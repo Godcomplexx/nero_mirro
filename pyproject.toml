@@ -1,0 +1,6 @@
+[project]
+name = "neuro-mirror"
+version = "0.1.0"
+description = "Skeleton for Neuro Mirror runtime"
+requires-python = ">=3.11"
+

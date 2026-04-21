@@ -1,0 +1,2 @@
+"""Aggregator plugin package."""
+

@@ -1,0 +1,1017 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Умное зеркало — C4 Архитектура реализации</title>
+<style>
+  @page { size: A3 landscape; margin: 8mm; }
+  @media print { body{padding:0} svg{width:100%;height:auto} .page{page-break-after:always} }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{background:#fff;display:flex;justify-content:center;align-items:flex-start;min-height:100vh;padding:20px;font-family:'Segoe UI',Tahoma,sans-serif}
+  .container{width:1500px}
+  .level-header{text-align:center;margin:50px 0 10px 0;padding-top:30px;border-top:3px solid #e2e8f0}
+  .level-header:first-child{margin-top:0;padding-top:0;border-top:none}
+  .level-header h2{font-size:24px;color:#0f172a;font-weight:800}
+  .level-header .badge{display:inline-block;padding:3px 12px;border-radius:8px;font-size:11px;font-weight:700;color:#fff;margin-bottom:8px}
+  .level-header p{font-size:12px;color:#64748b;margin-top:4px}
+  svg{display:block;margin:15px auto;max-width:100%;height:auto}
+
+  .tables-section{margin-top:50px;padding-top:30px;border-top:2px solid #e2e8f0}
+  .tables-section h2{font-size:18px;color:#1a1a2e;margin:35px 0 8px;font-weight:700;padding-bottom:8px;border-bottom:2px solid #e2e8f0}
+  .tables-section h2:first-child{margin-top:0}
+  .table-desc{font-size:12.5px;color:#64748b;margin-bottom:14px;line-height:1.5}
+  table{width:100%;border-collapse:collapse;margin-bottom:25px;font-size:12px}
+  thead th{background:#1e293b;color:#fff;font-weight:600;padding:9px 10px;text-align:left;font-size:11px}
+  thead th:first-child{border-radius:8px 0 0 0} thead th:last-child{border-radius:0 8px 0 0}
+  tbody td{padding:8px 10px;border-bottom:1px solid #e2e8f0;vertical-align:top;line-height:1.5;color:#334155}
+  tbody tr:last-child td{border-bottom:none}
+  td.mn{font-weight:600;color:#1e293b}
+  code{background:#f1f5f9;padding:1px 5px;border-radius:4px;font-size:11px;color:#475569;font-family:Consolas,monospace}
+  .tag{display:inline-block;padding:1px 7px;border-radius:4px;font-size:10px;font-weight:600;margin:1px 2px}
+  .t-p{background:#dcfce7;color:#166534}.t-s{background:#dbeafe;color:#1e40af}.t-a{background:#fef3c7;color:#92400e}.t-o{background:#fce7f3;color:#9d174d}
+
+  .tree{font-family:Consolas,monospace;font-size:12px;line-height:1.7;color:#334155;white-space:pre;background:#fff;padding:20px;border-radius:10px;border:1px solid #e2e8f0}
+  .tree .d{color:#2563eb;font-weight:600}.tree .c{color:#94a3b8;font-style:italic}
+</style>
+</head>
+<body>
+<div class="container">
+
+<!-- ================================================================ -->
+<!-- C4 LEVEL 1: CONTEXT                                              -->
+<!-- ================================================================ -->
+<div class="level-header">
+  <span class="badge" style="background:#1e40af">C4 Level 1</span>
+  <h2>Context — Системный контекст</h2>
+  <p>Кто взаимодействует с системой «Умное зеркало» и какие внешние связи существуют</p>
+</div>
+
+<svg width="1400" height="520" viewBox="0 0 1400 520" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="a1" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="#475569"/></marker>
+    <marker id="a1v" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="#7c3aed"/></marker>
+    <filter id="s1" x="-3%" y="-3%" width="108%" height="110%"><feDropShadow dx="0" dy="1" stdDeviation="1.2" flood-opacity="0.08" flood-color="#0f172a"/></filter>
+  </defs>
+
+  <!-- Пользователь (слева) -->
+  <g filter="url(#s1)">
+    <rect x="50" y="170" width="280" height="160" rx="16" fill="#3b82f6"/>
+    <text x="190" y="210" text-anchor="middle" fill="white" font-size="20" font-weight="700">Пользователь</text>
+    <text x="190" y="234" text-anchor="middle" fill="rgba(255,255,255,0.8)" font-size="12">(пожилой человек)</text>
+    <line x1="75" y1="248" x2="305" y2="248" stroke="rgba(255,255,255,0.2)"/>
+    <text x="190" y="272" text-anchor="middle" fill="rgba(255,255,255,0.7)" font-size="11">Смотрит в зеркало</text>
+    <text x="190" y="292" text-anchor="middle" fill="rgba(255,255,255,0.7)" font-size="11">Говорит / отвечает на тесты</text>
+    <text x="190" y="312" text-anchor="middle" fill="rgba(255,255,255,0.7)" font-size="11">Нажимает кнопки на экране</text>
+  </g>
+
+  <!-- Система (центр) -->
+  <g filter="url(#s1)">
+    <rect x="460" y="110" width="480" height="280" rx="20" fill="#1e293b"/>
+    <text x="700" y="155" text-anchor="middle" fill="#fbbf24" font-size="24" font-weight="800">«Умное зеркало»</text>
+    <text x="700" y="180" text-anchor="middle" fill="rgba(255,255,255,0.65)" font-size="13">Программная система</text>
+    <line x1="490" y1="196" x2="910" y2="196" stroke="rgba(255,255,255,0.12)"/>
+    <text x="700" y="226" text-anchor="middle" fill="rgba(255,255,255,0.85)" font-size="12">Мониторинг когнитивного и функционального состояния</text>
+    <text x="700" y="256" text-anchor="middle" fill="rgba(255,255,255,0.6)" font-size="11">Python · asyncio · Event Bus · плагины</text>
+    <text x="700" y="276" text-anchor="middle" fill="rgba(255,255,255,0.6)" font-size="11">Видеоанализ · Голосовые тесты · Отчёты · Тренировки</text>
+    <text x="700" y="306" text-anchor="middle" fill="rgba(255,255,255,0.35)" font-size="10" font-style="italic">Локальная система · /logs/ · ИИ-ветка опциональна</text>
+  </g>
+
+  <!-- Внешние системы (справа) -->
+  <g filter="url(#s1)">
+    <rect x="1070" y="170" width="280" height="160" rx="16" fill="#7c3aed"/>
+    <text x="1210" y="210" text-anchor="middle" fill="white" font-size="18" font-weight="700">Внешние системы</text>
+    <text x="1210" y="234" text-anchor="middle" fill="rgba(255,255,255,0.65)" font-size="11">(опционально)</text>
+    <line x1="1095" y1="248" x2="1325" y2="248" stroke="rgba(255,255,255,0.2)"/>
+    <text x="1210" y="272" text-anchor="middle" fill="rgba(255,255,255,0.7)" font-size="11">REST API / WebSocket</text>
+    <text x="1210" y="292" text-anchor="middle" fill="rgba(255,255,255,0.7)" font-size="11">Сторонние команды</text>
+    <text x="1210" y="312" text-anchor="middle" fill="rgba(255,255,255,0.7)" font-size="11">Мониторинг состояния</text>
+  </g>
+
+  <!-- Аппаратура (снизу) -->
+  <g filter="url(#s1)">
+    <rect x="510" y="430" width="380" height="70" rx="14" fill="#475569"/>
+    <text x="700" y="462" text-anchor="middle" fill="white" font-size="16" font-weight="700">Аппаратура зеркала</text>
+    <text x="700" y="484" text-anchor="middle" fill="rgba(255,255,255,0.7)" font-size="11">Камера · Микрофон · Экран · Динамик</text>
+  </g>
+
+  <!-- Стрелка: Пользователь → Система -->
+  <line x1="332" y1="250" x2="458" y2="250" stroke="#475569" stroke-width="2.5" marker-end="url(#a1)"/>
+  <text x="395" y="240" text-anchor="middle" fill="#475569" font-size="10" font-weight="600">взаимодействует</text>
+
+  <!-- Стрелка: Внешние → Система -->
+  <line x1="1068" y1="250" x2="942" y2="250" stroke="#7c3aed" stroke-width="2" stroke-dasharray="6,3" marker-end="url(#a1v)"/>
+  <text x="1005" y="240" text-anchor="middle" fill="#7c3aed" font-size="10" font-weight="600">команды (опц.)</text>
+
+  <!-- Стрелка: Система → Аппаратура -->
+  <line x1="700" y1="392" x2="700" y2="428" stroke="#475569" stroke-width="2.5" marker-end="url(#a1)"/>
+  <text x="730" y="416" fill="#475569" font-size="10" font-weight="600">управляет</text>
+</svg>
+
+<!-- ================================================================ -->
+<!-- C4 LEVEL 2: CONTAINERS                                           -->
+<!-- ================================================================ -->
+<div class="level-header">
+  <span class="badge" style="background:#b45309">C4 Level 2</span>
+  <h2>Containers — Контейнеры системы</h2>
+  <p>Основные исполняемые блоки внутри системы «Умное зеркало»</p>
+</div>
+
+<svg width="1400" height="700" viewBox="0 0 1400 700" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="a2" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="#b45309"/></marker>
+    <marker id="a2g" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="#475569"/></marker>
+    <filter id="s2" x="-3%" y="-3%" width="108%" height="110%"><feDropShadow dx="0" dy="1" stdDeviation="1.2" flood-opacity="0.08" flood-color="#0f172a"/></filter>
+  </defs>
+
+  <!-- ROW 0: main.py -->
+  <g filter="url(#s2)">
+    <rect x="530" y="20" width="340" height="70" rx="14" fill="#0f172a"/>
+    <text x="700" y="52" text-anchor="middle" fill="#fbbf24" font-size="20" font-weight="800">main.py</text>
+    <text x="700" y="74" text-anchor="middle" fill="rgba(255,255,255,0.65)" font-size="11">Точка входа · asyncio.run(main())</text>
+  </g>
+
+  <!-- Стрелки вниз от main.py -->
+  <line x1="560" y1="92" x2="230" y2="148" stroke="#b45309" stroke-width="2" marker-end="url(#a2)"/>
+  <line x1="700" y1="92" x2="700" y2="148" stroke="#b45309" stroke-width="2" marker-end="url(#a2)"/>
+  <line x1="840" y1="92" x2="1170" y2="148" stroke="#b45309" stroke-width="2" marker-end="url(#a2)"/>
+  <text x="380" y="118" fill="#b45309" font-size="10" font-weight="600">создаёт</text>
+  <text x="715" y="128" fill="#b45309" font-size="10" font-weight="600">создаёт</text>
+  <text x="1010" y="118" fill="#b45309" font-size="10" font-weight="600">создаёт</text>
+
+  <!-- ROW 1: Config, DeviceManager, EventBus, PluginManager -->
+  <g filter="url(#s2)">
+    <rect x="60" y="150" width="340" height="80" rx="12" fill="#334155"/>
+    <text x="230" y="182" text-anchor="middle" fill="white" font-size="16" font-weight="700">Config</text>
+    <text x="230" y="204" text-anchor="middle" fill="rgba(255,255,255,0.65)" font-size="11">config.yaml · параметры · enabled/disabled</text>
+  </g>
+
+  <g filter="url(#s2)">
+    <rect x="60" y="240" width="340" height="40" rx="10" fill="#0f766e"/>
+    <text x="230" y="265" text-anchor="middle" fill="white" font-size="13" font-weight="700">DeviceManager · discovery · saved selection · validate</text>
+  </g>
+
+  <g filter="url(#s2)">
+    <rect x="470" y="150" width="460" height="80" rx="12" fill="#f59e0b" stroke="#b45309" stroke-width="2"/>
+    <text x="700" y="182" text-anchor="middle" fill="white" font-size="18" font-weight="800">EventBus</text>
+    <text x="700" y="204" text-anchor="middle" fill="rgba(255,255,255,0.8)" font-size="12">Асинхронная шина событий · asyncio.Queue · pub/sub</text>
+  </g>
+
+  <g filter="url(#s2)">
+    <rect x="1000" y="150" width="340" height="80" rx="12" fill="#334155"/>
+    <text x="1170" y="182" text-anchor="middle" fill="white" font-size="16" font-weight="700">PluginManager</text>
+    <text x="1170" y="204" text-anchor="middle" fill="rgba(255,255,255,0.65)" font-size="11">Загрузка · регистрация · start/stop</text>
+  </g>
+
+  <!-- Надпись "все плагины подключены к EventBus" -->
+  <text x="700" y="265" text-anchor="middle" fill="#64748b" font-size="12" font-weight="600">Все модули обмениваются событиями только через EventBus</text>
+
+  <!-- ROW 2: Plugin groups -->
+  <!-- Датчики -->
+  <g filter="url(#s2)">
+    <rect x="60" y="290" width="280" height="130" rx="14" fill="#475569"/>
+    <text x="200" y="320" text-anchor="middle" fill="white" font-size="15" font-weight="700">Сенсоры</text>
+    <text x="200" y="340" text-anchor="middle" fill="rgba(255,255,255,0.5)" font-size="10">ISensorPlugin</text>
+    <line x1="80" y1="352" x2="320" y2="352" stroke="rgba(255,255,255,0.15)"/>
+    <text x="200" y="376" text-anchor="middle" fill="rgba(255,255,255,0.8)" font-size="12">CameraPlugin</text>
+    <text x="200" y="400" text-anchor="middle" fill="rgba(255,255,255,0.8)" font-size="12">MicrophonePlugin</text>
+    <text x="200" y="414" text-anchor="middle" fill="rgba(255,255,255,0.55)" font-size="9">получают resolved device_id</text>
+  </g>
+
+  <!-- Обработчики -->
+  <g filter="url(#s2)">
+    <rect x="380" y="290" width="320" height="160" rx="14" fill="#0284c7"/>
+    <text x="540" y="320" text-anchor="middle" fill="white" font-size="15" font-weight="700">Обработчики</text>
+    <text x="540" y="340" text-anchor="middle" fill="rgba(255,255,255,0.5)" font-size="10">IProcessorPlugin</text>
+    <line x1="400" y1="352" x2="680" y2="352" stroke="rgba(255,255,255,0.15)"/>
+    <text x="540" y="376" text-anchor="middle" fill="rgba(255,255,255,0.8)" font-size="12">VideoAnalysisPlugin</text>
+    <text x="540" y="400" text-anchor="middle" fill="rgba(255,255,255,0.8)" font-size="12">VoiceTestPlugin</text>
+    <text x="540" y="424" text-anchor="middle" fill="rgba(255,255,255,0.8)" font-size="12">VoiceInteractionPlugin</text>
+  </g>
+
+  <!-- Ядро -->
+  <g filter="url(#s2)">
+    <rect x="740" y="290" width="250" height="130" rx="14" fill="#f59e0b" stroke="#b45309" stroke-width="2"/>
+    <text x="865" y="320" text-anchor="middle" fill="white" font-size="15" font-weight="800">Ядро</text>
+    <text x="865" y="340" text-anchor="middle" fill="rgba(255,255,255,0.65)" font-size="10">IProcessorPlugin</text>
+    <line x1="760" y1="352" x2="970" y2="352" stroke="rgba(255,255,255,0.15)"/>
+    <text x="865" y="376" text-anchor="middle" fill="rgba(255,255,255,0.85)" font-size="12">AggregatorPlugin</text>
+    <text x="865" y="400" text-anchor="middle" fill="rgba(255,255,255,0.6)" font-size="10">State Machine · решения</text>
+  </g>
+
+  <!-- ИИ-ассистент -->
+  <g filter="url(#s2)">
+    <rect x="1030" y="290" width="250" height="130" rx="14" fill="#7c3aed" stroke="#5b21b6" stroke-width="2" stroke-dasharray="8,4"/>
+    <rect x="1095" y="278" width="120" height="20" rx="10" fill="#fef3c7" stroke="#f59e0b" stroke-width="1"/>
+    <text x="1155" y="292" text-anchor="middle" fill="#92400e" font-size="9" font-weight="700">ОТКЛЮЧАЕМЫЙ</text>
+    <text x="1155" y="330" text-anchor="middle" fill="white" font-size="15" font-weight="700">ИИ-ассистент</text>
+    <text x="1155" y="348" text-anchor="middle" fill="rgba(255,255,255,0.5)" font-size="10">IProcessorPlugin</text>
+    <line x1="1050" y1="358" x2="1260" y2="358" stroke="rgba(255,255,255,0.15)"/>
+    <text x="1155" y="382" text-anchor="middle" fill="rgba(255,255,255,0.8)" font-size="12">AIAssistantPlugin</text>
+    <text x="1155" y="404" text-anchor="middle" fill="rgba(255,255,255,0.6)" font-size="10">Голосовые + внешние команды</text>
+  </g>
+
+  <!-- ROW 3: Вывод и хранение -->
+  <g filter="url(#s2)">
+    <rect x="60" y="490" width="320" height="130" rx="14" fill="#059669"/>
+    <text x="220" y="520" text-anchor="middle" fill="white" font-size="15" font-weight="700">Вывод</text>
+    <text x="220" y="540" text-anchor="middle" fill="rgba(255,255,255,0.5)" font-size="10">IOutputPlugin</text>
+    <line x1="80" y1="552" x2="360" y2="552" stroke="rgba(255,255,255,0.15)"/>
+    <text x="140" y="576" text-anchor="middle" fill="rgba(255,255,255,0.85)" font-size="12">UIPlugin</text>
+    <text x="300" y="576" text-anchor="middle" fill="rgba(255,255,255,0.85)" font-size="12">ReportPlugin</text>
+    <text x="220" y="604" text-anchor="middle" fill="rgba(255,255,255,0.6)" font-size="10">Централизованный UI · экраны · адаптеры · отчёты</text>
+  </g>
+
+  <g filter="url(#s2)">
+    <rect x="420" y="490" width="300" height="130" rx="14" fill="#db2777"/>
+    <text x="570" y="520" text-anchor="middle" fill="white" font-size="15" font-weight="700">Тренировки</text>
+    <text x="570" y="540" text-anchor="middle" fill="rgba(255,255,255,0.5)" font-size="10">IProcessorPlugin</text>
+    <line x1="440" y1="552" x2="700" y2="552" stroke="rgba(255,255,255,0.15)"/>
+    <text x="570" y="576" text-anchor="middle" fill="rgba(255,255,255,0.85)" font-size="12">TrainingPlugin</text>
+    <text x="570" y="604" text-anchor="middle" fill="rgba(255,255,255,0.6)" font-size="10">Когнитивные упражнения</text>
+  </g>
+
+  <g filter="url(#s2)">
+    <rect x="760" y="490" width="300" height="130" rx="14" fill="#16a34a"/>
+    <text x="910" y="520" text-anchor="middle" fill="white" font-size="15" font-weight="700">Хранилище</text>
+    <text x="910" y="540" text-anchor="middle" fill="rgba(255,255,255,0.5)" font-size="10">IStoragePlugin</text>
+    <line x1="780" y1="552" x2="1040" y2="552" stroke="rgba(255,255,255,0.15)"/>
+    <text x="910" y="576" text-anchor="middle" fill="rgba(255,255,255,0.85)" font-size="12">StoragePlugin → /logs/</text>
+    <text x="910" y="604" text-anchor="middle" fill="rgba(255,255,255,0.6)" font-size="10">aiofiles · .json · .csv</text>
+  </g>
+
+  <!-- Стрелки Row1 → Row2 -->
+  <line x1="200" y1="232" x2="200" y2="238" stroke="#475569" stroke-width="2" marker-end="url(#a2g)"/>
+  <line x1="200" y1="282" x2="200" y2="288" stroke="#475569" stroke-width="2" marker-end="url(#a2g)"/>
+  <line x1="540" y1="232" x2="540" y2="288" stroke="#475569" stroke-width="2" marker-end="url(#a2g)"/>
+  <line x1="865" y1="232" x2="865" y2="288" stroke="#475569" stroke-width="2" marker-end="url(#a2g)"/>
+  <line x1="1155" y1="232" x2="1155" y2="288" stroke="#475569" stroke-width="2" marker-end="url(#a2g)"/>
+
+  <!-- Стрелки Row2 → Row3 -->
+  <line x1="220" y1="422" x2="220" y2="488" stroke="#475569" stroke-width="2" marker-end="url(#a2g)"/>
+  <line x1="570" y1="452" x2="570" y2="488" stroke="#475569" stroke-width="2" marker-end="url(#a2g)"/>
+  <line x1="865" y1="422" x2="910" y2="488" stroke="#475569" stroke-width="2" marker-end="url(#a2g)"/>
+</svg>
+
+<!-- ================================================================ -->
+<!-- C4 LEVEL 3.1: COMPONENTS — DATA FLOW (top → bottom)             -->
+<!-- ================================================================ -->
+<div class="level-header">
+  <span class="badge" style="background:#059669">C4 Level 3.1</span>
+  <h2>Components — Поток данных (сверху вниз)</h2>
+  <p>Как данные проходят через систему: от инициализации устройств и сенсоров через обработку к выводу. Все стрелки — события EventBus.</p>
+</div>
+
+<svg width="1400" height="1150" viewBox="0 0 1400 1150" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="d1" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="#475569"/></marker>
+    <marker id="d2" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="#0284c7"/></marker>
+    <marker id="d3" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="#0d9488"/></marker>
+    <marker id="d4" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="#b45309"/></marker>
+    <marker id="d5" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="#ea580c"/></marker>
+    <marker id="d6" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="#db2777"/></marker>
+    <marker id="d7" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="#16a34a"/></marker>
+    <marker id="d8" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="#7c3aed"/></marker>
+    <marker id="dm" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="#0f766e"/></marker>
+    <filter id="sd" x="-3%" y="-3%" width="108%" height="110%"><feDropShadow dx="0" dy="1" stdDeviation="1.2" flood-opacity="0.08" flood-color="#0f172a"/></filter>
+  </defs>
+
+  <!-- ========== ROW 0: DEVICE MANAGER (y=10..100) — отдельный ряд сверху ========== -->
+
+  <g filter="url(#sd)">
+    <rect x="230" y="10" width="940" height="90" rx="14" fill="#0f766e"/>
+    <text x="700" y="40" text-anchor="middle" fill="white" font-size="17" font-weight="700">DeviceManager</text>
+    <text x="700" y="60" text-anchor="middle" fill="rgba(255,255,255,0.55)" font-size="10">IDeviceProvider · discovery · saved selection · validate</text>
+    <text x="700" y="82" text-anchor="middle" fill="rgba(255,255,255,0.45)" font-size="10" font-style="italic">Перечисляет камеры и микрофоны → UI-мастер выбора → публикует device.selection_resolved</text>
+  </g>
+
+  <!-- DeviceManager → Camera (вниз-влево, чистая стрелка) -->
+  <line x1="480" y1="102" x2="220" y2="118" stroke="#0f766e" stroke-width="2.5" marker-end="url(#dm)"/>
+  <rect x="290" y="98" width="140" height="16" rx="6" fill="#f0fdf4"/>
+  <text x="360" y="109" text-anchor="middle" fill="#166534" font-size="9" font-weight="600">selected_camera_id</text>
+
+  <!-- DeviceManager → Microphone (вниз-вправо, чистая стрелка) -->
+  <line x1="920" y1="102" x2="620" y2="118" stroke="#0f766e" stroke-width="2.5" marker-end="url(#dm)"/>
+  <rect x="710" y="98" width="160" height="16" rx="6" fill="#f0fdf4"/>
+  <text x="790" y="109" text-anchor="middle" fill="#166534" font-size="9" font-weight="600">selected_microphone_id</text>
+
+  <!-- ========== ROW 1: SENSORS (y=120..260) ========== -->
+
+  <g filter="url(#sd)">
+    <rect x="80" y="120" width="280" height="140" rx="14" fill="#475569"/>
+    <text x="220" y="152" text-anchor="middle" fill="white" font-size="16" font-weight="700">CameraPlugin</text>
+    <text x="220" y="172" text-anchor="middle" fill="rgba(255,255,255,0.5)" font-size="10">ISensorPlugin</text>
+    <line x1="100" y1="182" x2="340" y2="182" stroke="rgba(255,255,255,0.12)"/>
+    <text x="100" y="206" fill="#86efac" font-size="10.5" font-weight="600">ВХОД: device_id + cmd.start_capture</text>
+    <text x="100" y="226" fill="#fbbf24" font-size="10.5" font-weight="600">ВЫХОД: видеокадры (≥25fps)</text>
+    <text x="100" y="250" fill="rgba(255,255,255,0.45)" font-size="9.5" font-style="italic">async generator · VideoFrame</text>
+  </g>
+
+  <g filter="url(#sd)">
+    <rect x="480" y="120" width="280" height="140" rx="14" fill="#475569"/>
+    <text x="620" y="152" text-anchor="middle" fill="white" font-size="16" font-weight="700">MicrophonePlugin</text>
+    <text x="620" y="172" text-anchor="middle" fill="rgba(255,255,255,0.5)" font-size="10">ISensorPlugin</text>
+    <line x1="500" y1="182" x2="740" y2="182" stroke="rgba(255,255,255,0.12)"/>
+    <text x="500" y="206" fill="#86efac" font-size="10.5" font-weight="600">ВХОД: device_id + cmd.start_capture</text>
+    <text x="500" y="226" fill="#fbbf24" font-size="10.5" font-weight="600">ВЫХОД: аудиочанки (PCM 16kHz)</text>
+    <text x="500" y="250" fill="rgba(255,255,255,0.45)" font-size="9.5" font-style="italic">async generator · AudioChunk</text>
+  </g>
+
+  <!-- ========== Стрелки: Sensors → Processors ========== -->
+
+  <!-- Camera → VideoAnalysis (прямо вниз) -->
+  <line x1="220" y1="262" x2="220" y2="308" stroke="#0284c7" stroke-width="2.5" marker-end="url(#d2)"/>
+  <rect x="152" y="272" width="136" height="18" rx="6" fill="#eff6ff"/>
+  <text x="220" y="285" text-anchor="middle" fill="#1e40af" font-size="9.5" font-weight="600">sensor.video_frame</text>
+
+  <!-- Mic → VoiceTest (вниз) -->
+  <line x1="560" y1="262" x2="560" y2="308" stroke="#0d9488" stroke-width="2.5" marker-end="url(#d3)"/>
+  <rect x="492" y="272" width="136" height="18" rx="6" fill="#f0fdfa"/>
+  <text x="560" y="285" text-anchor="middle" fill="#0d9488" font-size="9.5" font-weight="600">sensor.audio_chunk</text>
+
+  <!-- Mic → VoiceInteraction (вниз-вправо) -->
+  <line x1="700" y1="262" x2="880" y2="308" stroke="#0891b2" stroke-width="2" marker-end="url(#d2)"/>
+  <rect x="740" y="272" width="136" height="18" rx="6" fill="#ecfeff"/>
+  <text x="808" y="285" text-anchor="middle" fill="#0891b2" font-size="9.5" font-weight="600">sensor.audio_chunk</text>
+
+  <!-- ========== ROW 2: PROCESSORS (y=310..480) ========== -->
+
+  <g filter="url(#sd)">
+    <rect x="80" y="310" width="280" height="170" rx="14" fill="#0284c7"/>
+    <text x="220" y="340" text-anchor="middle" fill="white" font-size="15" font-weight="700">VideoAnalysisPlugin</text>
+    <text x="220" y="358" text-anchor="middle" fill="rgba(255,255,255,0.5)" font-size="10">IProcessorPlugin</text>
+    <line x1="100" y1="368" x2="340" y2="368" stroke="rgba(255,255,255,0.12)"/>
+    <text x="100" y="400" fill="rgba(255,255,255,0.55)" font-size="9.5" font-style="italic">Лицо · эмоции · взгляд · моторика</text>
+    <text x="100" y="418" fill="rgba(255,255,255,0.55)" font-size="9.5" font-style="italic">оценка невербальных признаков</text>
+    <text x="100" y="454" fill="#86efac" font-size="10" font-weight="600">ВХОД: видеокадры</text>
+    <text x="100" y="472" fill="#fbbf24" font-size="10" font-weight="600">ВЫХОД: ScreeningResult</text>
+  </g>
+
+  <g filter="url(#sd)">
+    <rect x="420" y="310" width="280" height="170" rx="14" fill="#0d9488"/>
+    <text x="560" y="340" text-anchor="middle" fill="white" font-size="15" font-weight="700">VoiceTestPlugin</text>
+    <text x="560" y="358" text-anchor="middle" fill="rgba(255,255,255,0.5)" font-size="10">IProcessorPlugin</text>
+    <line x1="440" y1="368" x2="680" y2="368" stroke="rgba(255,255,255,0.12)"/>
+    <text x="440" y="400" fill="rgba(255,255,255,0.55)" font-size="9.5" font-style="italic">ASR · анализ ответов · баллы</text>
+    <text x="440" y="418" fill="rgba(255,255,255,0.55)" font-size="9.5" font-style="italic">классификация результата теста</text>
+    <text x="440" y="454" fill="#86efac" font-size="10" font-weight="600">ВХОД: аудио + команда теста</text>
+    <text x="440" y="472" fill="#fbbf24" font-size="10" font-weight="600">ВЫХОД: TestResult</text>
+  </g>
+
+  <g filter="url(#sd)">
+    <rect x="760" y="310" width="280" height="170" rx="14" fill="#0891b2"/>
+    <text x="900" y="338" text-anchor="middle" fill="white" font-size="14" font-weight="700">VoiceInteractionPlugin</text>
+    <text x="900" y="358" text-anchor="middle" fill="rgba(255,255,255,0.5)" font-size="10">IProcessorPlugin · привязан к ИИ</text>
+    <line x1="780" y1="368" x2="1020" y2="368" stroke="rgba(255,255,255,0.12)"/>
+    <text x="780" y="400" fill="rgba(255,255,255,0.55)" font-size="9.5" font-style="italic">ASR · NLU · намерения · TTS</text>
+    <text x="780" y="436" fill="#86efac" font-size="10" font-weight="600">ВХОД: аудио + текст для TTS</text>
+    <text x="780" y="454" fill="#fbbf24" font-size="10" font-weight="600">ВЫХОД: Intent + AudioOutput</text>
+  </g>
+
+  <!-- ========== Стрелки: Processors → Aggregator ========== -->
+
+  <!-- VideoAnalysis → Aggregator (вниз) -->
+  <line x1="220" y1="482" x2="380" y2="538" stroke="#0284c7" stroke-width="2.5" marker-end="url(#d2)"/>
+  <rect x="220" y="500" width="140" height="18" rx="6" fill="#eff6ff"/>
+  <text x="290" y="513" text-anchor="middle" fill="#1e40af" font-size="9.5" font-weight="600">analysis.video_result</text>
+
+  <!-- VoiceTest → Aggregator (вниз) -->
+  <line x1="560" y1="482" x2="530" y2="538" stroke="#0d9488" stroke-width="2.5" marker-end="url(#d3)"/>
+  <rect x="480" y="500" width="116" height="18" rx="6" fill="#f0fdfa"/>
+  <text x="538" y="513" text-anchor="middle" fill="#0d9488" font-size="9.5" font-weight="600">test.voice_result</text>
+
+  <!-- VoiceInteraction → AIAssistant (вправо) -->
+  <line x1="1042" y1="390" x2="1098" y2="390" stroke="#7c3aed" stroke-width="2" marker-end="url(#d8)"/>
+  <rect x="1044" y="370" width="80" height="16" rx="6" fill="#f5f3ff"/>
+  <text x="1084" y="381" text-anchor="middle" fill="#7c3aed" font-size="9" font-weight="600">voice.intent</text>
+
+  <!-- ========== AI-Assistant (справа, отдельная зона) ========== -->
+
+  <g filter="url(#sd)">
+    <rect x="1100" y="320" width="260" height="150" rx="14" fill="#7c3aed" stroke="#5b21b6" stroke-width="2" stroke-dasharray="8,4"/>
+    <rect x="1170" y="308" width="120" height="20" rx="10" fill="#fef3c7" stroke="#f59e0b" stroke-width="1"/>
+    <text x="1230" y="322" text-anchor="middle" fill="#92400e" font-size="9" font-weight="700">ОТКЛЮЧАЕМЫЙ</text>
+    <text x="1230" y="354" text-anchor="middle" fill="white" font-size="15" font-weight="800">AIAssistantPlugin</text>
+    <text x="1230" y="374" text-anchor="middle" fill="rgba(255,255,255,0.5)" font-size="10">IProcessorPlugin</text>
+    <line x1="1120" y1="384" x2="1340" y2="384" stroke="rgba(255,255,255,0.12)"/>
+    <text x="1120" y="408" fill="#86efac" font-size="10" font-weight="600">ВХОД: намерения + внешние</text>
+    <text x="1120" y="426" fill="#fbbf24" font-size="10" font-weight="600">ВЫХОД: команды → Агрегатор</text>
+    <text x="1120" y="450" fill="rgba(255,255,255,0.45)" font-size="9.5" font-style="italic">Если откл. → только кнопки UI</text>
+  </g>
+
+  <!-- AIAssistant → Aggregator (вниз-влево) -->
+  <line x1="1230" y1="472" x2="750" y2="538" stroke="#7c3aed" stroke-width="2" stroke-dasharray="6,3" marker-end="url(#d8)"/>
+  <rect x="960" y="496" width="90" height="18" rx="6" fill="#f5f3ff"/>
+  <text x="1005" y="509" text-anchor="middle" fill="#7c3aed" font-size="9.5" font-weight="600">ai.command</text>
+
+  <!-- ========== ROW 3: AGGREGATOR (y=540..720) ========== -->
+
+  <g filter="url(#sd)">
+    <rect x="120" y="540" width="700" height="180" rx="18" fill="#f59e0b" stroke="#b45309" stroke-width="2.5"/>
+    <rect x="132" y="552" width="676" height="156" rx="14" fill="none" stroke="rgba(255,255,255,0.1)"/>
+    <text x="470" y="580" text-anchor="middle" fill="white" font-size="19" font-weight="800">AggregatorPlugin — центральное ядро</text>
+    <text x="470" y="602" text-anchor="middle" fill="rgba(255,255,255,0.7)" font-size="11">IProcessorPlugin · автономное ядро сценария</text>
+    <line x1="150" y1="614" x2="790" y2="614" stroke="rgba(255,255,255,0.12)"/>
+    <text x="150" y="638" fill="rgba(255,255,255,0.65)" font-size="10.5" font-style="italic">State Machine: IDLE → READY → SCREENING → VOICE_TEST → REPORTING → TRAINING → IDLE</text>
+    <text x="150" y="660" fill="rgba(255,255,255,0.55)" font-size="10" font-style="italic">Слияние данных · оценка состояния · координация модулей</text>
+    <text x="150" y="686" fill="#86efac" font-size="10" font-weight="600">ВХОД: результаты скрининга, тесты, действия UI, команды ИИ</text>
+    <text x="150" y="706" fill="#fbbf24" font-size="10" font-weight="600">ВЫХОД: команды старт/тест/UI, данные для отчёта, запись в логи</text>
+  </g>
+
+  <!-- ========== Стрелки: Aggregator → Output ========== -->
+
+  <!-- Aggregator → UI -->
+  <line x1="250" y1="722" x2="170" y2="788" stroke="#7c3aed" stroke-width="2" marker-end="url(#d8)"/>
+  <rect x="150" y="748" width="100" height="16" rx="6" fill="#f5f3ff"/>
+  <text x="200" y="759" text-anchor="middle" fill="#7c3aed" font-size="9" font-weight="600">cmd.ui_update</text>
+
+  <!-- Aggregator → Report -->
+  <line x1="420" y1="722" x2="420" y2="788" stroke="#ea580c" stroke-width="2" marker-end="url(#d5)"/>
+  <rect x="370" y="748" width="100" height="16" rx="6" fill="#fff7ed"/>
+  <text x="420" y="759" text-anchor="middle" fill="#ea580c" font-size="9" font-weight="600">report.data</text>
+
+  <!-- Aggregator → Training -->
+  <line x1="570" y1="722" x2="670" y2="788" stroke="#db2777" stroke-width="2" marker-end="url(#d6)"/>
+  <rect x="570" y="748" width="100" height="16" rx="6" fill="#fdf2f8"/>
+  <text x="620" y="759" text-anchor="middle" fill="#db2777" font-size="9" font-weight="600">report.data</text>
+
+  <!-- Aggregator → Storage -->
+  <line x1="720" y1="722" x2="920" y2="788" stroke="#16a34a" stroke-width="2" marker-end="url(#d7)"/>
+  <rect x="780" y="748" width="100" height="16" rx="6" fill="#f0fdf4"/>
+  <text x="830" y="759" text-anchor="middle" fill="#166534" font-size="9" font-weight="600">storage.write</text>
+
+  <!-- ========== ROW 4: OUTPUT (y=790..960) ========== -->
+
+  <g filter="url(#sd)">
+    <rect x="60" y="790" width="230" height="160" rx="14" fill="#7c3aed"/>
+    <text x="175" y="818" text-anchor="middle" fill="white" font-size="15" font-weight="700">UIPlugin</text>
+    <text x="175" y="838" text-anchor="middle" fill="rgba(255,255,255,0.5)" font-size="10">IOutputPlugin</text>
+    <line x1="80" y1="848" x2="270" y2="848" stroke="rgba(255,255,255,0.12)"/>
+    <text x="80" y="878" fill="rgba(255,255,255,0.55)" font-size="9.5" font-style="italic">Экраны · кнопки · результаты · мастер устройств</text>
+    <text x="80" y="916" fill="#86efac" font-size="10" font-weight="600">ВХОД: команды UI, отчёт, занятия</text>
+    <text x="80" y="936" fill="#fbbf24" font-size="10" font-weight="600">ВЫХОД: действия пользователя</text>
+  </g>
+
+  <g filter="url(#sd)">
+    <rect x="330" y="790" width="230" height="160" rx="14" fill="#ea580c"/>
+    <text x="445" y="818" text-anchor="middle" fill="white" font-size="15" font-weight="700">ReportPlugin</text>
+    <text x="445" y="838" text-anchor="middle" fill="rgba(255,255,255,0.5)" font-size="10">IOutputPlugin</text>
+    <line x1="350" y1="848" x2="540" y2="848" stroke="rgba(255,255,255,0.12)"/>
+    <text x="350" y="878" fill="rgba(255,255,255,0.55)" font-size="9.5" font-style="italic">Генерация отчёта · аналитика · тренды</text>
+    <text x="350" y="916" fill="#86efac" font-size="10" font-weight="600">ВХОД: данные скрининга</text>
+    <text x="350" y="936" fill="#fbbf24" font-size="10" font-weight="600">ВЫХОД: отчёт → UI + хранилище</text>
+  </g>
+
+  <g filter="url(#sd)">
+    <rect x="600" y="790" width="240" height="160" rx="14" fill="#db2777"/>
+    <text x="720" y="818" text-anchor="middle" fill="white" font-size="15" font-weight="700">TrainingPlugin</text>
+    <text x="720" y="838" text-anchor="middle" fill="rgba(255,255,255,0.5)" font-size="10">IProcessorPlugin</text>
+    <line x1="620" y1="848" x2="820" y2="848" stroke="rgba(255,255,255,0.12)"/>
+    <text x="620" y="878" fill="rgba(255,255,255,0.55)" font-size="9.5" font-style="italic">Подбор упражнений · адаптация сложности</text>
+    <text x="620" y="916" fill="#86efac" font-size="10" font-weight="600">ВХОД: данные скрининга</text>
+    <text x="620" y="936" fill="#fbbf24" font-size="10" font-weight="600">ВЫХОД: предложение → UI</text>
+  </g>
+
+  <g filter="url(#sd)">
+    <rect x="880" y="790" width="240" height="160" rx="14" fill="#16a34a"/>
+    <text x="1000" y="818" text-anchor="middle" fill="white" font-size="15" font-weight="700">StoragePlugin</text>
+    <text x="1000" y="838" text-anchor="middle" fill="rgba(255,255,255,0.5)" font-size="10">IStoragePlugin · /logs/</text>
+    <line x1="900" y1="848" x2="1100" y2="848" stroke="rgba(255,255,255,0.12)"/>
+    <text x="900" y="878" fill="rgba(255,255,255,0.55)" font-size="9.5" font-style="italic">Async запись и чтение /logs/</text>
+    <text x="900" y="916" fill="#86efac" font-size="10" font-weight="600">ВХОД: данные + запрос</text>
+    <text x="900" y="936" fill="#fbbf24" font-size="10" font-weight="600">ВЫХОД: файлы .json/.csv</text>
+  </g>
+
+  <!-- Стрелки между output-плагинами (горизонтальные) -->
+
+  <!-- Report → UI (отчёт) -->
+  <line x1="328" y1="870" x2="292" y2="870" stroke="#ea580c" stroke-width="2" marker-end="url(#d5)"/>
+  <rect x="292" y="855" width="90" height="14" rx="5" fill="#fff7ed"/>
+  <text x="337" y="865" text-anchor="middle" fill="#ea580c" font-size="8.5" font-weight="600">report.summary</text>
+
+  <!-- Training → UI (занятия) -->
+  <line x1="598" y1="890" x2="292" y2="890" stroke="#db2777" stroke-width="2" marker-end="url(#d6)"/>
+  <rect x="400" y="878" width="100" height="14" rx="5" fill="#fdf2f8"/>
+  <text x="450" y="888" text-anchor="middle" fill="#db2777" font-size="8.5" font-weight="600">training.suggest</text>
+
+  <!-- Report → Storage -->
+  <line x1="562" y1="920" x2="878" y2="920" stroke="#16a34a" stroke-width="1.5" marker-end="url(#d7)"/>
+  <rect x="660" y="908" width="90" height="14" rx="5" fill="#f0fdf4"/>
+  <text x="705" y="918" text-anchor="middle" fill="#166534" font-size="8.5" font-weight="600">storage.write</text>
+
+  <!-- Training → Storage -->
+  <line x1="842" y1="940" x2="878" y2="940" stroke="#16a34a" stroke-width="1.5" marker-end="url(#d7)"/>
+
+  <!-- ========== ROW 5: /logs/ (y=990..1050) ========== -->
+
+  <g filter="url(#sd)">
+    <rect x="880" y="990" width="240" height="65" rx="12" fill="#f0fdf4" stroke="#86efac" stroke-width="2"/>
+    <text x="1000" y="1018" text-anchor="middle" fill="#166534" font-size="15" font-weight="700">/logs/</text>
+    <text x="1000" y="1040" text-anchor="middle" fill="#64748b" font-size="10">sessions/ · reports/ · events/ · training/</text>
+  </g>
+  <line x1="1000" y1="952" x2="1000" y2="988" stroke="#16a34a" stroke-width="2" marker-end="url(#d7)"/>
+
+  <!-- Подпись -->
+  <text x="700" y="1095" text-anchor="middle" fill="#94a3b8" font-size="11" font-style="italic">Все стрелки = события через EventBus (asyncio.Queue · pub/sub)</text>
+  <text x="700" y="1115" text-anchor="middle" fill="#94a3b8" font-size="11" font-style="italic">Пунктир = опциональная связь (ИИ-ассистент может быть отключён)</text>
+</svg>
+
+<!-- ================================================================ -->
+<!-- C4 LEVEL 3.2: COMPONENTS — CONTROL FLOW (bottom → top)          -->
+<!-- ================================================================ -->
+<div class="level-header">
+  <span class="badge" style="background:#059669">C4 Level 3.2</span>
+  <h2>Components — Управляющие команды и обратные связи</h2>
+  <p>Как Агрегатор управляет другими модулями. ИИ-ветка. Обратная связь от UI.</p>
+</div>
+
+<svg width="1400" height="680" viewBox="0 0 1400 680" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="c1" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="#dc2626"/></marker>
+    <marker id="c2" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="#2563eb"/></marker>
+    <marker id="c3" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="#7c3aed"/></marker>
+    <marker id="c4" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="#0891b2"/></marker>
+    <filter id="sc" x="-3%" y="-3%" width="108%" height="110%"><feDropShadow dx="0" dy="1" stdDeviation="1.2" flood-opacity="0.08" flood-color="#0f172a"/></filter>
+  </defs>
+
+  <!-- ========== Заголовок секции 1: Команды Агрегатора ========== -->
+  <rect x="40" y="10" width="620" height="30" rx="8" fill="#fef2f2"/>
+  <text x="350" y="30" text-anchor="middle" fill="#dc2626" font-size="13" font-weight="700">Управляющие команды Агрегатора (↑ снизу вверх)</text>
+
+  <!-- Targets вверху -->
+  <g filter="url(#sc)">
+    <rect x="40" y="60" width="170" height="70" rx="12" fill="#475569"/>
+    <text x="125" y="90" text-anchor="middle" fill="white" font-size="13" font-weight="700">CameraPlugin</text>
+    <text x="125" y="110" text-anchor="middle" fill="rgba(255,255,255,0.5)" font-size="10">ISensor</text>
+  </g>
+
+  <g filter="url(#sc)">
+    <rect x="240" y="60" width="190" height="70" rx="12" fill="#475569"/>
+    <text x="335" y="90" text-anchor="middle" fill="white" font-size="13" font-weight="700">MicrophonePlugin</text>
+    <text x="335" y="110" text-anchor="middle" fill="rgba(255,255,255,0.5)" font-size="10">ISensor</text>
+  </g>
+
+  <g filter="url(#sc)">
+    <rect x="460" y="60" width="190" height="70" rx="12" fill="#0d9488"/>
+    <text x="555" y="90" text-anchor="middle" fill="white" font-size="13" font-weight="700">VoiceTestPlugin</text>
+    <text x="555" y="110" text-anchor="middle" fill="rgba(255,255,255,0.5)" font-size="10">IProcessor</text>
+  </g>
+
+  <!-- Aggregator внизу -->
+  <g filter="url(#sc)">
+    <rect x="100" y="220" width="500" height="90" rx="16" fill="#f59e0b" stroke="#b45309" stroke-width="2.5"/>
+    <text x="350" y="255" text-anchor="middle" fill="white" font-size="18" font-weight="800">AggregatorPlugin</text>
+    <text x="350" y="280" text-anchor="middle" fill="rgba(255,255,255,0.7)" font-size="11">Отправляет управляющие команды другим плагинам</text>
+  </g>
+
+  <!-- Стрелки вверх от Aggregator к целям -->
+  <line x1="200" y1="218" x2="125" y2="132" stroke="#dc2626" stroke-width="2.5" marker-end="url(#c1)"/>
+  <rect x="100" y="168" width="120" height="18" rx="6" fill="#fef2f2"/>
+  <text x="160" y="180" text-anchor="middle" fill="#dc2626" font-size="9.5" font-weight="600">cmd.start_capture</text>
+
+  <line x1="350" y1="218" x2="335" y2="132" stroke="#dc2626" stroke-width="2.5" marker-end="url(#c1)"/>
+  <rect x="276" y="168" width="120" height="18" rx="6" fill="#fef2f2"/>
+  <text x="336" y="180" text-anchor="middle" fill="#dc2626" font-size="9.5" font-weight="600">cmd.start_capture</text>
+
+  <line x1="500" y1="218" x2="555" y2="132" stroke="#dc2626" stroke-width="2.5" marker-end="url(#c1)"/>
+  <rect x="478" y="168" width="100" height="18" rx="6" fill="#fef2f2"/>
+  <text x="528" y="180" text-anchor="middle" fill="#dc2626" font-size="9.5" font-weight="600">cmd.start_test</text>
+
+  <!-- ========== Заголовок секции 2: Обратная связь UI ========== -->
+  <rect x="40" y="345" width="620" height="30" rx="8" fill="#eff6ff"/>
+  <text x="350" y="365" text-anchor="middle" fill="#2563eb" font-size="13" font-weight="700">Обратная связь от UI (↔ двусторонняя связь)</text>
+
+  <!-- UI -->
+  <g filter="url(#sc)">
+    <rect x="40" y="400" width="230" height="90" rx="14" fill="#7c3aed"/>
+    <text x="155" y="432" text-anchor="middle" fill="white" font-size="15" font-weight="700">UIPlugin</text>
+    <text x="155" y="456" text-anchor="middle" fill="rgba(255,255,255,0.65)" font-size="10">Кнопки: «Старт», «Подтвердить»</text>
+    <text x="155" y="476" text-anchor="middle" fill="rgba(255,255,255,0.5)" font-size="10">Выбор тренировок</text>
+  </g>
+
+  <!-- Aggregator -->
+  <g filter="url(#sc)">
+    <rect x="400" y="400" width="260" height="90" rx="14" fill="#f59e0b" stroke="#b45309" stroke-width="2"/>
+    <text x="530" y="436" text-anchor="middle" fill="white" font-size="16" font-weight="800">AggregatorPlugin</text>
+    <text x="530" y="462" text-anchor="middle" fill="rgba(255,255,255,0.65)" font-size="10">Реагирует на действия</text>
+    <text x="530" y="478" text-anchor="middle" fill="rgba(255,255,255,0.65)" font-size="10">пользователя</text>
+  </g>
+
+  <!-- UI → Aggregator -->
+  <line x1="272" y1="432" x2="398" y2="432" stroke="#2563eb" stroke-width="2.5" marker-end="url(#c2)"/>
+  <rect x="296" y="415" width="80" height="16" rx="6" fill="#eff6ff"/>
+  <text x="336" y="426" text-anchor="middle" fill="#2563eb" font-size="9.5" font-weight="600">ui.action</text>
+
+  <!-- Aggregator → UI -->
+  <line x1="398" y1="462" x2="272" y2="462" stroke="#b45309" stroke-width="2" marker-end="url(#c1)"/>
+  <rect x="296" y="450" width="95" height="16" rx="6" fill="#fef2f2"/>
+  <text x="344" y="461" text-anchor="middle" fill="#dc2626" font-size="9.5" font-weight="600">cmd.ui_update</text>
+
+  <!-- ========== Заголовок секции 3: ИИ-ветка ========== -->
+  <rect x="730" y="10" width="640" height="30" rx="8" fill="#f5f3ff"/>
+  <text x="1050" y="30" text-anchor="middle" fill="#7c3aed" font-size="13" font-weight="700">ИИ-ветка (опционально, отключаемая)</text>
+
+  <!-- VoiceInteraction -->
+  <g filter="url(#sc)">
+    <rect x="730" y="60" width="260" height="100" rx="14" fill="#0891b2"/>
+    <text x="860" y="90" text-anchor="middle" fill="white" font-size="14" font-weight="700">VoiceInteractionPlugin</text>
+    <text x="860" y="110" text-anchor="middle" fill="rgba(255,255,255,0.55)" font-size="10">ASR → NLU → Intent</text>
+    <text x="860" y="130" text-anchor="middle" fill="rgba(255,255,255,0.55)" font-size="10">Текст → TTS → Голос</text>
+  </g>
+
+  <!-- AIAssistant -->
+  <g filter="url(#sc)">
+    <rect x="1080" y="60" width="260" height="100" rx="14" fill="#7c3aed" stroke="#5b21b6" stroke-width="2" stroke-dasharray="8,4"/>
+    <rect x="1150" y="48" width="120" height="20" rx="10" fill="#fef3c7" stroke="#f59e0b" stroke-width="1"/>
+    <text x="1210" y="62" text-anchor="middle" fill="#92400e" font-size="9" font-weight="700">ОТКЛЮЧАЕМЫЙ</text>
+    <text x="1210" y="98" text-anchor="middle" fill="white" font-size="14" font-weight="700">AIAssistantPlugin</text>
+    <text x="1210" y="118" text-anchor="middle" fill="rgba(255,255,255,0.55)" font-size="10">Голосовые + внешние команды</text>
+    <text x="1210" y="138" text-anchor="middle" fill="rgba(255,255,255,0.55)" font-size="10">→ команды для Агрегатора</text>
+  </g>
+
+  <!-- VoiceInteract → AIAssistant (voice.intent) -->
+  <line x1="992" y1="95" x2="1078" y2="95" stroke="#7c3aed" stroke-width="2.5" marker-end="url(#c3)"/>
+  <rect x="1000" y="78" width="76" height="16" rx="6" fill="#f5f3ff"/>
+  <text x="1038" y="89" text-anchor="middle" fill="#7c3aed" font-size="9.5" font-weight="600">voice.intent</text>
+
+  <!-- AIAssistant → VoiceInteract (ai.tts_text) -->
+  <line x1="1078" y1="135" x2="992" y2="135" stroke="#0891b2" stroke-width="2" marker-end="url(#c4)"/>
+  <rect x="1000" y="122" width="70" height="16" rx="6" fill="#ecfeff"/>
+  <text x="1035" y="133" text-anchor="middle" fill="#0891b2" font-size="9.5" font-weight="600">ai.tts_text</text>
+
+  <!-- AIAssistant → Aggregator (ai.command) -->
+  <g filter="url(#sc)">
+    <rect x="1030" y="220" width="260" height="70" rx="14" fill="#f59e0b" stroke="#b45309" stroke-width="2"/>
+    <text x="1160" y="252" text-anchor="middle" fill="white" font-size="16" font-weight="800">AggregatorPlugin</text>
+    <text x="1160" y="274" text-anchor="middle" fill="rgba(255,255,255,0.65)" font-size="10">Получает команды от ИИ</text>
+  </g>
+  <line x1="1210" y1="162" x2="1210" y2="218" stroke="#7c3aed" stroke-width="2.5" stroke-dasharray="6,3" marker-end="url(#c3)"/>
+  <rect x="1170" y="180" width="80" height="16" rx="6" fill="#f5f3ff"/>
+  <text x="1210" y="191" text-anchor="middle" fill="#7c3aed" font-size="9.5" font-weight="600">ai.command</text>
+
+  <!-- Внешний API → AIAssistant -->
+  <g filter="url(#sc)">
+    <rect x="1130" y="330" width="200" height="55" rx="12" fill="#f5f3ff" stroke="#c4b5fd" stroke-width="1.5"/>
+    <text x="1230" y="354" text-anchor="middle" fill="#5b21b6" font-size="12" font-weight="700">Внешний API</text>
+    <text x="1230" y="372" text-anchor="middle" fill="#7c3aed" font-size="10">REST / WebSocket</text>
+  </g>
+  <line x1="1280" y1="328" x2="1280" y2="162" stroke="#7c3aed" stroke-width="2" stroke-dasharray="6,3" marker-end="url(#c3)"/>
+  <rect x="1284" y="240" width="110" height="16" rx="6" fill="#f5f3ff"/>
+  <text x="1339" y="251" text-anchor="middle" fill="#7c3aed" font-size="9.5" font-weight="600">external.command</text>
+
+  <!-- ========== Заголовок секции 4: Цикл адаптации ========== -->
+  <rect x="730" y="410" width="640" height="30" rx="8" fill="#fdf2f8"/>
+  <text x="1050" y="430" text-anchor="middle" fill="#db2777" font-size="13" font-weight="700">Цикл адаптации (Training → Storage → Aggregator)</text>
+
+  <!-- Training → Storage → Aggregator -->
+  <g filter="url(#sc)">
+    <rect x="730" y="460" width="200" height="70" rx="12" fill="#db2777"/>
+    <text x="830" y="492" text-anchor="middle" fill="white" font-size="13" font-weight="700">TrainingPlugin</text>
+    <text x="830" y="514" text-anchor="middle" fill="rgba(255,255,255,0.6)" font-size="10">Сохраняет результаты</text>
+  </g>
+
+  <g filter="url(#sc)">
+    <rect x="990" y="460" width="180" height="70" rx="12" fill="#16a34a"/>
+    <text x="1080" y="492" text-anchor="middle" fill="white" font-size="13" font-weight="700">StoragePlugin</text>
+    <text x="1080" y="514" text-anchor="middle" fill="rgba(255,255,255,0.6)" font-size="10">/logs/training/</text>
+  </g>
+
+  <g filter="url(#sc)">
+    <rect x="1230" y="460" width="140" height="70" rx="12" fill="#f59e0b" stroke="#b45309" stroke-width="2"/>
+    <text x="1300" y="498" text-anchor="middle" fill="white" font-size="13" font-weight="800">Aggregator</text>
+  </g>
+
+  <line x1="932" y1="495" x2="988" y2="495" stroke="#16a34a" stroke-width="2" marker-end="url(#c1)"/>
+  <rect x="930" y="478" width="80" height="16" rx="6" fill="#f0fdf4"/>
+  <text x="970" y="489" text-anchor="middle" fill="#166534" font-size="9" font-weight="600">storage.write</text>
+
+  <line x1="1172" y1="495" x2="1228" y2="495" stroke="#dc2626" stroke-width="2" marker-end="url(#c1)"/>
+  <rect x="1160" y="478" width="90" height="16" rx="6" fill="#fef2f2"/>
+  <text x="1205" y="489" text-anchor="middle" fill="#dc2626" font-size="9" font-weight="600">storage.read_result</text>
+
+  <!-- Цикл: Aggregator → Training (через адаптацию) -->
+  <path d="M 1300 532 L 1300 580 L 830 580 L 830 532" stroke="#dc2626" stroke-width="2" fill="none" stroke-dasharray="6,3" marker-end="url(#c1)"/>
+  <rect x="1000" y="568" width="160" height="18" rx="6" fill="white" stroke="#dc2626" stroke-width="1"/>
+  <text x="1080" y="581" text-anchor="middle" fill="#dc2626" font-size="10" font-weight="600">Адаптация сложности ↺</text>
+
+  <!-- Подпись -->
+  <text x="700" y="645" text-anchor="middle" fill="#94a3b8" font-size="11" font-style="italic">Все связи через EventBus. Пунктир = опциональная связь (ИИ-ассистент отключаемый).</text>
+  <text x="700" y="665" text-anchor="middle" fill="#94a3b8" font-size="11" font-style="italic">Красные стрелки = управляющие команды. Синие стрелки = обратная связь от пользователя.</text>
+</svg>
+
+<!-- ================================================================ -->
+<!-- C4 LEVEL 3.3: TESTING CYCLE                                      -->
+<!-- ================================================================ -->
+<div class="level-header">
+  <span class="badge" style="background:#059669">C4 Level 3.3</span>
+  <h2>Components — Цикл тестирования (пошаговый сценарий)</h2>
+  <p>Последовательность шагов от подготовки устройств и запуска скрининга до предложения тренировок</p>
+</div>
+
+<svg width="1400" height="480" viewBox="0 0 1400 480" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="t1" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="#475569"/></marker>
+    <filter id="st" x="-3%" y="-3%" width="108%" height="110%"><feDropShadow dx="0" dy="1" stdDeviation="1.2" flood-opacity="0.08" flood-color="#0f172a"/></filter>
+  </defs>
+
+  <!-- Шаг 1: Инициализация устройств -->
+  <g filter="url(#st)">
+    <rect x="40" y="30" width="180" height="120" rx="14" fill="#7c3aed"/>
+    <circle cx="70" cy="55" r="16" fill="rgba(255,255,255,0.15)"/>
+    <text x="70" y="60" text-anchor="middle" fill="white" font-size="14" font-weight="800">1</text>
+    <text x="130" y="55" text-anchor="middle" fill="white" font-size="12" font-weight="700">Инициализация</text>
+    <text x="130" y="72" text-anchor="middle" fill="white" font-size="12" font-weight="700">устройств</text>
+    <line x1="55" y1="76" x2="205" y2="76" stroke="rgba(255,255,255,0.12)"/>
+    <text x="130" y="100" text-anchor="middle" fill="rgba(255,255,255,0.7)" font-size="10">UI-мастер + DeviceManager</text>
+    <text x="130" y="118" text-anchor="middle" fill="rgba(255,255,255,0.7)" font-size="10">выбор и проверка устройств</text>
+    <text x="130" y="140" text-anchor="middle" fill="#fbbf24" font-size="9">ui.device_selected → DeviceManager</text>
+  </g>
+
+  <!-- Стрелка 1→2 -->
+  <line x1="222" y1="90" x2="268" y2="90" stroke="#475569" stroke-width="2.5" marker-end="url(#t1)"/>
+
+  <!-- Шаг 2: Видеоанализ -->
+  <g filter="url(#st)">
+    <rect x="270" y="30" width="200" height="120" rx="14" fill="#0284c7"/>
+    <circle cx="300" cy="55" r="16" fill="rgba(255,255,255,0.15)"/>
+    <text x="300" y="60" text-anchor="middle" fill="white" font-size="14" font-weight="800">2</text>
+    <text x="370" y="58" text-anchor="middle" fill="white" font-size="13" font-weight="700">Видеоанализ</text>
+    <line x1="285" y1="76" x2="455" y2="76" stroke="rgba(255,255,255,0.12)"/>
+    <text x="370" y="100" text-anchor="middle" fill="rgba(255,255,255,0.7)" font-size="10">Camera → VideoAnalysis</text>
+    <text x="370" y="118" text-anchor="middle" fill="rgba(255,255,255,0.7)" font-size="10">Эмоции, взгляд, моторика</text>
+    <text x="370" y="140" text-anchor="middle" fill="#fbbf24" font-size="9">analysis.video_result</text>
+  </g>
+
+  <!-- Стрелка 2→3 -->
+  <line x1="472" y1="90" x2="518" y2="90" stroke="#475569" stroke-width="2.5" marker-end="url(#t1)"/>
+
+  <!-- Шаг 3: Подтверждение -->
+  <g filter="url(#st)">
+    <rect x="520" y="30" width="200" height="120" rx="14" fill="#0d9488"/>
+    <circle cx="550" cy="55" r="16" fill="rgba(255,255,255,0.15)"/>
+    <text x="550" y="60" text-anchor="middle" fill="white" font-size="14" font-weight="800">3</text>
+    <text x="630" y="55" text-anchor="middle" fill="white" font-size="12" font-weight="700">Подтверждение</text>
+    <text x="630" y="72" text-anchor="middle" fill="white" font-size="12" font-weight="700">голосовых тестов</text>
+    <line x1="535" y1="82" x2="705" y2="82" stroke="rgba(255,255,255,0.12)"/>
+    <text x="620" y="106" text-anchor="middle" fill="rgba(255,255,255,0.7)" font-size="10">Кнопка на экране</text>
+    <text x="620" y="124" text-anchor="middle" fill="rgba(255,255,255,0.7)" font-size="10">или команда ИИ</text>
+    <text x="620" y="142" text-anchor="middle" fill="#fbbf24" font-size="9">ui.action → Aggregator</text>
+  </g>
+
+  <!-- Стрелка 3→4 -->
+  <line x1="722" y1="90" x2="768" y2="90" stroke="#475569" stroke-width="2.5" marker-end="url(#t1)"/>
+
+  <!-- Шаг 4: Голосовые тесты -->
+  <g filter="url(#st)">
+    <rect x="770" y="30" width="200" height="120" rx="14" fill="#0891b2"/>
+    <circle cx="800" cy="55" r="16" fill="rgba(255,255,255,0.15)"/>
+    <text x="800" y="60" text-anchor="middle" fill="white" font-size="14" font-weight="800">4</text>
+    <text x="878" y="55" text-anchor="middle" fill="white" font-size="12" font-weight="700">Голосовые</text>
+    <text x="878" y="72" text-anchor="middle" fill="white" font-size="12" font-weight="700">тесты</text>
+    <line x1="785" y1="82" x2="955" y2="82" stroke="rgba(255,255,255,0.12)"/>
+    <text x="870" y="106" text-anchor="middle" fill="rgba(255,255,255,0.7)" font-size="10">Mic → VoiceTest</text>
+    <text x="870" y="124" text-anchor="middle" fill="rgba(255,255,255,0.7)" font-size="10">ASR → баллы</text>
+    <text x="870" y="142" text-anchor="middle" fill="#fbbf24" font-size="9">test.voice_result</text>
+  </g>
+
+  <!-- Стрелка 4→5 -->
+  <line x1="972" y1="90" x2="1018" y2="90" stroke="#475569" stroke-width="2.5" marker-end="url(#t1)"/>
+
+  <!-- Шаг 5: Отчёт -->
+  <g filter="url(#st)">
+    <rect x="1020" y="30" width="160" height="120" rx="14" fill="#ea580c"/>
+    <circle cx="1050" cy="55" r="16" fill="rgba(255,255,255,0.15)"/>
+    <text x="1050" y="60" text-anchor="middle" fill="white" font-size="14" font-weight="800">5</text>
+    <text x="1110" y="60" text-anchor="middle" fill="white" font-size="14" font-weight="700">Отчёт</text>
+    <line x1="1035" y1="76" x2="1165" y2="76" stroke="rgba(255,255,255,0.12)"/>
+    <text x="1100" y="100" text-anchor="middle" fill="rgba(255,255,255,0.7)" font-size="10">Report → UI</text>
+    <text x="1100" y="118" text-anchor="middle" fill="rgba(255,255,255,0.7)" font-size="10">Аналитика, тренды</text>
+    <text x="1100" y="140" text-anchor="middle" fill="#fbbf24" font-size="9">report.summary</text>
+  </g>
+
+  <!-- Стрелка 5→6 -->
+  <line x1="1182" y1="90" x2="1218" y2="90" stroke="#475569" stroke-width="2.5" marker-end="url(#t1)"/>
+
+  <!-- Шаг 6: Занятия -->
+  <g filter="url(#st)">
+    <rect x="1220" y="30" width="160" height="120" rx="14" fill="#db2777"/>
+    <circle cx="1250" cy="55" r="16" fill="rgba(255,255,255,0.15)"/>
+    <text x="1250" y="60" text-anchor="middle" fill="white" font-size="14" font-weight="800">6</text>
+    <text x="1310" y="60" text-anchor="middle" fill="white" font-size="14" font-weight="700">Занятия</text>
+    <line x1="1235" y1="76" x2="1365" y2="76" stroke="rgba(255,255,255,0.12)"/>
+    <text x="1300" y="100" text-anchor="middle" fill="rgba(255,255,255,0.7)" font-size="10">Training → UI</text>
+    <text x="1300" y="118" text-anchor="middle" fill="rgba(255,255,255,0.7)" font-size="10">Когнитивные</text>
+    <text x="1300" y="136" text-anchor="middle" fill="rgba(255,255,255,0.7)" font-size="10">упражнения</text>
+  </g>
+
+  <!-- Нижний ряд: Детализация участников -->
+  <rect x="40" y="200" width="1340" height="220" rx="16" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.5"/>
+  <text x="710" y="228" text-anchor="middle" fill="#1e293b" font-size="14" font-weight="700">Краткая детализация участников по этапам</text>
+  <line x1="80" y1="240" x2="1340" y2="240" stroke="#e2e8f0"/>
+
+  <!-- Шаг 1 detail -->
+  <text x="80" y="268" fill="#7c3aed" font-size="12" font-weight="700">① Инициализация устройств</text>
+  <text x="80" y="290" fill="#475569" font-size="11">UIPlugin + DeviceManager: выбор устройств, валидация, публикация <tspan font-family="Consolas">device.selection_resolved</tspan>.</text>
+
+  <!-- Шаг 2-3 detail -->
+  <text x="80" y="334" fill="#0284c7" font-size="12" font-weight="700">② Видеоанализ</text>
+  <text x="80" y="356" fill="#475569" font-size="11">CameraPlugin → sensor.video_frame → VideoAnalysisPlugin → analysis.video_result → AggregatorPlugin.</text>
+
+  <text x="700" y="334" fill="#0d9488" font-size="12" font-weight="700">③ Подтверждение</text>
+  <text x="700" y="356" fill="#475569" font-size="11">UIPlugin или ИИ-ветка отправляют действие, после чего Aggregator переводит систему в <tspan font-family="Consolas">VOICE_TEST</tspan>.</text>
+
+  <!-- Шаг 4-5-6 detail -->
+  <text x="80" y="388" fill="#0891b2" font-size="12" font-weight="700">④ Голосовые тесты</text>
+  <text x="80" y="410" fill="#475569" font-size="11">Aggregator → cmd.start_test → VoiceTestPlugin → test.voice_result → AggregatorPlugin.</text>
+
+  <text x="700" y="388" fill="#ea580c" font-size="12" font-weight="700">⑤ Отчёт и ⑥ занятия</text>
+  <text x="700" y="410" fill="#475569" font-size="11">Aggregator формирует ветки <tspan font-family="Consolas">report.data</tspan> → ReportPlugin и <tspan font-family="Consolas">training.suggest</tspan> → UIPlugin, затем возвращает систему в <tspan font-family="Consolas">IDLE</tspan>.</text>
+</svg>
+
+<!-- ================================================================ -->
+<!-- C4 LEVEL 4: CODE                                                  -->
+<!-- ================================================================ -->
+<div class="level-header">
+  <span class="badge" style="background:#dc2626">C4 Level 4</span>
+  <h2>Code — Код (интерфейсы, классы, внутренние процессы плагинов)</h2>
+  <p>Структура файлов, иерархия интерфейсов и пошаговый процесс внутри каждого плагина</p>
+</div>
+
+<!-- Tables for Level 4 -->
+<div class="tables-section" style="border-top:none;padding-top:0;margin-top:15px">
+
+  <h2>4.1 Файловая структура проекта</h2>
+  <p class="table-desc">Каждый плагин — отдельный Python-пакет. Контур выбора устройств и централизованный UI вынесены в отдельные сервисы и интерфейсы.</p>
+
+  <div class="tree"><span class="d">smart_mirror/</span>
+├── <span class="f">main.py</span>                         <span class="c"># Точка входа · создаёт EventBus, PluginManager, DeviceManager</span>
+├── <span class="f">config.yaml</span>                     <span class="c"># Какие плагины включены + параметры</span>
+├── <span class="d">core/</span>
+│   ├── <span class="f">event_bus.py</span>                <span class="c"># EventBus — асинхронная шина событий</span>
+│   ├── <span class="f">plugin_manager.py</span>           <span class="c"># PluginManager — загрузка и управление</span>
+│   ├── <span class="f">device_manager.py</span>           <span class="c"># DeviceManager — discovery, saved selection, validate</span>
+│   └── <span class="f">config.py</span>                   <span class="c"># Config — чтение config.yaml</span>
+├── <span class="d">interfaces/</span>
+│   ├── <span class="f">plugin.py</span>                   <span class="c"># IPlugin — базовый (start, stop, name)</span>
+│   ├── <span class="f">sensor.py</span>                   <span class="c"># ISensorPlugin → IPlugin (capture)</span>
+│   ├── <span class="f">processor.py</span>                <span class="c"># IProcessorPlugin → IPlugin (process)</span>
+│   ├── <span class="f">device.py</span>                   <span class="c"># IDeviceProvider / IDeviceRegistry</span>
+│   ├── <span class="f">ui.py</span>                       <span class="c"># IUIContract — мастер устройств + стандартные UI-события</span>
+│   ├── <span class="f">output.py</span>                   <span class="c"># IOutputPlugin → IPlugin (render)</span>
+│   └── <span class="f">storage.py</span>                  <span class="c"># IStoragePlugin → IPlugin (save, load)</span>
+├── <span class="d">models/</span>
+│   ├── <span class="f">events.py</span>                   <span class="c"># Event — структура событий EventBus</span>
+│   ├── <span class="f">device.py</span>                   <span class="c"># DeviceInfo, SelectedDevices, DeviceValidation</span>
+│   └── <span class="f">types.py</span>                    <span class="c"># VideoFrame, AudioChunk, TestResult, UICommand, ...</span>
+├── <span class="d">plugins/</span>
+│   ├── <span class="d">camera/</span>          <span class="c"># CameraPlugin       → ISensorPlugin</span>
+│   ├── <span class="d">microphone/</span>      <span class="c"># MicrophonePlugin   → ISensorPlugin</span>
+│   ├── <span class="d">video_analysis/</span>  <span class="c"># VideoAnalysisPlugin → IProcessorPlugin</span>
+│   ├── <span class="d">voice_test/</span>      <span class="c"># VoiceTestPlugin    → IProcessorPlugin</span>
+│   ├── <span class="d">voice_interaction/</span> <span class="c"># VoiceInteraction  → IProcessorPlugin (→ ИИ)</span>
+│   ├── <span class="d">aggregator/</span>      <span class="c"># AggregatorPlugin   → IProcessorPlugin [ЯДРО]</span>
+│   ├── <span class="d">ai_assistant/</span>    <span class="c"># AIAssistantPlugin  → IProcessorPlugin [ОТКЛ.]</span>
+│   ├── <span class="d">ui/</span>              <span class="c"># UIPlugin           → IOutputPlugin + централизованные экраны/адаптеры</span>
+│   ├── <span class="d">report/</span>          <span class="c"># ReportPlugin       → IOutputPlugin</span>
+│   ├── <span class="d">storage/</span>         <span class="c"># StoragePlugin      → IStoragePlugin</span>
+│   └── <span class="d">training/</span>        <span class="c"># TrainingPlugin     → IProcessorPlugin</span>
+└── <span class="d">logs/</span>
+    ├── <span class="d">sessions/</span>   <span class="c"># Данные сеансов (.json)</span>
+    ├── <span class="d">reports/</span>    <span class="c"># Отчёты (.json, .csv)</span>
+    ├── <span class="d">events/</span>     <span class="c"># Лог событий EventBus</span>
+    └── <span class="d">training/</span>   <span class="c"># Результаты тренировок</span></div>
+
+  <h2>4.2 Иерархия интерфейсов</h2>
+  <p class="table-desc">Все плагины наследуют от <code>IPlugin</code>. Интерфейсы устройств и UI-контракты вынесены отдельно, чтобы менять экраны и выбор устройств без правок в обработчиках.</p>
+
+  <table>
+    <thead><tr><th>Интерфейс</th><th>Наследует</th><th>Расположение</th><th>Для чего</th><th>Кто реализует</th></tr></thead>
+    <tbody>
+      <tr><td class="mn">IPlugin</td><td>ABC</td><td>interfaces/plugin.py</td><td>Базовый: старт, стоп, имя, версия</td><td>Все плагины</td></tr>
+      <tr><td class="mn">ISensorPlugin</td><td>IPlugin</td><td>interfaces/sensor.py</td><td>Датчики: непрерывный захват данных</td><td>Camera, Microphone</td></tr>
+      <tr><td class="mn">IProcessorPlugin</td><td>IPlugin</td><td>interfaces/processor.py</td><td>Обработка: получает событие → возвращает результат</td><td>VideoAnalysis, VoiceTest, VoiceInteraction, Aggregator, AIAssistant, Training</td></tr>
+      <tr><td class="mn">IDeviceProvider</td><td>ABC</td><td>interfaces/device.py</td><td>Discovery, сохранение и проверка выбора устройств</td><td>DeviceManager</td></tr>
+      <tr><td class="mn">IUIContract</td><td>ABC</td><td>interfaces/ui.py</td><td>Мастер выбора устройств, стандартные UI-экраны и UI-события</td><td>UIPlugin</td></tr>
+      <tr><td class="mn">IOutputPlugin</td><td>IPlugin</td><td>interfaces/output.py</td><td>Вывод: рендер экрана, генерация отчёта</td><td>UI, Report</td></tr>
+      <tr><td class="mn">IStoragePlugin</td><td>IPlugin</td><td>interfaces/storage.py</td><td>Хранение: async запись/чтение файлов</td><td>Storage</td></tr>
+    </tbody>
+  </table>
+
+  <h2>4.3 Плагины и сервисы — внутренний процесс каждого</h2>
+  <p class="table-desc">Пошаговое описание работы каждого компонента. Что происходит внутри от получения события до публикации результата.</p>
+
+  <table>
+    <thead><tr><th style="width:12%">Компонент</th><th style="width:9%">Интерфейс</th><th style="width:13%">ВХОД (подписка)</th><th style="width:13%">ВЫХОД (публикация)</th><th style="width:53%">Внутренний процесс (пошагово)</th></tr></thead>
+    <tbody>
+      <tr style="background:#ecfeff;">
+        <td class="mn"><strong>DeviceManager</strong></td><td>IDeviceProvider</td>
+        <td><span class="tag t-s">ui.device_selected</span> <span class="tag t-s">cmd.prepare_session</span></td>
+        <td><span class="tag t-p">device.selection_resolved</span> <span class="tag t-p">device.validation_failed</span> <span class="tag t-p">ui.device_wizard.open</span></td>
+        <td>1. Читает сохранённый выбор → 2. Перечисляет доступные камеры и микрофоны → 3. Сравнивает сохранённые <code>device_id</code> с фактически доступными → 4. Открывает UI-мастер выбора устройств → 5. При подтверждении сохраняет новый выбор → 6. Публикует <code>SelectedDevices</code> для старта сеанса или ошибку/статус, если устройство недоступно.</td>
+      </tr>
+      <tr>
+        <td class="mn">CameraPlugin</td><td>ISensor</td>
+        <td><span class="tag t-s">cmd.start_capture</span></td>
+        <td><span class="tag t-p">sensor.video_frame</span></td>
+        <td>1. Получает команду старт и уже разрешённый <code>selected_camera_id</code> → 2. Открывает конкретную камеру → 3. В цикле захватывает кадры (≥25fps) → 4. Каждый кадр упаковывает в VideoFrame → 5. Публикует в EventBus → 6. Не выполняет discovery или выбор устройства самостоятельно.</td>
+      </tr>
+      <tr>
+        <td class="mn">MicrophonePlugin</td><td>ISensor</td>
+        <td><span class="tag t-s">cmd.start_capture</span></td>
+        <td><span class="tag t-p">sensor.audio_chunk</span></td>
+        <td>1. Получает команду старт и уже разрешённый <code>selected_microphone_id</code> → 2. Открывает конкретный микрофон (16kHz) → 3. В цикле записывает аудиочанки → 4. Упаковывает в AudioChunk → 5. Публикует в EventBus. Логика discovery/select здесь отсутствует.</td>
+      </tr>
+      <tr>
+        <td class="mn">VideoAnalysisPlugin</td><td>IProcessor</td>
+        <td><span class="tag t-s">sensor.video_frame</span></td>
+        <td><span class="tag t-p">analysis.video_result</span></td>
+        <td>1. Получает кадр → 2. Детекция лица → 3. Извлечение ключевых точек → 4. Классификация эмоций → 5. Анализ направления взгляда → 6. Оценка двигательной активности → 7. Упаковка в ScreeningResult → 8. Публикация</td>
+      </tr>
+      <tr>
+        <td class="mn">VoiceTestPlugin</td><td>IProcessor</td>
+        <td><span class="tag t-s">sensor.audio_chunk</span> <span class="tag t-s">cmd.start_test</span></td>
+        <td><span class="tag t-p">test.voice_result</span></td>
+        <td>1. Ждёт команду запуска теста → 2. Начинает сбор аудио → 3. Распознаёт речь (ASR) → 4. Анализирует корректность ответов → 5. Считает баллы и время реакции → 6. Классификация (норма/отклонение) → 7. Публикация TestResult</td>
+      </tr>
+      <tr>
+        <td class="mn">VoiceInteractionPlugin</td><td>IProcessor</td>
+        <td><span class="tag t-s">sensor.audio_chunk</span> <span class="tag t-s">ai.tts_text</span></td>
+        <td><span class="tag t-p">voice.intent</span> <span class="tag t-p">voice.tts_output</span></td>
+        <td>1. Получает аудио → 2. Распознаёт речь (ASR) → 3. Извлекает намерение (NLU) → 4. Публикует Intent для ИИ-ассистента. По запросу TTS: 5. Получает текст → 6. Синтезирует речь → 7. Воспроизводит. <strong>Привязан к ИИ-ассистенту.</strong></td>
+      </tr>
+      <tr style="background:#fffbeb;">
+        <td class="mn"><strong>AggregatorPlugin</strong></td><td>IProcessor</td>
+        <td><span class="tag t-s">analysis.*</span> <span class="tag t-s">test.*</span> <span class="tag t-s">ui.action</span> <span class="tag t-s">ai.command</span> <span class="tag t-s">device.selection_resolved</span></td>
+        <td><span class="tag t-p">cmd.*</span> <span class="tag t-p">report.data</span> <span class="tag t-p">storage.write</span></td>
+        <td><strong>Ядро системы.</strong> 1. Инициирует подготовку сеанса → 2. Ждёт <code>device.selection_resolved</code> и только затем разрешает старт сенсоров → 3. Собирает результаты от обработчиков → 4. Мультимодальное слияние (видео + аудио) → 5. Оценка когнитивного состояния → 6. State Machine переходит в следующее состояние → 7. Отправляет команды: запуск камеры/теста/UI → 8. Передаёт данные в отчётность → 9. Пишет логи. <em>Состояния: IDLE → READY → SCREENING → VOICE_TEST → REPORTING → TRAINING → IDLE</em></td>
+      </tr>
+      <tr style="background:#eef2ff;">
+        <td class="mn"><strong>AIAssistantPlugin</strong> <span class="tag t-o">откл.</span></td><td>IProcessor</td>
+        <td><span class="tag t-s">voice.intent</span> <span class="tag t-s">external.command</span></td>
+        <td><span class="tag t-p">ai.command</span> <span class="tag t-p">ai.tts_text</span></td>
+        <td>1. Получает намерение от VoiceInteraction → 2. Или получает внешнюю команду (API) → 3. Формирует команду для Агрегатора → 4. Отправляет текст для озвучки → TTS. <strong>Если отключён</strong> — система работает через кнопки UI, голосовые команды недоступны.</td>
+      </tr>
+      <tr>
+        <td class="mn">UIPlugin</td><td>IOutput</td>
+        <td><span class="tag t-s">cmd.ui_update</span> <span class="tag t-s">report.summary</span> <span class="tag t-s">training.suggest</span> <span class="tag t-s">ui.device_wizard.open</span> <span class="tag t-s">device.validation_failed</span></td>
+        <td><span class="tag t-p">ui.action</span> <span class="tag t-p">ui.device_selected</span></td>
+        <td>1. Получает команду от Агрегатора или DeviceManager → 2. Рендерит экран из централизованного набора экранов, форм, кнопок и адаптеров → 3. Показывает мастер выбора устройств, тесты, результаты и экран занятий → 4. Пользователь выбирает устройство или нажимает кнопку → 5. Публикует стандартизованные UI-события. Все изменения экранов и UI-потоков локализованы в этом модуле.</td>
+      </tr>
+      <tr>
+        <td class="mn">ReportPlugin</td><td>IOutput</td>
+        <td><span class="tag t-s">report.data</span></td>
+        <td><span class="tag t-p">report.summary</span> <span class="tag t-p">storage.write</span></td>
+        <td>1. Получает данные скрининга → 2. Формирует полный отчёт (аналитика, тренды) → 3. Краткую версию отправляет на UI → 4. Полную версию отправляет в хранилище (JSON/CSV)</td>
+      </tr>
+      <tr>
+        <td class="mn">StoragePlugin</td><td>IStorage</td>
+        <td><span class="tag t-s">storage.write</span> <span class="tag t-s">storage.read</span></td>
+        <td><span class="tag t-p">storage.read_result</span></td>
+        <td>1. Получает данные для записи → 2. Async записывает в /logs/ (JSON/CSV) → 3. По запросу Агрегатора читает историю → 4. Возвращает исторические данные. <em>Полностью async I/O — не блокирует event loop.</em></td>
+      </tr>
+      <tr style="background:#fdf2f8;">
+        <td class="mn"><strong>TrainingPlugin</strong></td><td>IProcessor</td>
+        <td><span class="tag t-s">report.data</span></td>
+        <td><span class="tag t-p">training.suggest</span> <span class="tag t-p">storage.write</span></td>
+        <td>1. Получает данные скрининга → 2. Анализирует слабые стороны → 3. Подбирает когнитивные упражнения → 4. Адаптирует сложность → 5. Отправляет предложение занятий на UI → 6. Сохраняет результаты тренировок</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>4.4 Типы событий EventBus</h2>
+  <p class="table-desc">Все события в системе. Каждое содержит: тип, данные, источник, метка времени. События выбора устройств и UI-мастера выделены отдельно.</p>
+
+  <table>
+    <thead><tr><th style="width:17%">Событие</th><th style="width:12%">Откуда</th><th style="width:14%">Куда</th><th style="width:12%">Данные</th><th style="width:45%">Описание</th></tr></thead>
+    <tbody>
+      <tr><td class="mn"><code>sensor.video_frame</code></td><td>Camera</td><td>VideoAnalysis</td><td>VideoFrame</td><td>Кадр видеопотока. Непрерывный поток (≥25fps).</td></tr>
+      <tr><td class="mn"><code>sensor.audio_chunk</code></td><td>Microphone</td><td>VoiceTest, VoiceInteract</td><td>AudioChunk</td><td>Аудиочанк PCM 16kHz. Подписаны оба голосовых плагина.</td></tr>
+      <tr><td class="mn"><code>analysis.video_result</code></td><td>VideoAnalysis</td><td>Aggregator</td><td>ScreeningResult</td><td>Эмоции, внимание, моторика, взгляд.</td></tr>
+      <tr><td class="mn"><code>test.voice_result</code></td><td>VoiceTest</td><td>Aggregator</td><td>TestResult</td><td>Баллы, время реакции, классификация.</td></tr>
+      <tr><td class="mn"><code>voice.intent</code></td><td>VoiceInteract</td><td>AIAssistant</td><td>Intent</td><td>Намерение пользователя (NLU). Только если ИИ включён.</td></tr>
+      <tr><td class="mn"><code>voice.tts_output</code></td><td>VoiceInteract</td><td>— (аудиовыход)</td><td>AudioChunk</td><td>Синтезированная речь (TTS).</td></tr>
+      <tr><td class="mn"><code>ai.command</code></td><td>AIAssistant</td><td>Aggregator</td><td>Command</td><td>Команды от ИИ. <span class="tag t-o">опционально</span></td></tr>
+      <tr><td class="mn"><code>ai.tts_text</code></td><td>AIAssistant</td><td>VoiceInteract</td><td>str</td><td>Текст для озвучки. <span class="tag t-o">опционально</span></td></tr>
+      <tr><td class="mn"><code>external.command</code></td><td>Внешний API</td><td>AIAssistant</td><td>Command</td><td>Сторонние команды (REST/WS). <span class="tag t-o">опционально</span></td></tr>
+      <tr><td class="mn"><code>cmd.prepare_session</code></td><td>Aggregator</td><td>DeviceManager</td><td>SessionConfig</td><td>Команда подготовить сеанс и проверить доступность устройств.</td></tr>
+      <tr><td class="mn"><code>ui.device_wizard.open</code></td><td>DeviceManager</td><td>UI</td><td>DeviceSelectionView</td><td>Открыть предсеансовый мастер выбора устройств.</td></tr>
+      <tr><td class="mn"><code>ui.device_selected</code></td><td>UI</td><td>DeviceManager</td><td>DeviceSelection</td><td>Пользователь подтвердил выбранные камеру и микрофон.</td></tr>
+      <tr><td class="mn"><code>device.selection_resolved</code></td><td>DeviceManager</td><td>Aggregator</td><td>SelectedDevices</td><td>Итоговый набор валидированных устройств для запуска сеанса.</td></tr>
+      <tr><td class="mn"><code>device.validation_failed</code></td><td>DeviceManager</td><td>UI</td><td>DeviceError</td><td>Сохранённое устройство недоступно или выбор неполон.</td></tr>
+      <tr><td class="mn"><code>cmd.start_capture</code></td><td>Aggregator</td><td>Camera, Mic</td><td>CaptureConfig</td><td>Команда начать захват с уже разрешёнными <code>device_id</code>.</td></tr>
+      <tr><td class="mn"><code>cmd.start_test</code></td><td>Aggregator</td><td>VoiceTest</td><td>TestConfig</td><td>Команда запустить тест.</td></tr>
+      <tr><td class="mn"><code>cmd.ui_update</code></td><td>Aggregator</td><td>UI</td><td>UICommand</td><td>Обновить экран централизованного UI-модуля.</td></tr>
+      <tr><td class="mn"><code>ui.action</code></td><td>UI</td><td>Aggregator</td><td>UserAction</td><td>Стандартное действие пользователя: старт, подтверждение, выбор занятия.</td></tr>
+      <tr><td class="mn"><code>report.data</code></td><td>Aggregator</td><td>Report, Training</td><td>AggregatedState</td><td>Данные для отчёта и занятий.</td></tr>
+      <tr><td class="mn"><code>report.summary</code></td><td>Report</td><td>UI</td><td>Report</td><td>Готовый отчёт для экрана.</td></tr>
+      <tr><td class="mn"><code>training.suggest</code></td><td>Training</td><td>UI</td><td>TrainingSuggestion</td><td>Предложение когнитивных тренировок.</td></tr>
+      <tr><td class="mn"><code>storage.write</code></td><td>Aggregator, Report, Training</td><td>Storage</td><td>StorageEntry</td><td>Запись в /logs/.</td></tr>
+      <tr><td class="mn"><code>storage.read</code></td><td>Aggregator</td><td>Storage</td><td>StorageQuery</td><td>Запрос истории.</td></tr>
+      <tr><td class="mn"><code>storage.read_result</code></td><td>Storage</td><td>Aggregator</td><td>list</td><td>Результат чтения истории.</td></tr>
+    </tbody>
+  </table>
+
+</div>
+
+</div>
+</body>
+</html>

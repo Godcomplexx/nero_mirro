@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Neuro Mirror</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <!-- ===== Full-screen camera background ===== -->
+    <div class="camera-fullscreen" id="camera-fullscreen">
+      <video id="camera-preview" autoplay playsinline muted></video>
+      <div class="camera-overlay" id="camera-overlay">
+        <svg class="camera-off-icon" viewBox="0 0 24 24" width="48" height="48" fill="rgba(255,255,255,0.4)">
+          <path d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z"/>
+        </svg>
+        <span>Нажмите «Камера» чтобы начать</span>
+      </div>
+    </div>
+
+    <!-- ===== Mascot (bottom-right corner) ===== -->
+    <div class="mascot-float" id="mascot-float">
+      <div class="mascot" id="mascot" data-state="idle">
+        <div class="mascot-halo"></div>
+        <div class="mascot-live2d" id="mascot-live2d" hidden></div>
+        <img
+          class="mascot-image"
+          id="mascot-image"
+          src="/static/assets/airi/hiyori-preview.png"
+          alt="AIRI mascot Hiyori"
+        />
+        <div class="mouth" id="mascot-mouth"></div>
+      </div>
+      <span class="mascot-state-badge" id="mascot-state" hidden>idle</span>
+    </div>
+
+    <!-- ===== Speech bubble (near mascot) ===== -->
+    <div class="mascot-speech" id="mascot-speech" hidden>
+      <div class="mascot-speech-text" id="mascot-speech-text"></div>
+    </div>
+
+    <!-- ===== Top bar ===== -->
+    <header class="topbar">
+      <div class="topbar-left">
+        <div class="connection-dot" id="connection-dot" title="WebSocket: нет связи"></div>
+        <span class="topbar-title">Neuro Mirror</span>
+      </div>
+      <div class="topbar-right">
+        <label class="tts-toggle">
+          <input type="checkbox" id="tts-enabled" checked />
+          <span>Озвучка</span>
+        </label>
+        <div class="hero-chip" id="backend-label">Загрузка…</div>
+      </div>
+    </header>
+
+    <!-- ===== HUD overlay (controls on top of camera) ===== -->
+    <div class="hud">
+      <!-- Left column: assistant + status -->
+      <div class="hud-left">
+        <div class="hud-card hud-assistant">
+          <form id="assistant-form" class="assistant-form">
+            <textarea
+              id="assistant-input"
+              placeholder="Спросите что-нибудь… или используйте голос"
+              rows="1"
+            ></textarea>
+            <div class="form-actions">
+              <button type="submit" class="primary" id="ask-button">Спросить</button>
+              <button type="button" id="screening-button" class="secondary">Скрининг</button>
+            </div>
+          </form>
+        </div>
+
+        <div class="hud-card hud-status" id="hud-status">
+          <div class="status-line">
+            <span>Экран</span>
+            <strong id="screen-value">—</strong>
+          </div>
+          <div class="status-line">
+            <span>Источник</span>
+            <strong id="source-value">—</strong>
+          </div>
+          <p id="message-value" class="message-value">Ожидание подключения…</p>
+          <p id="transcript-value" class="transcript-value"></p>
+        </div>
+      </div>
+
+      <!-- Right column: actions -->
+      <div class="hud-right">
+        <!-- Camera + Appearance buttons -->
+        <div class="hud-card hud-actions">
+          <button type="button" id="camera-toggle" class="secondary camera-btn">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+              <path d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z"/>
+            </svg>
+            <span>Камера</span>
+          </button>
+          <button type="button" id="appearance-button" class="primary" disabled>
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/>
+            </svg>
+            <span>Оценить вид</span>
+          </button>
+        </div>
+
+        <!-- Voice button -->
+        <button type="button" id="voice-button" class="voice-btn">
+          <svg class="mic-icon" viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+            <path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z"/>
+          </svg>
+          <span id="voice-button-label">Нажми и говори</span>
+        </button>
+        <p id="voice-status" class="voice-status"></p>
+      </div>
+    </div>
+
+    <!-- ===== Bottom drawer (collapsible details) ===== -->
+    <details class="drawer" id="details-drawer">
+      <summary class="drawer-toggle">Подробности ▾</summary>
+      <div class="drawer-body">
+        <div class="drawer-grid">
+          <!-- Report -->
+          <section class="drawer-card">
+            <h3>Последний отчёт</h3>
+            <div id="report-value" class="report-content">
+              <p class="placeholder-text">Отчёт пока не получен.</p>
+            </div>
+          </section>
+
+          <!-- Modules -->
+          <section class="drawer-card">
+            <h3>Модули</h3>
+            <div id="modules-value" class="modules-list">
+              <p class="placeholder-text">Данные о модулях ещё не получены.</p>
+            </div>
+          </section>
+
+          <!-- Log -->
+          <section class="drawer-card">
+            <h3>
+              Журнал
+              <button type="button" id="log-clear" class="text-btn">Очистить</button>
+            </h3>
+            <pre id="log-value" class="log-value">Подключение…</pre>
+          </section>
+        </div>
+      </div>
+    </details>
+
+    <p id="mascot-note" class="mascot-note" hidden></p>
+
+    <script src="/static/app.js?v=20260421a" defer></script>
+  </body>
+</html>

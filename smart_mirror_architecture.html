@@ -1,0 +1,826 @@
+﻿<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Архитектура системы «Умное зеркало»</title>
+<style>
+  @page {
+    size: A3 landscape;
+    margin: 10mm;
+  }
+  @media print {
+    body { padding: 0; }
+    .container { width: 100%; }
+    svg { width: 100%; height: auto; }
+    table { page-break-inside: avoid; }
+    .tables-section h2 { page-break-after: avoid; }
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #ffffff;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    min-height: 100vh;
+    padding: 20px;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  }
+  .container {
+    width: 1600px;
+    position: relative;
+  }
+  h1 {
+    text-align: center;
+    font-size: 24px;
+    color: #0f172a;
+    margin-bottom: 6px;
+    font-weight: 700;
+    letter-spacing: 0;
+  }
+  .subtitle {
+    text-align: center;
+    font-size: 12px;
+    color: #64748b;
+    margin-bottom: 20px;
+  }
+  svg {
+    display: block;
+    margin: 0 auto;
+    max-width: 100%;
+    height: auto;
+  }
+
+  /* ===== Tables Section ===== */
+  .tables-section {
+    margin-top: 50px;
+    padding-top: 40px;
+    border-top: 2px solid #e2e8f0;
+  }
+  .tables-section h2 {
+    font-size: 19px;
+    color: #1a1a2e;
+    margin: 40px 0 8px 0;
+    font-weight: 700;
+    padding-bottom: 8px;
+    border-bottom: 2px solid #e2e8f0;
+  }
+  .tables-section h2:first-child {
+    margin-top: 0;
+  }
+  .table-desc {
+    font-size: 12.5px;
+    color: #64748b;
+    margin-bottom: 16px;
+    line-height: 1.5;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 30px;
+    font-size: 12px;
+  }
+  thead th {
+    background: #1e293b;
+    color: #fff;
+    font-weight: 600;
+    padding: 10px 12px;
+    text-align: left;
+    font-size: 11.5px;
+    letter-spacing: 0.3px;
+  }
+  thead th:first-child {
+    border-radius: 8px 0 0 0;
+  }
+  thead th:last-child {
+    border-radius: 0 8px 0 0;
+  }
+  tbody td {
+    padding: 9px 12px;
+    border-bottom: 1px solid #e2e8f0;
+    vertical-align: top;
+    line-height: 1.55;
+    color: #334155;
+  }
+  tbody tr:last-child td {
+    border-bottom: none;
+  }
+  td.mod-name {
+    font-weight: 600;
+    white-space: nowrap;
+    color: #1e293b;
+  }
+  .dot {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    margin-right: 6px;
+    vertical-align: middle;
+  }
+  .dot-user   { background: #4f46e5; }
+  .dot-cam    { background: #475569; }
+  .dot-mic    { background: #475569; }
+  .dot-video  { background: #0284c7; }
+  .dot-voice  { background: #0891b2; }
+  .dot-vtest  { background: #0d9488; }
+  .dot-device { background: #0f766e; }
+  .dot-ai     { background: linear-gradient(135deg, #f59e0b, #ef4444); }
+  .dot-ui     { background: #7c3aed; }
+  .dot-report { background: #ea580c; }
+  .dot-db     { background: #16a34a; }
+
+  table.matrix thead th {
+    text-align: center;
+    padding: 8px 6px;
+    font-size: 10.5px;
+  }
+  table.matrix thead th:first-child {
+    text-align: left;
+    min-width: 170px;
+  }
+  table.matrix tbody td {
+    text-align: center;
+    padding: 7px 6px;
+    font-size: 10.5px;
+  }
+  table.matrix tbody td:first-child {
+    text-align: left;
+    font-weight: 600;
+    font-size: 11px;
+    white-space: nowrap;
+  }
+  .cell-self {
+    background: #f1f5f9;
+    color: #94a3b8;
+  }
+  .cell-arrow {
+    color: #1e293b;
+    font-weight: 500;
+  }
+  .cell-empty {
+    color: #cbd5e1;
+  }
+
+  .cycle-init td:first-child     { border-left: 4px solid #0f766e; }
+  .cycle-interact td:first-child { border-left: 4px solid #6366f1; }
+  .cycle-test td:first-child     { border-left: 4px solid #f59e0b; }
+  .cycle-report td:first-child   { border-left: 4px solid #16a34a; }
+  .cycle-adapt td:first-child    { border-left: 4px solid #be185d; }
+
+  code {
+    background: #f1f5f9;
+    padding: 1px 5px;
+    border-radius: 4px;
+    font-size: 11.5px;
+    color: #475569;
+    font-family: 'Consolas', 'Courier New', monospace;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Архитектура программного обеспечения системы «Умное зеркало»</h1>
+  <p class="subtitle">Модульная интеллектуальная система мониторинга когнитивного и функционального состояния</p>
+
+  <svg width="1600" height="960" viewBox="0 0 1600 960" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arrow-neutral" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#475569"/>
+    </marker>
+    <marker id="arrow-data" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#2563eb"/>
+    </marker>
+    <marker id="arrow-control" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#ea580c"/>
+    </marker>
+    <marker id="arrow-device" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#0f766e"/>
+    </marker>
+    <marker id="arrow-storage" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#16a34a"/>
+    </marker>
+    <marker id="arrow-optional" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#7c3aed"/>
+    </marker>
+    <filter id="shadow" x="-5%" y="-5%" width="115%" height="115%">
+      <feDropShadow dx="0" dy="1" stdDeviation="1.2" flood-opacity="0.08" flood-color="#0f172a"/>
+    </filter>
+  </defs>
+
+  <rect x="40" y="40" width="1520" height="150" rx="18" fill="#f8fafc" stroke="#e2e8f0"/>
+  <rect x="40" y="210" width="1520" height="150" rx="18" fill="#f8fafc" stroke="#e2e8f0"/>
+  <rect x="40" y="380" width="1520" height="170" rx="18" fill="#f8fafc" stroke="#e2e8f0"/>
+  <rect x="40" y="570" width="1520" height="180" rx="18" fill="#f8fafc" stroke="#e2e8f0"/>
+  <rect x="40" y="770" width="1520" height="140" rx="18" fill="#f8fafc" stroke="#e2e8f0"/>
+
+  <text x="65" y="65" font-size="12" fill="#64748b" font-weight="700">Слой взаимодействия</text>
+  <text x="65" y="235" font-size="12" fill="#64748b" font-weight="700">Слой подготовки сеанса и захвата</text>
+  <text x="65" y="405" font-size="12" fill="#64748b" font-weight="700">Слой обработки сигналов</text>
+  <text x="65" y="595" font-size="12" fill="#64748b" font-weight="700">Координационное ядро</text>
+  <text x="65" y="795" font-size="12" fill="#64748b" font-weight="700">Выходные и адаптационные модули</text>
+
+  <g filter="url(#shadow)">
+    <rect x="70" y="88" width="260" height="90" rx="16" fill="#2563eb"/>
+    <text x="200" y="122" text-anchor="middle" fill="white" font-size="18" font-weight="700">Пользователь</text>
+    <text x="200" y="145" text-anchor="middle" fill="rgba(255,255,255,0.78)" font-size="11">видит экран, нажимает кнопки, говорит</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="420" y="70" width="560" height="120" rx="16" fill="#4338ca"/>
+    <text x="700" y="105" text-anchor="middle" fill="white" font-size="18" font-weight="700">Единый UI-модуль</text>
+    <line x1="450" y1="118" x2="950" y2="118" stroke="rgba(255,255,255,0.18)"/>
+    <text x="450" y="142" fill="rgba(255,255,255,0.9)" font-size="11">• Все экраны, формы, кнопки, сообщения и UI-события</text>
+    <text x="450" y="162" fill="rgba(255,255,255,0.9)" font-size="11">• Мастер выбора устройств до начала сеанса</text>
+    <text x="450" y="182" fill="rgba(255,255,255,0.62)" font-size="10" font-style="italic">остальные модули не знают о конкретных экранах и работают через контракты</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="1180" y="88" width="300" height="90" rx="16" fill="#ede9fe" stroke="#c4b5fd"/>
+    <text x="1330" y="122" text-anchor="middle" fill="#5b21b6" font-size="16" font-weight="700">Внешние системы</text>
+    <text x="1330" y="145" text-anchor="middle" fill="#7c3aed" font-size="11">REST / WebSocket, если ИИ-ветка включена</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="470" y="245" width="460" height="96" rx="16" fill="#0f766e"/>
+    <text x="700" y="278" text-anchor="middle" fill="white" font-size="17" font-weight="700">Device Manager / инициализация устройств</text>
+    <line x1="500" y1="290" x2="900" y2="290" stroke="rgba(255,255,255,0.2)"/>
+    <text x="500" y="312" fill="rgba(255,255,255,0.9)" font-size="11">• list devices, saved selection, validate</text>
+    <text x="500" y="330" fill="rgba(255,255,255,0.9)" font-size="11">• публикует selected_camera_id / selected_microphone_id</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="940" y="255" width="90" height="74" rx="14" fill="#334155"/>
+    <text x="985" y="284" text-anchor="middle" fill="white" font-size="14" font-weight="700">Config</text>
+    <text x="985" y="306" text-anchor="middle" fill="rgba(255,255,255,0.72)" font-size="9.5">saved defaults</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="150" y="255" width="200" height="74" rx="14" fill="#475569"/>
+    <text x="250" y="286" text-anchor="middle" fill="white" font-size="15" font-weight="700">CameraPlugin</text>
+    <text x="250" y="308" text-anchor="middle" fill="rgba(255,255,255,0.72)" font-size="10">захват видео по selected_camera_id</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="1050" y="255" width="220" height="74" rx="14" fill="#475569"/>
+    <text x="1160" y="286" text-anchor="middle" fill="white" font-size="15" font-weight="700">MicrophonePlugin</text>
+    <text x="1160" y="308" text-anchor="middle" fill="rgba(255,255,255,0.72)" font-size="10">захват аудио по selected_microphone_id</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="110" y="415" width="300" height="108" rx="16" fill="#0f4c81"/>
+    <text x="260" y="448" text-anchor="middle" fill="white" font-size="16" font-weight="700">VideoAnalysisPlugin</text>
+    <line x1="140" y1="460" x2="380" y2="460" stroke="rgba(255,255,255,0.16)"/>
+    <text x="140" y="484" fill="rgba(255,255,255,0.9)" font-size="11">• лицо, эмоции, взгляд, моторика</text>
+    <text x="140" y="504" fill="rgba(255,255,255,0.62)" font-size="10" font-style="italic">выход: screening_result</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="470" y="415" width="300" height="108" rx="16" fill="#0d9488"/>
+    <text x="620" y="448" text-anchor="middle" fill="white" font-size="16" font-weight="700">VoiceTestPlugin</text>
+    <line x1="500" y1="460" x2="740" y2="460" stroke="rgba(255,255,255,0.16)"/>
+    <text x="500" y="484" fill="rgba(255,255,255,0.9)" font-size="11">• сценарий теста, ASR, проверка, баллы</text>
+    <text x="500" y="504" fill="rgba(255,255,255,0.62)" font-size="10" font-style="italic">выход: test_result</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="1080" y="415" width="320" height="108" rx="16" fill="#0891b2"/>
+    <text x="1240" y="448" text-anchor="middle" fill="white" font-size="16" font-weight="700">VoiceInteractionPlugin</text>
+    <line x1="1110" y1="460" x2="1370" y2="460" stroke="rgba(255,255,255,0.16)"/>
+    <text x="1110" y="484" fill="rgba(255,255,255,0.9)" font-size="11">• ASR, NLU, TTS для диалога</text>
+    <text x="1110" y="504" fill="rgba(255,255,255,0.62)" font-size="10" font-style="italic">используется только в опциональной ИИ-ветке</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="430" y="605" width="560" height="118" rx="18" fill="#b45309"/>
+    <text x="710" y="640" text-anchor="middle" fill="white" font-size="19" font-weight="800">AggregatorPlugin</text>
+    <text x="710" y="662" text-anchor="middle" fill="rgba(255,255,255,0.88)" font-size="12" font-weight="600">центральное ядро сценария и координации</text>
+    <line x1="460" y1="675" x2="960" y2="675" stroke="rgba(255,255,255,0.2)"/>
+    <text x="470" y="698" fill="rgba(255,255,255,0.92)" font-size="11">• собирает результаты обработки, действия UI и историю</text>
+    <text x="470" y="716" fill="rgba(255,255,255,0.92)" font-size="11">• управляет этапами скрининга, отчётом, занятиями и состоянием системы</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="1120" y="605" width="340" height="118" rx="18" fill="#5b21b6" stroke="#7c3aed" stroke-dasharray="8,4"/>
+    <rect x="1235" y="592" width="110" height="20" rx="10" fill="#fef3c7" stroke="#f59e0b"/>
+    <text x="1290" y="606" text-anchor="middle" fill="#92400e" font-size="9" font-weight="700">ОПЦИОНАЛЬНО</text>
+    <text x="1290" y="640" text-anchor="middle" fill="white" font-size="17" font-weight="700">AIAssistantPlugin</text>
+    <text x="1290" y="664" text-anchor="middle" fill="rgba(255,255,255,0.85)" font-size="11">диалог, голосовые команды, внешние интеграции</text>
+    <text x="1290" y="690" text-anchor="middle" fill="rgba(255,255,255,0.62)" font-size="10" font-style="italic">не является обязательной частью основного контура</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="120" y="812" width="270" height="84" rx="16" fill="#c2410c"/>
+    <text x="255" y="845" text-anchor="middle" fill="white" font-size="16" font-weight="700">ReportPlugin</text>
+    <text x="255" y="867" text-anchor="middle" fill="rgba(255,255,255,0.74)" font-size="10">отчёт, аналитика, краткие результаты</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="470" y="812" width="270" height="84" rx="16" fill="#be185d"/>
+    <text x="605" y="845" text-anchor="middle" fill="white" font-size="16" font-weight="700">TrainingPlugin</text>
+    <text x="605" y="867" text-anchor="middle" fill="rgba(255,255,255,0.74)" font-size="10">подбор упражнений и адаптация сложности</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="820" y="812" width="270" height="84" rx="16" fill="#166534"/>
+    <text x="955" y="845" text-anchor="middle" fill="white" font-size="16" font-weight="700">Storage / logs</text>
+    <text x="955" y="867" text-anchor="middle" fill="rgba(255,255,255,0.74)" font-size="10">история сеансов, отчёты, результаты тренировок</text>
+  </g>
+
+  <line x1="332" y1="116" x2="418" y2="116" stroke="#475569" stroke-width="2.4" marker-end="url(#arrow-neutral)"/>
+  <text x="350" y="108" fill="#475569" font-size="10" font-weight="600">действия пользователя</text>
+  <line x1="418" y1="150" x2="334" y2="150" stroke="#475569" stroke-width="2" stroke-dasharray="6,3" marker-end="url(#arrow-neutral)"/>
+  <text x="350" y="167" fill="#475569" font-size="10" font-weight="600">экран и сообщения</text>
+
+  <line x1="700" y1="192" x2="700" y2="243" stroke="#0f766e" stroke-width="2.6" marker-end="url(#arrow-device)"/>
+  <text x="714" y="224" fill="#0f766e" font-size="10" font-weight="600">мастер выбора устройств</text>
+  <line x1="740" y1="243" x2="740" y2="194" stroke="#0f766e" stroke-width="2" stroke-dasharray="6,3" marker-end="url(#arrow-device)"/>
+  <text x="748" y="214" fill="#0f766e" font-size="10" font-weight="600">статус и ошибки</text>
+
+  <line x1="468" y1="293" x2="352" y2="293" stroke="#0f766e" stroke-width="2.4" marker-end="url(#arrow-device)"/>
+  <text x="374" y="284" fill="#0f766e" font-size="10" font-weight="600">selected_camera_id</text>
+  <line x1="938" y1="293" x2="932" y2="293" stroke="#0f766e" stroke-width="2.2" marker-end="url(#arrow-device)"/>
+  <text x="900" y="316" fill="#0f766e" font-size="10" font-weight="600">saved selection</text>
+  <line x1="932" y1="293" x2="1048" y2="293" stroke="#0f766e" stroke-width="2.4" marker-end="url(#arrow-device)"/>
+  <text x="934" y="284" fill="#0f766e" font-size="10" font-weight="600">selected_microphone_id</text>
+
+  <path d="M 700 343 L 700 385 L 820 385 L 820 603" stroke="#0f766e" stroke-width="2" stroke-dasharray="6,3" fill="none" marker-end="url(#arrow-device)"/>
+  <text x="832" y="430" fill="#0f766e" font-size="10" font-weight="600">готовность сеанса</text>
+
+  <line x1="250" y1="331" x2="250" y2="413" stroke="#2563eb" stroke-width="2.6" marker-end="url(#arrow-data)"/>
+  <text x="258" y="375" fill="#2563eb" font-size="10" font-weight="600">video stream</text>
+  <line x1="1110" y1="331" x2="650" y2="413" stroke="#2563eb" stroke-width="2.4" marker-end="url(#arrow-data)"/>
+  <text x="820" y="360" fill="#2563eb" font-size="10" font-weight="600">audio stream</text>
+  <line x1="1175" y1="331" x2="1230" y2="413" stroke="#2563eb" stroke-width="2.4" marker-end="url(#arrow-data)"/>
+
+  <line x1="320" y1="525" x2="510" y2="603" stroke="#2563eb" stroke-width="2.6" marker-end="url(#arrow-data)"/>
+  <text x="360" y="560" fill="#2563eb" font-size="10" font-weight="600">screening_result</text>
+  <line x1="620" y1="525" x2="650" y2="603" stroke="#2563eb" stroke-width="2.6" marker-end="url(#arrow-data)"/>
+  <text x="630" y="560" fill="#2563eb" font-size="10" font-weight="600">test_result</text>
+
+  <path d="M 520 190 L 520 560 L 560 560 L 560 603" stroke="#ea580c" stroke-width="2" stroke-dasharray="6,3" fill="none" marker-end="url(#arrow-control)"/>
+  <text x="406" y="554" fill="#ea580c" font-size="10" font-weight="600">ui.action / confirm / start</text>
+
+  <path d="M 770 603 L 770 560 L 760 560 L 760 469 L 772 469" stroke="#ea580c" stroke-width="2" stroke-dasharray="6,3" fill="none" marker-end="url(#arrow-control)"/>
+  <text x="778" y="546" fill="#ea580c" font-size="10" font-weight="600">start_test</text>
+
+  <path d="M 600 603 L 600 560 L 900 560 L 900 192" stroke="#ea580c" stroke-width="2" stroke-dasharray="6,3" fill="none" marker-end="url(#arrow-control)"/>
+  <text x="915" y="420" fill="#ea580c" font-size="10" font-weight="600">UI commands / results</text>
+
+  <line x1="540" y1="725" x2="310" y2="810" stroke="#ea580c" stroke-width="2.4" marker-end="url(#arrow-control)"/>
+  <text x="356" y="764" fill="#ea580c" font-size="10" font-weight="600">report data</text>
+  <line x1="650" y1="725" x2="605" y2="810" stroke="#ea580c" stroke-width="2.4" marker-end="url(#arrow-control)"/>
+  <text x="614" y="772" fill="#ea580c" font-size="10" font-weight="600">training data</text>
+  <line x1="815" y1="725" x2="920" y2="810" stroke="#16a34a" stroke-width="2.4" marker-end="url(#arrow-storage)"/>
+  <text x="844" y="772" fill="#166534" font-size="10" font-weight="600">write session data</text>
+
+  <path d="M 220 810 L 220 760 L 430 760 L 430 192" stroke="#ea580c" stroke-width="2" stroke-dasharray="6,3" fill="none" marker-end="url(#arrow-control)"/>
+  <text x="256" y="748" fill="#ea580c" font-size="10" font-weight="600">summary to UI</text>
+  <path d="M 560 810 L 560 770 L 460 770 L 460 192" stroke="#be185d" stroke-width="2" stroke-dasharray="6,3" fill="none" marker-end="url(#arrow-control)"/>
+  <text x="468" y="748" fill="#be185d" font-size="10" font-weight="600">training suggestion</text>
+
+  <path d="M 955 810 L 955 765 L 1080 765 L 1080 664 L 992 664" stroke="#16a34a" stroke-width="2" stroke-dasharray="6,3" fill="none" marker-end="url(#arrow-storage)"/>
+  <text x="1090" y="712" fill="#166534" font-size="10" font-weight="600">history / adaptation context</text>
+
+  <line x1="1330" y1="180" x2="1330" y2="603" stroke="#7c3aed" stroke-width="2" stroke-dasharray="8,4" marker-end="url(#arrow-optional)"/>
+  <text x="1342" y="396" fill="#7c3aed" font-size="10" font-weight="600">external commands</text>
+  <line x1="1290" y1="603" x2="1240" y2="525" stroke="#7c3aed" stroke-width="2.4" stroke-dasharray="8,4" marker-end="url(#arrow-optional)"/>
+  <line x1="1240" y1="525" x2="1240" y2="603" stroke="#7c3aed" stroke-width="2" stroke-dasharray="8,4" marker-end="url(#arrow-optional)"/>
+  <text x="1260" y="560" fill="#7c3aed" font-size="10" font-weight="600">intent / tts_text</text>
+  <line x1="1120" y1="664" x2="992" y2="664" stroke="#7c3aed" stroke-width="2.4" stroke-dasharray="8,4" marker-end="url(#arrow-optional)"/>
+  <text x="1012" y="654" fill="#7c3aed" font-size="10" font-weight="600">ai.command</text>
+
+  <g transform="translate(1190, 790)">
+    <rect x="0" y="0" width="290" height="104" rx="12" fill="white" stroke="#e2e8f0" filter="url(#shadow)"/>
+    <text x="145" y="24" text-anchor="middle" fill="#1e293b" font-size="12" font-weight="700">Условные связи</text>
+    <line x1="18" y1="38" x2="272" y2="38" stroke="#e2e8f0"/>
+    <line x1="20" y1="58" x2="58" y2="58" stroke="#2563eb" stroke-width="2.4" marker-end="url(#arrow-data)"/>
+    <text x="70" y="62" fill="#334155" font-size="10">данные и результаты обработки</text>
+    <line x1="20" y1="80" x2="58" y2="80" stroke="#ea580c" stroke-width="2" stroke-dasharray="6,3" marker-end="url(#arrow-control)"/>
+    <text x="70" y="84" fill="#334155" font-size="10">команды и UI-события</text>
+    <line x1="20" y1="100" x2="58" y2="100" stroke="#7c3aed" stroke-width="2" stroke-dasharray="8,4" marker-end="url(#arrow-optional)"/>
+    <text x="70" y="104" fill="#334155" font-size="10">опциональная ИИ-ветка</text>
+  </g>
+</svg>
+
+  <!-- ==================== TABLES SECTION ==================== -->
+  <div class="tables-section">
+
+    <!-- ====== TABLE 1: Module Descriptions ====== -->
+    <h2>Таблица 1. Описание модулей системы и потоков данных</h2>
+    <p class="table-desc">Структурированное описание всех компонентов архитектуры. Перед стартом сеанса система проходит контур инициализации устройств: Device Manager обнаруживает камеры и микрофоны, проверяет сохранённый выбор и открывает централизованный UI-мастер выбора устройств. Модуль голосового взаимодействия (2.1) по-прежнему привязан к ИИ-ассистенту.</p>
+
+    <table>
+      <thead>
+        <tr>
+          <th style="width:14%">Модуль</th>
+          <th style="width:17%">Входные данные</th>
+          <th style="width:30%">Ключевые функции</th>
+          <th style="width:18%">Выходные данные</th>
+          <th style="width:21%">Направление передачи</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="mod-name"><span class="dot dot-cam"></span>Камера</td>
+          <td>Оптический сигнал (лицо, поза, жесты)</td>
+          <td>Захват видеопотока с частотой &ge;25 кадров/с, работа с уже выбранным <code>selected_camera_id</code></td>
+          <td>Непрерывный видеопоток (кадры)</td>
+          <td>Камера &rarr; Модуль видеоанализа</td>
+        </tr>
+        <tr>
+          <td class="mod-name"><span class="dot dot-mic"></span>Микрофон</td>
+          <td>Акустический сигнал (речь, интонация, паузы)</td>
+          <td>Захват аудиосигнала, шумоподавление, работа с уже выбранным <code>selected_microphone_id</code></td>
+          <td>Аудиопоток (PCM / WAV)</td>
+          <td>Микрофон &rarr; Модуль 2.1 / 2.2</td>
+        </tr>
+        <tr style="background:#ecfeff;">
+          <td class="mod-name"><span class="dot dot-device"></span><strong>0. Device Manager / инициализация</strong></td>
+          <td>Список устройств ОС; сохранённый выбор; действия из UI-мастера</td>
+          <td>Перечисление камер и микрофонов &bull; чтение и сохранение выбора &bull; валидация доступности &bull; публикация итоговой конфигурации устройств &bull; возврат статуса и ошибок в UI</td>
+          <td><code>selected_camera_id</code>, <code>selected_microphone_id</code>, статус подготовки сеанса</td>
+          <td>Интерфейс &harr; Device Manager &rarr; Камера / Микрофон; Device Manager &rarr; Агрегатор</td>
+        </tr>
+        <tr>
+          <td class="mod-name"><span class="dot dot-video"></span>1. Модуль видеоанализа</td>
+          <td>Видеопоток с камеры</td>
+          <td>Детекция и трекинг лица &bull; Лицевые ключевые точки &bull; Классификация эмоций &bull; Анализ взгляда &bull; Оценка двигательной активности</td>
+          <td>Вектор невербальных признаков + временные метки (результаты видео скрининга)</td>
+          <td>Видеоанализ &rarr; Агрегатор</td>
+        </tr>
+        <tr>
+          <td class="mod-name"><span class="dot dot-voice"></span>2.1 Модуль голосового взаимодействия</td>
+          <td>Аудиосигнал с микрофона; текст от ИИ-ассистента для озвучивания</td>
+          <td>ASR &bull; NLU &bull; Управление диалогом &bull; TTS</td>
+          <td>Намерения (intent) + текст &rarr; ИИ-ассистент; голосовой ответ &rarr; пользователю</td>
+          <td>Микрофон &rarr; 2.1 &harr; ИИ-ассистент &rarr; Пользователь<br><em>Привязан к ИИ-ассистенту</em></td>
+        </tr>
+        <tr>
+          <td class="mod-name"><span class="dot dot-vtest"></span>2.2 Модуль голосовых тестов</td>
+          <td>Аудиосигнал (ответы); команда от Агрегатора / ИИ-ассистента (тип теста)</td>
+          <td>Управление тестовым сценарием &bull; Распознавание ответов &bull; Анализ корректности &bull; Расчёт баллов и латентности</td>
+          <td>Результаты: баллы, время реакции, классификация</td>
+          <td>Агрегатор / ИИ &harr; 2.2 &larr; Микрофон</td>
+        </tr>
+        <tr style="background:#fffbeb;">
+          <td class="mod-name"><span class="dot dot-ai" style="background:linear-gradient(135deg,#f59e0b,#ef4444)"></span><strong>3a. Агрегатор (ядро)</strong></td>
+          <td>Результаты видеоанализа; результаты тестов; история из логов; действия из интерфейса; команды от ИИ-ассистента</td>
+          <td>
+            <strong>Сбор данных от всех модулей</strong> &bull;
+            Мультимодальное слияние признаков &bull;
+            Оценка когнитивного состояния &bull;
+            Принятие решения о сценарии &bull;
+            Управление логикой тестирования &bull;
+            Команды интерфейсу &bull;
+            Запись логов &bull;
+            Формирование отчётов &bull;
+            Передача данных модулю занятий
+          </td>
+          <td>Команды всем модулям; данные для отчётности; записи в логи; данные скрининга &rarr; модуль занятий</td>
+          <td>&harr; Все модули<br>Центральный узел (hub)<br>Работает автономно</td>
+        </tr>
+        <tr style="background:#eef2ff;">
+          <td class="mod-name"><span class="dot" style="background:#6366f1"></span><strong>3b. ИИ-ассистент</strong> <em style="color:#b45309;font-size:10px;">(отключаемый)</em></td>
+          <td>Намерения от модуля 2.1; голосовые команды пользователя; сторонние команды</td>
+          <td>
+            Диалог с пользователем &bull;
+            Голосовые и сторонние команды &bull;
+            Запуск тестов по команде &bull;
+            Персональные рекомендации
+          </td>
+          <td>Команды &rarr; Агрегатор (старт, запуск тестов); текст &rarr; 2.1 для TTS</td>
+          <td>2.1 &rarr; ИИ-ассистент &rarr; Агрегатор<br>Отдельная ветка, отключаемая</td>
+        </tr>
+        <tr>
+          <td class="mod-name"><span class="dot dot-ui"></span>4. Интерфейс зеркала</td>
+          <td>Команды от Агрегатора; краткие результаты от отчётности; предложения от модуля занятий; статусы и ошибки от Device Manager</td>
+          <td>Единая точка входа для всех экранов и UI-адаптеров &bull; мастер выбора устройств &bull; рендеринг тестов &bull; подсказки &bull; результаты и тренды &bull; кнопки управления &bull; экран занятий</td>
+          <td>Визуальный вывод &rarr; пользователю; UI-события &rarr; Device Manager / Агрегатор</td>
+          <td>Device Manager / Агрегатор / Отчётность / Занятия &rarr; Интерфейс &harr; Пользователь</td>
+        </tr>
+        <tr>
+          <td class="mod-name"><span class="dot dot-report"></span>5. Модуль отчётности</td>
+          <td>Агрегированные результаты сеанса от Агрегатора</td>
+          <td>Формирование отчёта &bull; Вычисление аналитических показателей &bull; Подготовка визуализаций</td>
+          <td>Полный отчёт &rarr; логи; краткие результаты &rarr; интерфейс</td>
+          <td>Агрегатор &rarr; Отчётность &rarr; Логи / Интерфейс</td>
+        </tr>
+        <tr>
+          <td class="mod-name"><span class="dot dot-db"></span>6. Папка хранения логов</td>
+          <td>Отчёты от модуля 5; события от Агрегатора</td>
+          <td>Хранение результатов тестов (.json) &bull; Хранение отчётов (.json/.csv) &bull; История взаимодействия &bull; Лог событий</td>
+          <td>Исторические данные &rarr; Агрегатор (по запросу)</td>
+          <td>Отчётность / Агрегатор &rarr; /logs/ &rarr; Агрегатор</td>
+        </tr>
+        <tr style="background:#fdf2f8;">
+          <td class="mod-name"><span class="dot" style="background:#db2777"></span><strong>7. Модуль занятий</strong></td>
+          <td>Данные скрининга от Агрегатора (результаты видеоанализа + голосовых тестов)</td>
+          <td>Подбор упражнений на основе результатов скрининга &bull; Когнитивные тренировки &bull; Адаптивная сложность</td>
+          <td>Предложение занятий &rarr; интерфейс; результаты тренировок &rarr; логи</td>
+          <td>Агрегатор &rarr; Модуль занятий &rarr; Интерфейс</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <!-- ====== TABLE 2: Connection Matrix ====== -->
+    <h2>Таблица 2. Матрица информационных связей между модулями</h2>
+    <p class="table-desc">Ячейки показывают тип данных, передаваемых от модуля-строки к модулю-столбцу. Для аппаратных устройств таблица дополнительно фиксирует статус доступности и выбранные <code>device_id</code>, публикуемые через контур инициализации. Модуль 2.1 привязан к ИИ-ассистенту.</p>
+
+    <table class="matrix">
+      <thead>
+        <tr>
+          <th>Откуда &darr; / Куда &rarr;</th>
+          <th>0. Иниц.</th>
+          <th>1. Видео</th>
+          <th>2.1 Голос.</th>
+          <th>2.2 Тесты</th>
+          <th>3a. Агрегатор</th>
+          <th>3b. ИИ-асс.</th>
+          <th>4. Интерф.</th>
+          <th>5. Отчётн.</th>
+          <th>6. Логи</th>
+          <th>7. Занятия</th>
+          <th>Пользов.</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="dot dot-cam"></span>Камера</td>
+          <td class="cell-arrow">доступность</td>
+          <td class="cell-arrow">видеопоток</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+        </tr>
+        <tr>
+          <td><span class="dot dot-mic"></span>Микрофон</td>
+          <td class="cell-arrow">доступность</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-arrow">аудиосигнал</td>
+          <td class="cell-arrow">аудиосигнал</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+        </tr>
+        <tr style="background:#ecfeff;">
+          <td><span class="dot dot-device"></span><strong>0. Инициал.</strong></td>
+          <td class="cell-self">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-arrow"><strong>selected_devices</strong></td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-arrow"><strong>мастер / статус</strong></td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+        </tr>
+        <tr>
+          <td><span class="dot dot-video"></span>1. Видеоанализ</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-self">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-arrow"><strong>результаты скрининга</strong></td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+        </tr>
+        <tr>
+          <td><span class="dot dot-voice"></span>2.1 Голосовое</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-self">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-arrow"><strong>намерения</strong></td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-arrow">голос. ответ</td>
+        </tr>
+        <tr>
+          <td><span class="dot dot-vtest"></span>2.2 Тесты</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-self">&mdash;</td>
+          <td class="cell-arrow"><strong>результаты тестов</strong></td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+        </tr>
+        <tr style="background:#fffbeb;">
+          <td><span class="dot" style="background:linear-gradient(135deg,#f59e0b,#ef4444)"></span><strong>3a. Агрегатор</strong></td>
+          <td class="cell-arrow">prepare_session</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-arrow">запуск теста</td>
+          <td class="cell-self">&mdash;</td>
+          <td class="cell-arrow">статус</td>
+          <td class="cell-arrow"><strong>команды UI</strong></td>
+          <td class="cell-arrow"><strong>данные отчёта</strong></td>
+          <td class="cell-arrow"><strong>запись логов</strong></td>
+          <td class="cell-arrow"><strong>данные скрининга</strong></td>
+          <td class="cell-empty">&mdash;</td>
+        </tr>
+        <tr style="background:#eef2ff;">
+          <td><span class="dot" style="background:#6366f1"></span><strong>3b. ИИ-асс.</strong></td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-arrow">текст для TTS</td>
+          <td class="cell-arrow">запуск теста</td>
+          <td class="cell-arrow">команды</td>
+          <td class="cell-self">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+        </tr>
+        <tr>
+          <td><span class="dot dot-ui"></span>4. Интерфейс</td>
+          <td class="cell-arrow">выбор устройств</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-arrow">действия (кнопки)</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-self">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-arrow"><strong>визуал. вывод</strong></td>
+        </tr>
+        <tr>
+          <td><span class="dot dot-report"></span>5. Отчётность</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-arrow">краткие рез.</td>
+          <td class="cell-self">&mdash;</td>
+          <td class="cell-arrow"><strong>полный отчёт</strong></td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+        </tr>
+        <tr>
+          <td><span class="dot dot-db"></span>6. Логи</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-arrow"><strong>история</strong></td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-self">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+        </tr>
+        <tr style="background:#fdf2f8;">
+          <td><span class="dot" style="background:#db2777"></span><strong>7. Занятия</strong></td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-arrow">предлож. занятий</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-arrow">рез. тренировок</td>
+          <td class="cell-self">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+        </tr>
+        <tr>
+          <td><span class="dot dot-user"></span>Пользователь</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-arrow">касания, кнопки</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-empty">&mdash;</td>
+          <td class="cell-self">&mdash;</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <!-- ====== TABLE 3: Closed Loops ====== -->
+    <h2>Таблица 3. Замкнутые циклы обработки данных</h2>
+    <p class="table-desc">Циклы обратной связи. Перед началом тестирования система проходит обязательный контур подготовки сеанса: выбор и проверку устройств. ИИ-ассистент участвует опционально — система работает и без него.</p>
+
+    <table>
+      <thead>
+        <tr>
+          <th style="width:14%">Цикл</th>
+          <th style="width:30%">Последовательность</th>
+          <th style="width:14%">Тип данных</th>
+          <th style="width:10%">Латентность</th>
+          <th style="width:32%">Назначение</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr class="cycle-init">
+          <td class="mod-name" style="color:#0f766e;">Цикл инициализации</td>
+          <td>
+            <code>Пользователь</code> &rarr;
+            <code>Интерфейс (мастер)</code> &rarr;
+            <code>Device Manager</code> &rarr;
+            <code>Камера / Микрофон</code>
+            <br>
+            <code>Device Manager</code> &rarr;
+            <code>Агрегатор</code>
+          </td>
+          <td>Список устройств &rarr; выбор &rarr; <code>selected_device_id</code> &rarr; статус готовности</td>
+          <td>1&ndash;3 с</td>
+          <td>Предсеансовая подготовка. Система перечисляет доступные устройства, подставляет сохранённый выбор, валидирует его и не запускает сенсоры, пока выбор не подтверждён.</td>
+        </tr>
+        <tr class="cycle-interact">
+          <td class="mod-name" style="color:#4f46e5;">Цикл взаимодействия</td>
+          <td>
+            <code>Пользователь</code> &rarr;
+            <code>Интерфейс (кнопки)</code> &rarr;
+            <code>Агрегатор</code> &rarr;
+            <code>Интерфейс (вывод)</code> &rarr;
+            <code>Пользователь</code>
+          </td>
+          <td>Действия пользователя &rarr; команды &rarr; визуальный вывод</td>
+          <td>&lt;&nbsp;500 мс</td>
+          <td>Основной цикл реального времени после успешной инициализации устройств. Агрегатор самостоятельно управляет интерфейсом. ИИ-ассистент не обязателен.</td>
+        </tr>
+        <tr class="cycle-test">
+          <td class="mod-name" style="color:#b45309;">Сеанс скрининга</td>
+          <td>
+            <code>Интерфейс / ИИ (опц.)</code> &rarr;
+            <code>Агрегатор</code> &rarr;
+            <code>Камера / Микрофон</code> &rarr;
+            <code>VideoAnalysis / VoiceTest</code> &rarr;
+            <code>Агрегатор</code> &rarr;
+            <code>Отчётность / Занятия</code> &rarr;
+            <code>Интерфейс</code>
+          </td>
+          <td>UI-события &rarr; команды сценария &rarr; видео/аудио &rarr; результаты обработки &rarr; отчёт/занятия</td>
+          <td>5&ndash;15 мин</td>
+          <td>Основной контур сеанса после успешной инициализации. Агрегатор запускает и координирует обработку, получает результаты модулей, а затем передаёт данные в отчётность и подбор занятий.</td>
+        </tr>
+        <tr class="cycle-report">
+          <td class="mod-name" style="color:#16a34a;">Цикл отчётности</td>
+          <td>
+            <code>Агрегатор</code> &rarr;
+            <code>Модуль отчётности</code> &rarr;
+            <code>Папка логов (/logs/)</code>
+            <br>
+            <code>Модуль отчётности</code> &rarr;
+            <code>Интерфейс зеркала</code> &rarr;
+            <code>Пользователь</code>
+          </td>
+          <td>Агрегированные результаты &rarr; отчёт (.json/.csv) + визуализации</td>
+          <td>2&ndash;5 с</td>
+          <td>Формирование отчётов и сохранение в файловое хранилище. Пользователь видит краткие результаты на экране зеркала.</td>
+        </tr>
+        <tr class="cycle-adapt">
+          <td class="mod-name" style="color:#be185d;">Цикл адаптации</td>
+          <td>
+            <code>Папка логов</code> &rarr;
+            <code>Агрегатор</code> &rarr;
+            <code>Изменение сценария</code> &rarr;
+            <code>Новый тест / режим / занятия</code>
+            <br>&darr; результаты &rarr; <code>/logs/</code> (замыкание)
+          </td>
+          <td>Исторические файлы &rarr; параметры адаптации &rarr; обновлённый сценарий</td>
+          <td>Межсеансовый</td>
+          <td>Перед сеансом Агрегатор читает логи и адаптирует тесты, сложность и набор занятий. Результаты тренировок также влияют на следующий сеанс.</td>
+        </tr>
+      </tbody>
+    </table>
+
+  </div>
+
+</div>
+</body>
+</html>
+

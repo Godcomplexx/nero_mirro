@@ -1,0 +1,15 @@
+AIRI mascot preview asset notice
+
+Source:
+- Repository: https://github.com/moeru-ai/airi
+- File used: packages/stage-ui/src/assets/live2d/models/hiyori/preview.png
+
+Repository license:
+- MIT License
+
+Additional note:
+- This project bundles only the preview image used for the mascot panel.
+- The full Live2D model is not redistributed here.
+- If you plan to ship or redistribute the original Hiyori Live2D model files,
+  review the upstream Project AIRI repository and the original Live2D sample
+  material terms for Hiyori Momose.

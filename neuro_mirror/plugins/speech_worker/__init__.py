@@ -1,0 +1,1 @@
+"""Speech worker plugin package."""
