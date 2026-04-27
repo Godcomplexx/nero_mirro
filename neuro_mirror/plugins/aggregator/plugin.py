@@ -33,12 +33,15 @@ class AggregatorPlugin(ProcessorPlugin):
         self.state = SessionState.IDLE
         self.history_count = 0
         self._latest_results: dict[str, dict[str, Any]] = {}
+        self._pending_capture_mode = ""
 
     def subscribed_topics(self) -> tuple[str, ...]:
         return (
             Topics.SYSTEM_BOOTSTRAP,
             Topics.UI_ACTION,
             Topics.AI_COMMAND,
+            Topics.DEVICE_SELECTION_RESOLVED,
+            Topics.DEVICE_VALIDATION_FAILED,
             Topics.ANALYSIS_RESULT,
             Topics.VOICE_TEST_RESULT,
             Topics.STORAGE_READ_RESULT,
@@ -55,6 +58,14 @@ class AggregatorPlugin(ProcessorPlugin):
 
         if event.topic in {Topics.UI_ACTION, Topics.AI_COMMAND}:
             await self._handle_action(event.payload)
+            return
+
+        if event.topic == Topics.DEVICE_SELECTION_RESOLVED:
+            await self._handle_devices_resolved(event.payload)
+            return
+
+        if event.topic == Topics.DEVICE_VALIDATION_FAILED:
+            await self._handle_device_validation_failed(event.payload)
             return
 
         if event.topic == Topics.ANALYSIS_RESULT:
@@ -119,6 +130,7 @@ class AggregatorPlugin(ProcessorPlugin):
     async def _start_screening(self) -> None:
         self.state = SessionState.SCREENING
         self._latest_results.clear()
+        self._pending_capture_mode = "daily_fast"
 
         await self.bus.publish(
             Event(
@@ -134,22 +146,16 @@ class AggregatorPlugin(ProcessorPlugin):
         )
         await self.bus.publish(
             Event(
-                topic=Topics.START_CAPTURE,
+                topic=Topics.PREPARE_SESSION,
                 source=self.name,
-                payload={"mode": "daily_fast"},
-            )
-        )
-        await self.bus.publish(
-            Event(
-                topic=Topics.START_TEST,
-                source=self.name,
-                payload={"test_id": "speech_baseline"},
+                payload={"mode": "daily_fast", "require_microphone": False},
             )
         )
 
     async def _start_appearance_analysis(self) -> None:
         self.state = SessionState.APPEARANCE
         self._latest_results.clear()
+        self._pending_capture_mode = "appearance_check"
 
         await self.bus.publish(
             Event(
@@ -164,9 +170,58 @@ class AggregatorPlugin(ProcessorPlugin):
         )
         await self.bus.publish(
             Event(
+                topic=Topics.PREPARE_SESSION,
+                source=self.name,
+                payload={"mode": "appearance_check", "require_microphone": False},
+            )
+        )
+
+    async def _handle_devices_resolved(self, payload: dict[str, Any]) -> None:
+        mode = str(payload.get("mode") or self._pending_capture_mode)
+        if not mode:
+            return
+
+        await self.bus.publish(
+            Event(
                 topic=Topics.START_CAPTURE,
                 source=self.name,
-                payload={"mode": "appearance_check"},
+                payload={
+                    "mode": mode,
+                    "selected_devices": payload.get("selected_devices") or {},
+                },
+            )
+        )
+
+        if mode == "daily_fast":
+            await self.bus.publish(
+                Event(
+                    topic=Topics.START_TEST,
+                    source=self.name,
+                    payload={
+                        "test_id": "speech_baseline",
+                        "selected_devices": payload.get("selected_devices") or {},
+                    },
+                )
+            )
+
+        self._pending_capture_mode = ""
+
+    async def _handle_device_validation_failed(self, payload: dict[str, Any]) -> None:
+        self.state = SessionState.IDLE
+        self._pending_capture_mode = ""
+        errors = payload.get("errors") or []
+        message = "Не удалось подготовить устройства."
+        if errors:
+            message = f"{message} {'; '.join(map(str, errors))}"
+        await self.bus.publish(
+            Event(
+                topic=Topics.UI_UPDATE,
+                source=self.name,
+                payload={
+                    "screen": "idle",
+                    "message": message,
+                    "assistant_source": "устройства",
+                },
             )
         )
 

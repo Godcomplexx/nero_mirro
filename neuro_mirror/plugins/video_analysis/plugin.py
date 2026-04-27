@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
-import re
-import time
+import os
+import tempfile
+from pathlib import Path
 from typing import Any
 from urllib import error, request
 
@@ -12,98 +14,147 @@ from neuro_mirror.core.settings import Settings
 from neuro_mirror.core.worker_client import WorkerClient
 from neuro_mirror.interfaces.processor import ProcessorPlugin
 from neuro_mirror.models.events import Event, Topics
+from neuro_mirror.plugins.ai_assistant.appearance_response import AppearanceResponseComposer
+from neuro_mirror.utils.text import is_safe_russian_text, sanitize_vision_description
 
 
 class VisionWorkerPlugin(ProcessorPlugin):
     plugin_name = "video_analysis"
 
-    def __init__(self, bus, *, settings: Settings) -> None:
+    def __init__(
+        self,
+        bus,
+        *,
+        settings: Settings,
+        appearance_composer: AppearanceResponseComposer | None = None,
+    ) -> None:
         super().__init__(bus)
         self.settings = settings
+        self.appearance_composer = appearance_composer
         self.worker = WorkerClient(
             name="vision_worker",
             python_executable=settings.vision_worker_python,
             script_path=settings.vision_worker_script,
             request_timeout_seconds=settings.worker_request_timeout_seconds,
         )
-        self._preview_task: asyncio.Task[None] | None = None
-        self._preview_enabled = False
         self._last_status: dict[str, Any] = {}
-        self._last_preview_status: dict[str, Any] = {}
 
     def subscribed_topics(self) -> tuple[str, ...]:
-        return (Topics.UI_ACTION, Topics.START_CAPTURE)
+        return (Topics.SENSOR_VIDEO_FRAME, Topics.REQ_APPEARANCE_ANALYZE)
 
     async def on_start(self) -> None:
-        self._preview_enabled = False
-        self._preview_task = asyncio.create_task(self._preview_loop(), name="vision-preview-loop")
+        return None
 
     async def on_stop(self) -> None:
-        self._preview_enabled = False
-        if self._preview_task is not None:
-            self._preview_task.cancel()
-            try:
-                await self._preview_task
-            except asyncio.CancelledError:
-                pass
-            self._preview_task = None
         await self.worker.stop()
 
     async def handle_event(self, event: Event) -> None:
-        if event.topic == Topics.UI_ACTION:
-            await self._handle_ui_action(event.payload)
+        if event.topic == Topics.REQ_APPEARANCE_ANALYZE:
+            await self._handle_req_appearance(event)
             return
 
-        if event.topic == Topics.START_CAPTURE:
+        if event.topic == Topics.SENSOR_VIDEO_FRAME:
             await self._handle_capture(event.payload)
 
-    async def _handle_ui_action(self, payload: dict[str, Any]) -> None:
-        action = str(payload.get("action") or "")
-        if action == "start_preview":
-            await self._ensure_worker_started()
-            self._preview_enabled = True
-            await self._publish_status_message("Предпросмотр камеры включён.")
+    # ---- request-reply: appearance analysis for web layer ----
+
+    async def _handle_req_appearance(self, event: Event) -> None:
+        request_id = event.payload.get("_request_id", "")
+        image_path = str(event.payload.get("image_path") or "")
+        if not image_path:
+            await self._send_reply(request_id, {"error": "image_path is empty"})
             return
 
-        if action == "stop_preview":
-            self._preview_enabled = False
+        await self._ensure_worker_started()
+        try:
+            response = await self.worker.request("analyze_image_file", {"image_path": image_path})
+        except Exception as exc:
+            await self._send_reply(request_id, {"error": str(exc)})
+            return
+
+        if not response.ok:
+            await self._send_reply(request_id, {"error": response.error_message})
+            return
+
+        result = dict(response.result, source_backend="vision_worker:web")
+        frame_base64 = str(result.pop("frame_base64", "") or "").strip()
+        if frame_base64:
             try:
-                await self.worker.request("release_camera")
-            except Exception:
-                pass
-            await self.worker.stop()
-            await self.bus.publish(
-                Event(
-                    topic=Topics.UI_UPDATE,
-                    source=self.name,
-                    payload={
-                        "preview_image_base64": "",
-                        "message": "Предпросмотр камеры остановлен.",
-                        "assistant_source": "",
-                        "screen": "idle",
-                    },
+                vision_description = await asyncio.to_thread(
+                    self._call_ollama_vision_sync, frame_base64
                 )
-            )
-            await self._publish_status_snapshot({"worker_available": True, "camera_available": False})
-            return
+                vision_description = sanitize_vision_description(vision_description)
+                if vision_description:
+                    result["appearance_description"] = vision_description
+            except Exception as exc:
+                notes = str(result.get("notes") or "").strip()
+                result["notes"] = f"{notes} Ollama Vision: {exc}".strip()
 
-        if action == "release_camera":
-            self._preview_enabled = False
-            try:
-                await self.worker.request("release_camera")
-            except Exception:
-                pass
-            await self.worker.stop()
-            await self._publish_status_snapshot({"worker_available": False, "camera_available": False})
-            await self._publish_status_message("Backend-камера освобождена и worker остановлен.")
-            return
+        reply_text = ""
+        if self.appearance_composer:
+            reply_text = await self.appearance_composer.compose(result)
+            if not is_safe_russian_text(reply_text):
+                result["appearance_description"] = ""
+                reply_text = self.appearance_composer._build_template(result)
+
+        report_payload = {
+            "report_type": "appearance",
+            "state": "completed",
+            "compliment": reply_text,
+            "observed": result.get("observed") or "",
+            "suggestion": "Можно повторить анализ при другом освещении или под другим углом камеры.",
+            "face_detected": result.get("face_detected"),
+            "face_count": result.get("face_count"),
+            "confidence": result.get("confidence"),
+            "emotion": result.get("emotion") or "",
+            "appearance_description": result.get("appearance_description") or "",
+            "emotiefflib_available": result.get("emotiefflib_available"),
+            "notes": result.get("notes") or "",
+            "source_backend": result.get("source_backend") or "vision_worker:web",
+        }
+
+        await self.bus.publish(Event(topic=Topics.REPORT_DATA, source="web.appearance", payload=report_payload))
+        await self.bus.publish(Event(topic=Topics.STORAGE_WRITE, source="web.appearance", payload=report_payload))
+        await self.bus.publish(
+            Event(
+                topic=Topics.UI_UPDATE,
+                source=self.name,
+                payload={
+                    "screen": "summary",
+                    "message": reply_text,
+                    "assistant_source": "визуальный анализ",
+                    "report": report_payload,
+                },
+            )
+        )
+        await self._send_reply(request_id, {"reply": reply_text, "report": report_payload})
+
+    async def _send_reply(self, request_id: str, payload: dict[str, Any]) -> None:
+        payload["_reply_to"] = request_id
+        await self.bus.publish(
+            Event(topic=Topics.RESP_APPEARANCE_ANALYZE, source=self.name, payload=payload)
+        )
+
+    # ---- original internal logic (SENSOR_VIDEO_FRAME) ----
 
     async def _handle_capture(self, payload: dict[str, Any]) -> None:
         mode = str(payload.get("mode") or "")
+        frame_base64 = str(payload.get("image_base64") or "").strip()
+        if not frame_base64:
+            await self._publish_video_failure(mode, str(payload.get("error") or "Кадр камеры не получен."))
+            return
+
         await self._ensure_worker_started()
+        image_path = self._write_frame_to_temp_file(frame_base64)
+        try:
+            response = await self.worker.request("analyze_image_file", {"image_path": image_path})
+        finally:
+            try:
+                Path(image_path).unlink(missing_ok=True)
+            except Exception:
+                pass
 
         if mode == "appearance_check":
-            response = await self.worker.request("analyze_appearance")
             if response.ok:
                 result = dict(response.result, source_backend="vision_worker")
                 # Call Ollama Vision outside worker lock so preview keeps running
@@ -113,7 +164,7 @@ class VisionWorkerPlugin(ProcessorPlugin):
                         desc = await asyncio.to_thread(
                             self._call_ollama_vision_sync, frame_b64
                         )
-                        desc = self._sanitize_vision_description(desc)
+                        desc = sanitize_vision_description(desc)
                         result["appearance_description"] = desc
                         observed = result.get("observed", "")
                         if desc:
@@ -156,13 +207,20 @@ class VisionWorkerPlugin(ProcessorPlugin):
             await self._publish_error_status(response.error_message)
             return
 
-        response = await self.worker.request("analyze_screening")
         if response.ok:
+            raw = dict(response.result)
             await self.bus.publish(
                 Event(
                     topic=Topics.ANALYSIS_RESULT,
                     source=self.name,
-                    payload=dict(response.result, source_backend="vision_worker"),
+                    payload={
+                        "analysis_type": "screening",
+                        "attention_score": 0.78 if raw.get("face_detected") else 0.42,
+                        "face_detected": bool(raw.get("face_detected", False)),
+                        "face_count": int(raw.get("face_count") or 0),
+                        "notes": raw.get("notes") or "Видео-скрининг использует кадр из CameraPlugin.",
+                        "source_backend": "vision_worker",
+                    },
                 )
             )
             await self._publish_status_snapshot(response.result)
@@ -184,6 +242,43 @@ class VisionWorkerPlugin(ProcessorPlugin):
         )
         await self._publish_error_status(response.error_message)
 
+    async def _publish_video_failure(self, mode: str, message: str) -> None:
+        analysis_type = "appearance" if mode == "appearance_check" else "screening"
+        payload: dict[str, Any]
+        if analysis_type == "appearance":
+            payload = {
+                "analysis_type": "appearance",
+                "face_detected": False,
+                "face_count": 0,
+                "emotiefflib_available": False,
+                "confidence": 0.0,
+                "emotion": "",
+                "appearance_description": "",
+                "observed": "",
+                "notes": message,
+                "source_backend": "camera",
+            }
+        else:
+            payload = {
+                "analysis_type": "screening",
+                "attention_score": 0.25,
+                "face_detected": False,
+                "face_count": 0,
+                "notes": message,
+                "source_backend": "camera",
+            }
+        await self.bus.publish(Event(topic=Topics.ANALYSIS_RESULT, source=self.name, payload=payload))
+        await self._publish_error_status(message)
+
+    @staticmethod
+    def _write_frame_to_temp_file(frame_base64: str) -> str:
+        data = base64.b64decode(frame_base64)
+        fd, temp_path = tempfile.mkstemp(prefix="neuro_mirror_sensor_frame_", suffix=".png")
+        os.close(fd)
+        with open(temp_path, "wb") as output_file:
+            output_file.write(data)
+        return temp_path
+
     async def _ensure_worker_started(self) -> None:
         try:
             await self.worker.start()
@@ -195,72 +290,11 @@ class VisionWorkerPlugin(ProcessorPlugin):
         except Exception as exc:
             await self._publish_error_status(str(exc))
 
-    async def _preview_loop(self) -> None:
-        while True:
-            if not self._preview_enabled:
-                await asyncio.sleep(self.settings.preview_interval_seconds)
-                continue
-
-            try:
-                request_started_at = time.perf_counter()
-                response = await self.worker.request("capture_preview_frame")
-                roundtrip_ms = round((time.perf_counter() - request_started_at) * 1000, 1)
-            except Exception as exc:
-                await self._publish_error_status(str(exc))
-                await asyncio.sleep(self.settings.preview_interval_seconds)
-                continue
-
-            if not response.ok:
-                await self._publish_error_status(response.error_message)
-                await asyncio.sleep(self.settings.preview_interval_seconds)
-                continue
-
-            status_result = {
-                "camera_available": response.result.get("camera_available", False),
-                "worker_available": True,
-                "camera_index": response.result.get("camera_index"),
-                "camera_backend": response.result.get("camera_backend"),
-                "capture_ms": response.result.get("capture_ms"),
-                "encode_ms": response.result.get("encode_ms"),
-                "total_ms": response.result.get("total_ms"),
-                "roundtrip_ms": roundtrip_ms,
-            }
-            emotion_status = self._last_status.get("emotiefflib")
-            if isinstance(emotion_status, dict):
-                status_result["emotiefflib_available"] = bool(emotion_status.get("available", False))
-                status_result["emotiefflib_error"] = str(emotion_status.get("error") or "")
-            if status_result != self._last_preview_status:
-                self._last_preview_status = dict(status_result)
-                await self._publish_status_snapshot(status_result)
-            await self.bus.publish(
-                Event(
-                    topic=Topics.UI_UPDATE,
-                    source=self.name,
-                    payload={
-                        "preview_image_base64": response.result.get("image_base64", ""),
-                    },
-                )
-            )
-            await asyncio.sleep(self.settings.preview_interval_seconds)
-
-    async def _publish_status_message(self, message: str) -> None:
-        await self.bus.publish(
-            Event(
-                topic=Topics.UI_UPDATE,
-                source=self.name,
-                payload={"message": message, "assistant_source": "", "screen": "idle"},
-            )
-        )
-
     async def _publish_error_status(self, error_message: str) -> None:
         status = {
             "vision_worker": {
                 "available": False,
                 "detail": error_message,
-            },
-            "camera": {
-                "available": False,
-                "detail": "Камера недоступна",
             },
             "emotiefflib": {
                 "available": False,
@@ -280,43 +314,10 @@ class VisionWorkerPlugin(ProcessorPlugin):
         )
 
     async def _publish_status_snapshot(self, raw_result: dict[str, Any]) -> None:
-        camera_detail = "Камера активна"
-        camera_available = bool(raw_result.get("camera_available", raw_result.get("face_detected", False)))
-        if not camera_available:
-            attempts = raw_result.get("camera_attempts") or []
-            if attempts:
-                camera_detail = f"Камера не найдена. Проверено: {', '.join(map(str, attempts[:6]))}"
-            else:
-                camera_detail = "Камера недоступна"
-        else:
-            used_backend = raw_result.get("camera_backend")
-            used_index = raw_result.get("camera_index")
-            capture_ms = raw_result.get("capture_ms")
-            encode_ms = raw_result.get("encode_ms")
-            total_ms = raw_result.get("total_ms")
-            roundtrip_ms = raw_result.get("roundtrip_ms")
-            if used_backend not in {None, ''} and used_index is not None:
-                camera_detail = f"Камера активна ({used_backend}:{used_index})"
-                metrics: list[str] = []
-                if capture_ms is not None:
-                    metrics.append(f"capture {capture_ms} мс")
-                if encode_ms is not None:
-                    metrics.append(f"encode {encode_ms} мс")
-                if total_ms is not None:
-                    metrics.append(f"worker {total_ms} мс")
-                if roundtrip_ms is not None:
-                    metrics.append(f"roundtrip {roundtrip_ms} мс")
-                if metrics:
-                    camera_detail = f"{camera_detail}; {'; '.join(metrics)}"
-
         status = {
             "vision_worker": {
                 "available": bool(raw_result.get("worker_available", True)),
                 "detail": "Vision worker активен",
-            },
-            "camera": {
-                "available": camera_available,
-                "detail": camera_detail,
             },
             "emotiefflib": {
                 "available": bool(raw_result.get("emotiefflib_available", False)),
@@ -351,13 +352,19 @@ class VisionWorkerPlugin(ProcessorPlugin):
         payload = {
             "model": model,
             "prompt": (
-                "Опиши внешность человека на фото кратко, 2-3 предложения на русском. "
-                "Укажи примерный возраст, пол, общее впечатление. "
-                "Не ставь диагнозов. Будь дружелюбным и тактичным."
+                "Опиши внешность человека на фото на русском, 4-6 предложений.\n"
+                "Обязательно отметь (если видно):\n"
+                "- Общее впечатление и атмосферу (уверенность, лёгкость, спокойствие)\n"
+                "- Лицо и взгляд\n"
+                "- Волосы — стиль, как уложены, как дополняют образ\n"
+                "- Одежда — стиль, цвета, что подчёркивает\n"
+                "- Аксессуары — очки, украшения, часы и т.д.\n"
+                "Тон: тёплый и доброжелательный, как комплимент от подруги.\n"
+                "Не ставь диагнозов. Не упоминай качество фото или камеру."
             ),
             "images": [image_base64],
             "stream": False,
-            "options": {"temperature": 0.3},
+            "options": {"temperature": 0.35, "num_predict": 300},
         }
         body = json.dumps(payload).encode("utf-8")
         req = request.Request(
@@ -381,62 +388,5 @@ class VisionWorkerPlugin(ProcessorPlugin):
             raise RuntimeError(f"Ollama: {parsed['error']}")
         return str(parsed.get("response", "")).strip()
 
-    @staticmethod
-    def _sanitize_vision_description(text: str) -> str:
-        cleaned = " ".join(str(text or "").strip().split())
-        if not cleaned:
-            return ""
-
-        lowered = cleaned.lower()
-        blocked_markers = (
-            "i am a large language model",
-            "cannot generate images",
-            "не могу генерировать изображения",
-            "disclaimer:",
-        )
-        if any(marker in lowered for marker in blocked_markers):
-            return ""
-
-        if len(cleaned) < 18:
-            return ""
-
-        if not VisionWorkerPlugin._is_safe_russian_text(cleaned):
-            return ""
-
-        return cleaned
-
-    @staticmethod
-    def _is_safe_russian_text(
-        text: str,
-        *,
-        min_cyrillic_ratio: float = 0.82,
-        max_foreign_tokens: int = 2,
-    ) -> bool:
-        cleaned = " ".join(str(text or "").split()).strip()
-        if not cleaned:
-            return False
-
-        letters = [ch for ch in cleaned if ch.isalpha()]
-        if not letters:
-            return False
-
-        cyrillic_letters = sum(1 for ch in letters if "\u0400" <= ch <= "\u04ff")
-        if cyrillic_letters / len(letters) < min_cyrillic_ratio:
-            return False
-
-        foreign_tokens = 0
-        for token in re.findall(r"[\w'-]+", cleaned, flags=re.UNICODE):
-            token_letters = [ch for ch in token if ch.isalpha()]
-            if len(token_letters) < 2:
-                continue
-
-            has_cyrillic = any("\u0400" <= ch <= "\u04ff" for ch in token_letters)
-            has_foreign = any(not ("\u0400" <= ch <= "\u04ff") for ch in token_letters)
-            if has_cyrillic and has_foreign:
-                return False
-            if has_foreign:
-                foreign_tokens += 1
-                if foreign_tokens > max_foreign_tokens:
-                    return False
-
-        return True
+    # _sanitize_vision_description and _is_safe_russian_text
+    # are now in neuro_mirror.utils.text (shared module)

@@ -4,12 +4,14 @@ import asyncio
 import json
 import re
 from dataclasses import dataclass
+from datetime import datetime
 from html.parser import HTMLParser
 from typing import Protocol
 from urllib import error, parse, request
 
 from neuro_mirror.core.gpu_scheduler import exclusive_gpu_task_sync
 from neuro_mirror.core.settings import Settings
+from neuro_mirror.plugins.ai_assistant.rules import load_assistant_rules
 
 
 @dataclass(slots=True)
@@ -51,7 +53,7 @@ class RuleBasedAssistantBackend:
         reply = (
             "Запускаю скрининг."
             if command == "start_screening"
-            else "Подходящая команда не найдена."
+            else "Не могу надёжно ответить на этот вопрос без локальной модели. Повторите его или уточните формулировку."
         )
         return AssistantDecision(command=command, reply=reply, backend_name=self.name)
 
@@ -71,6 +73,7 @@ class OllamaAssistantBackend:
         currency_base_url: str = "https://api.frankfurter.dev",
         internet_fallback_enabled: bool = True,
         internet_fallback_base_url: str = "https://api.duckduckgo.com",
+        assistant_rules: str = "",
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.model = model
@@ -83,6 +86,7 @@ class OllamaAssistantBackend:
         self.currency_base_url = currency_base_url.rstrip("/")
         self.internet_fallback_enabled = internet_fallback_enabled
         self.internet_fallback_base_url = internet_fallback_base_url.rstrip("/")
+        self.assistant_rules = assistant_rules.strip() or load_assistant_rules()
         self.name = f"ollama:{model}"
         self._resolved_model_cache: str = ""
 
@@ -145,6 +149,13 @@ class OllamaAssistantBackend:
                     reply=f"Не удалось получить курс валют: {exc}",
                     backend_name="интернет:валюта",
                 )
+
+        if detect_current_date_request(utterance):
+            return AssistantDecision(
+                command=None,
+                reply=build_current_date_reply(),
+                backend_name=self.name,
+            )
 
         if self.internet_fallback_enabled and should_prefer_internet_answer(utterance):
             internet_answer = await self._try_answer_from_internet(resolved_model, utterance)
@@ -219,31 +230,32 @@ class OllamaAssistantBackend:
             backend_name="интернет:поиск",
         )
 
+    def _rules_block(self) -> str:
+        return f"Общие правила поведения ассистента:\n{self.assistant_rules}\n\n"
+
     def _build_prompt(self, utterance: str) -> str:
-        return (
+        return self._rules_block() + (
             "Ты строгий классификатор интентов для приложения Нейро-зеркало.\n"
-            "Это не чат и не медицинская консультация.\n"
             "Твоя задача: сопоставить реплику пользователя с одной командой приложения.\n"
             "Доступные команды:\n"
             '- "start_screening" если пользователь хочет начать скрининг, проверку, тест или оценку.\n'
             '- "analyze_appearance" если пользователь просит посмотреть на него через камеру и оценить внешний вид.\n'
             '- "camera_vision_query" если пользователь просит описать что видно на камере, или спрашивает что перед ним/в кадре.\n'
             '- "none" если это не команда приложения.\n'
+            "Для обычного вопроса всегда выбирай command=none.\n"
             "Ответь только JSON по схеме:\n"
             '{"command":"start_screening|analyze_appearance|camera_vision_query|none","reply":"короткий нейтральный текст для UI"}\n'
             "Примеры:\n"
             'Пользователь: "Начать когнитивный скрининг" -> {"command":"start_screening","reply":"Запускаю скрининг."}\n'
             'Пользователь: "Как я сегодня выгляжу?" -> {"command":"analyze_appearance","reply":"Сейчас посмотрю в камеру и дам короткий комментарий."}\n'
             'Пользователь: "Что ты видишь на камере?" -> {"command":"camera_vision_query","reply":"Сейчас посмотрю на камеру и расскажу что вижу."}\n'
-            'Пользователь: "Какая сегодня погода?" -> {"command":"none","reply":"Подходящая команда не найдена."}\n'
+            'Пользователь: "Какая сегодня погода?" -> {"command":"none","reply":"Это обычный вопрос, не команда приложения."}\n'
             f'Пользователь: "{utterance}"'
         )
 
     def _build_general_prompt(self, utterance: str) -> str:
-        return (
-            "Ты локальный ассистент приложения Нейро-зеркало.\n"
-            "Отвечай кратко и ясно на том же языке, что и пользователь.\n"
-            "Держи ответ в пределах 1-3 коротких предложений.\n"
+        return self._rules_block() + (
+            "Ответь на обычный вопрос пользователя как помощник приложения Нейро-зеркало.\n"
             "Если вопрос неясен, похож на ошибку распознавания речи или тебе не хватает контекста,\n"
             "ответь только: 'Не могу надёжно ответить на этот вопрос. Повторите его или уточните формулировку.'.\n"
             "ВАЖНО: если вопрос требует актуальных данных (новости, цены, события, "
@@ -254,8 +266,7 @@ class OllamaAssistantBackend:
         )
 
     def _build_combined_prompt(self, utterance: str) -> str:
-        return (
-            "Ты ассистент приложения Нейро-зеркало.\n"
+        return self._rules_block() + (
             "Сначала определи, является ли реплика командой приложения.\n"
             "Команды: start_screening (скрининг/тест/проверка), "
             "analyze_appearance (оценить внешний вид), "
@@ -263,6 +274,7 @@ class OllamaAssistantBackend:
             "Если это команда — верни JSON: "
             '{"command":"<команда>","reply":"<короткий текст>"}\n'
             "Если это НЕ команда — ответь как ассистент кратко (1-3 предложения) на языке пользователя. "
+            "Не предлагай список команд приложения в ответ на обычный вопрос. "
             "Верни JSON: "
             '{"command":"none","reply":"<твой ответ>"}\n'
             "ВАЖНО: если вопрос требует актуальных данных, начни reply со слов "
@@ -418,6 +430,7 @@ class OllamaAssistantBackend:
             self._resolved_model_cache = resolved_vision
 
         prompt_en = (
+            f"{self._rules_block()}"
             "You are a helpful assistant. "
             "You are given a camera frame and the user's question. "
             "Answer the question using only what is visible in the image. "
@@ -484,18 +497,24 @@ class OllamaAssistantBackend:
 
         prompts = [
             (
+                self._rules_block()
+                + (
                 "Переведи текст ниже на русский язык. "
                 "Сохрани смысл и тон. Ответь только переводом на русском языке, без пояснений и без английских фраз.\n"
                 f"Контекст: пользователь спросил «{utterance}» и получил ответ по кадру с камеры.\n\n"
                 f"{en_response}"
+                )
             ),
             (
+                self._rules_block()
+                + (
                 "Ниже дано английское описание кадра с камеры. "
                 "Сформулируй короткий ответ пользователю полностью на русском языке. "
                 "Не оставляй английские слова, если есть русский эквивалент. "
                 "Ответь 1-3 короткими предложениями.\n"
                 f"Вопрос пользователя: {utterance}\n"
                 f"Английское описание: {en_response}"
+                )
             ),
         ]
 
@@ -695,9 +714,9 @@ class OllamaAssistantBackend:
             snippet = item.get("snippet", "")
             context_parts.append(f"{i}. {title}\n{snippet}")
         context_text = "\n\n".join(context_parts)
+        current_date = _format_russian_absolute_date(datetime.now())
 
-        prompt = (
-            "Ты ассистент приложения Нейро-зеркало.\n"
+        prompt = self._rules_block() + (
             "Ниже приведены результаты интернет-поиска. "
             "Используй их, чтобы дать точный и краткий ответ на вопрос пользователя.\n"
             "Отвечай на том же языке, что и пользователь. "
@@ -706,6 +725,11 @@ class OllamaAssistantBackend:
             f"Результаты поиска:\n{context_text}\n\n"
             f'Вопрос пользователя: "{utterance}"'
         )
+        prompt += (
+            f"\n\nCurrent date: {current_date}. "
+            'If search results mention other dates, do not refer to them as "today".'
+        )
+
         payload = {
             "model": resolved_model,
             "prompt": prompt,
@@ -856,8 +880,9 @@ class _DuckDuckGoHTMLParser(HTMLParser):
             self._current["snippet"] = self._current.get("snippet", "") + data
 
 
-def build_assistant_backend(settings: Settings) -> AssistantBackend:
+def build_assistant_backend(settings: Settings, *, assistant_rules: str = "") -> AssistantBackend:
     if settings.ai_backend == "ollama":
+        effective_rules = assistant_rules or load_assistant_rules(settings.assistant_rules_path)
         return OllamaAssistantBackend(
             base_url=settings.ollama_base_url,
             model=settings.ollama_model,
@@ -870,6 +895,7 @@ def build_assistant_backend(settings: Settings) -> AssistantBackend:
             currency_base_url=settings.currency_base_url,
             internet_fallback_enabled=settings.internet_fallback_enabled,
             internet_fallback_base_url=settings.internet_fallback_base_url,
+            assistant_rules=effective_rules,
         )
     return RuleBasedAssistantBackend()
 
@@ -1096,7 +1122,6 @@ def extract_currency_pair(utterance: str) -> tuple[str, str]:
 
 def should_use_internet_fallback(utterance: str, local_reply: str) -> bool:
     lowered_reply = local_reply.lower()
-    lowered_utterance = utterance.lower().strip()
 
     no_access_markers = (
         "не имею доступа",
@@ -1105,6 +1130,10 @@ def should_use_internet_fallback(utterance: str, local_reply: str) -> bool:
         "не знаю",
         "не могу проверить",
         "нужен интернет",
+        "не понимаю ваш запрос",
+        "используйте команды",
+        "команды приложения",
+        "подходящая команда не найдена",
         "do not have access",
         "don't have access",
         "cannot access",
@@ -1113,25 +1142,7 @@ def should_use_internet_fallback(utterance: str, local_reply: str) -> bool:
     if any(marker in lowered_reply for marker in no_access_markers):
         return True
 
-    time_sensitive_markers = (
-        "сейчас",
-        "сегодня",
-        "последн",
-        "актуал",
-        "курс",
-        "цена",
-        "новост",
-        "rate",
-        "price",
-        "current",
-        "latest",
-        "today",
-        "news",
-    )
-    if any(marker in lowered_utterance for marker in time_sensitive_markers):
-        return True
-
-    return False
+    return is_time_sensitive_request(utterance)
 
 
 def should_prefer_internet_answer(utterance: str) -> bool:
@@ -1140,7 +1151,9 @@ def should_prefer_internet_answer(utterance: str) -> bool:
         return False
     if is_local_only_request(lowered):
         return False
-    return True
+    if detect_current_date_request(lowered):
+        return False
+    return is_time_sensitive_request(lowered)
 
 
 def is_local_only_request(utterance: str) -> bool:
@@ -1189,6 +1202,92 @@ def is_local_only_request(utterance: str) -> bool:
     return any(marker in lowered for marker in processing_markers)
 
 
+def detect_current_date_request(utterance: str) -> bool:
+    lowered = _normalized_text(utterance)
+    markers = (
+        "какое сегодня число",
+        "какое сегодня число и день недели",
+        "какой сегодня день",
+        "какой сегодня день недели",
+        "какая сегодня дата",
+        "what date is today",
+        "what day is it today",
+        "what day is today",
+        "today's date",
+    )
+    return any(marker in lowered for marker in markers)
+
+
+def is_time_sensitive_request(utterance: str) -> bool:
+    lowered = _normalized_text(utterance)
+    if not lowered:
+        return False
+
+    markers = (
+        "сейчас",
+        "сегодня",
+        "последн",
+        "актуал",
+        "курс",
+        "цена",
+        "новост",
+        "погод",
+        "температ",
+        "дожд",
+        "снег",
+        "current",
+        "latest",
+        "today",
+        "news",
+        "weather",
+        "forecast",
+        "temperature",
+        "price",
+        "rate",
+        "президент",
+        "премьер",
+        "глава государства",
+        "president",
+        "prime minister",
+        "head of state",
+    )
+    return any(marker in lowered for marker in markers)
+
+
+def build_current_date_reply(now: datetime | None = None) -> str:
+    current = now or datetime.now()
+    weekdays = (
+        "понедельник",
+        "вторник",
+        "среда",
+        "четверг",
+        "пятница",
+        "суббота",
+        "воскресенье",
+    )
+    weekday = weekdays[current.weekday()]
+    formatted_date = _format_russian_absolute_date(current)
+    return f"Сегодня {formatted_date}, {weekday}."
+
+
+def _format_russian_absolute_date(value: datetime) -> str:
+    months = (
+        "января",
+        "февраля",
+        "марта",
+        "апреля",
+        "мая",
+        "июня",
+        "июля",
+        "августа",
+        "сентября",
+        "октября",
+        "ноября",
+        "декабря",
+    )
+    return f"{value.day} {months[value.month - 1]} {value.year} года"
+
+
 def source_label_for_backend(backend_name: str) -> str:
     lowered = backend_name.lower()
     if lowered.startswith("ollama:"):
@@ -1223,7 +1322,7 @@ def normalize_user_utterance(utterance: str) -> str:
     if cleaned[-1] in "?!.":
         trailing_punctuation = cleaned[-1]
 
-    normalized = _normalized_text(cleaned)
+    normalized = _normalized_text(cleaned).replace("…", " ")
     replacements = (
         (r"\bчто\s+у\s+меня\s+в\s+рук\w*\b", "что у меня в руках"),
         (r"\bчто\s+это\s+у\s+меня\s+в\s+рук\w*\b", "что это у меня в руках"),
@@ -1237,11 +1336,17 @@ def normalize_user_utterance(utterance: str) -> str:
         (r"\bкак\s+я\s+сегодня\s+выгл\w*\b", "как я сегодня выгляжу"),
         (r"\bнач(ать|ни)\s+скринин\w*\b", "начать скрининг"),
         (r"\bскрини\w*\b", "скрининг"),
+        (r"\b(?:юсей|юэсэй|юэсей|ю\s*эс\s*эй|usa|u\.s\.a\.|u\.s\.|сша)\b", "сша"),
+        (r"\bюрсц[иы]\b", "сша"),
+        (r"\bсоедин[её]нн\w+\s+штат\w+\b", "сша"),
     )
     for pattern, replacement in replacements:
         normalized = re.sub(pattern, replacement, normalized, flags=re.IGNORECASE)
 
     normalized = re.sub(r"^(?:ну|а|и|слушай|смотри|ээ+|эм+)\s+", "", normalized).strip()
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    if re.fullmatch(r"(?:кто\s+|последн\w+\s+)?президент\s+сша[.!?]?", normalized):
+        normalized = "кто сейчас президент сша"
     if not normalized:
         return ""
 
@@ -1266,6 +1371,10 @@ def _sanitize_assistant_reply(reply: str) -> str:
         "provided search results",
         "предоставленные результаты поиска",
         "не понимаю, что вы имеете в виду",
+        "не понимаю ваш запрос",
+        "используйте команды",
+        "команды приложения",
+        "подходящая команда не найдена",
         "без контекста",
         "пожалуйста, предоставьте изображение",
     )
@@ -1305,6 +1414,10 @@ def _is_unsuccessful_assistant_reply(reply: str) -> bool:
         "не удалось получить надёжный ответ",
         "не имею доступа к актуальным данным",
         "не могу проверить",
+        "не понимаю ваш запрос",
+        "используйте команды",
+        "команды приложения",
+        "подходящая команда не найдена",
     )
     return any(marker in lowered for marker in bad_markers)
 

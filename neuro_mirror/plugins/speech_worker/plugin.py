@@ -1,19 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-import os
-import tempfile
-import threading
-import wave
 from pathlib import Path
 from typing import Any
-
-import numpy as np
-
-try:
-    import sounddevice as sd  # type: ignore
-except Exception:
-    sd = None
 
 from neuro_mirror.core.settings import Settings
 from neuro_mirror.core.gpu_scheduler import exclusive_gpu_task
@@ -21,81 +10,6 @@ from neuro_mirror.core.worker_client import WorkerClient
 from neuro_mirror.interfaces.processor import ProcessorPlugin
 from neuro_mirror.models.events import Event, Topics
 from neuro_mirror.plugins.ai_assistant.backends import normalize_user_utterance
-
-
-class VoiceRecorder:
-    def __init__(self, *, sample_rate: int, channels: int, max_seconds: float) -> None:
-        self.sample_rate = sample_rate
-        self.channels = channels
-        self.max_seconds = max_seconds
-        self._stream = None
-        self._wave_file: wave.Wave_write | None = None
-        self._file_path = ""
-        self._lock = threading.Lock()
-        self._captured_frames = 0
-
-    @property
-    def available(self) -> bool:
-        return sd is not None
-
-    @property
-    def recording(self) -> bool:
-        return self._stream is not None
-
-    def start(self) -> str:
-        if sd is None:
-            raise RuntimeError("sounddevice не установлен")
-        if self._stream is not None:
-            raise RuntimeError("запись уже выполняется")
-
-        fd, file_path = tempfile.mkstemp(prefix="neuro_mirror_", suffix=".wav")
-        os.close(fd)
-        self._file_path = file_path
-        self._captured_frames = 0
-
-        wave_file = wave.open(file_path, "wb")
-        wave_file.setnchannels(self.channels)
-        wave_file.setsampwidth(2)
-        wave_file.setframerate(self.sample_rate)
-        self._wave_file = wave_file
-        max_frames = int(self.sample_rate * self.max_seconds)
-
-        def callback(indata, frames, _time, status) -> None:
-            if status:
-                return
-            pcm = (np.clip(indata, -1.0, 1.0) * 32767).astype(np.int16).tobytes()
-            with self._lock:
-                if self._wave_file is not None:
-                    self._wave_file.writeframes(pcm)
-                    self._captured_frames += frames
-                if self._captured_frames >= max_frames:
-                    raise sd.CallbackStop()
-
-        self._stream = sd.InputStream(
-            samplerate=self.sample_rate,
-            channels=self.channels,
-            dtype="float32",
-            callback=callback,
-        )
-        self._stream.start()
-        return file_path
-
-    def stop(self) -> str:
-        if self._stream is None:
-            return ""
-
-        self._stream.stop()
-        self._stream.close()
-        self._stream = None
-
-        with self._lock:
-            if self._wave_file is not None:
-                self._wave_file.close()
-                self._wave_file = None
-
-        file_path = self._file_path
-        self._file_path = ""
-        return file_path
 
 
 class SpeechWorkerPlugin(ProcessorPlugin):
@@ -110,17 +24,11 @@ class SpeechWorkerPlugin(ProcessorPlugin):
             script_path=settings.speech_worker_script,
             request_timeout_seconds=settings.worker_request_timeout_seconds,
         )
-        self.recorder = VoiceRecorder(
-            sample_rate=settings.voice_sample_rate,
-            channels=settings.voice_channels,
-            max_seconds=settings.voice_max_record_seconds,
-        )
-        self._recording_path = ""
         self._last_status: dict[str, Any] = {}
         self._warmup_task: asyncio.Task[None] | None = None
 
     def subscribed_topics(self) -> tuple[str, ...]:
-        return (Topics.UI_ACTION,)
+        return (Topics.SENSOR_AUDIO_CHUNK, Topics.REQ_SPEECH_TRANSCRIBE)
 
     async def on_start(self) -> None:
         await self._ensure_worker_started()
@@ -128,8 +36,6 @@ class SpeechWorkerPlugin(ProcessorPlugin):
         self._warmup_task = asyncio.create_task(self._warmup_model(), name="speech-worker-warmup")
 
     async def on_stop(self) -> None:
-        if self.recorder.recording:
-            self.recorder.stop()
         if self._warmup_task is not None:
             self._warmup_task.cancel()
             try:
@@ -140,12 +46,116 @@ class SpeechWorkerPlugin(ProcessorPlugin):
         await self.worker.stop()
 
     async def handle_event(self, event: Event) -> None:
-        action = str(event.payload.get("action") or "")
-        if action == "start_voice_capture":
-            await self._start_voice_capture()
+        if event.topic == Topics.REQ_SPEECH_TRANSCRIBE:
+            await self._handle_req_transcribe(event)
             return
-        if action == "stop_voice_capture":
-            await self._stop_voice_capture()
+
+        audio_path = str(event.payload.get("audio_path") or "")
+        if audio_path:
+            await self._transcribe_audio_path(audio_path)
+
+    # ---- request-reply: transcription for web layer ----
+
+    async def _handle_req_transcribe(self, event: Event) -> None:
+        request_id = event.payload.get("_request_id", "")
+        audio_path = str(event.payload.get("audio_path") or "")
+        if not audio_path:
+            await self._send_reply(request_id, {"accepted": False, "transcript": "", "message": "audio_path is empty"})
+            return
+
+        transcribe_timeout = max(self.settings.worker_request_timeout_seconds, 120.0)
+        stt_payload = self._build_stt_payload(audio_path)
+
+        try:
+            if self.settings.stt_device == "cpu":
+                response = await asyncio.wait_for(
+                    self.worker.request("transcribe_audio_file", stt_payload, timeout=transcribe_timeout),
+                    timeout=transcribe_timeout + 5,
+                )
+            else:
+                async with exclusive_gpu_task("stt"):
+                    response = await asyncio.wait_for(
+                        self.worker.request("transcribe_audio_file", stt_payload, timeout=transcribe_timeout),
+                        timeout=transcribe_timeout + 5,
+                    )
+        except (TimeoutError, asyncio.TimeoutError):
+            message = "Распознавание заняло слишком долго. Модель ещё загружается — попробуйте через 30 секунд."
+            await self._publish_ui_message(message, transcript_text="")
+            await self._send_reply(request_id, {"accepted": False, "transcript": "", "message": message})
+            return
+        except Exception as exc:
+            message = f"Ошибка распознавания речи: {exc}"
+            await self._publish_ui_message(message, transcript_text="")
+            await self._send_reply(request_id, {"accepted": False, "transcript": "", "message": message})
+            return
+
+        if not response.ok:
+            message = f"Ошибка распознавания речи: {response.error_message}"
+            await self._publish_ui_message(message, transcript_text="")
+            await self._send_reply(request_id, {"accepted": False, "transcript": "", "message": message})
+            return
+
+        result = response.result
+        raw_transcript = str(result.get("transcript") or "").strip()
+
+        if not raw_transcript:
+            message = str(result.get("notes") or "Речь не распознана.")
+            await self._publish_ui_message(message, transcript_text="")
+            await self._send_reply(request_id, {"accepted": False, "transcript": "", "message": message})
+            return
+
+        transcript = normalize_user_utterance(raw_transcript) or raw_transcript
+
+        if self._is_low_confidence_transcript(
+            raw_transcript,
+            confidence_score=result.get("confidence_score"),
+            average_logprob=result.get("average_logprob"),
+            max_no_speech_prob=result.get("max_no_speech_prob"),
+        ):
+            message = "Ещё раз сформулируйте вопрос: речь распознана неуверенно."
+            await self._publish_ui_message(message, transcript_text=transcript)
+            await self._send_reply(request_id, {
+                "accepted": False,
+                "transcript": transcript,
+                "raw_transcript": raw_transcript,
+                "message": message,
+            })
+            return
+
+        await self._publish_ui_message(
+            f"Распознан текст: {transcript}",
+            transcript_text=transcript,
+        )
+        await self._send_reply(request_id, {
+            "accepted": True,
+            "transcript": transcript,
+            "raw_transcript": raw_transcript,
+            "notes": str(result.get("notes") or ""),
+            "stt_device": str(result.get("device") or ""),
+            "stt_model": str(result.get("model_name") or self.settings.stt_model_name),
+            "stt_compute_type": str(result.get("compute_type") or ""),
+        })
+
+    async def _send_reply(self, request_id: str, payload: dict[str, Any]) -> None:
+        payload["_reply_to"] = request_id
+        await self.bus.publish(
+            Event(topic=Topics.RESP_SPEECH_TRANSCRIBE, source=self.name, payload=payload)
+        )
+
+    async def _publish_ui_message(
+        self,
+        message: str,
+        *,
+        transcript_text: str | None = None,
+    ) -> None:
+        ui_payload: dict[str, Any] = {"screen": "assistant", "message": message}
+        if transcript_text is not None:
+            ui_payload["transcript_text"] = transcript_text
+        await self.bus.publish(
+            Event(topic=Topics.UI_UPDATE, source=self.name, payload=ui_payload)
+        )
+
+    # ---- original internal logic (SENSOR_AUDIO_CHUNK) ----
 
     async def _ensure_worker_started(self) -> None:
         try:
@@ -154,51 +164,8 @@ class SpeechWorkerPlugin(ProcessorPlugin):
         except Exception:
             pass
 
-    async def _start_voice_capture(self) -> None:
-        if not self.recorder.available:
-            await self._publish_status_snapshot(message="Микрофонный ввод недоступен: sounddevice не установлен.")
-            return
-
-        if self.recorder.recording:
-            await self._publish_status_snapshot(message="Запись уже выполняется.")
-            return
-
-        try:
-            self._recording_path = self.recorder.start()
-        except Exception as exc:
-            await self._publish_status_snapshot(message=f"Не удалось начать запись: {exc}")
-            return
-
-        await self.bus.publish(
-            Event(
-                topic=Topics.UI_UPDATE,
-                source=self.name,
-                payload={
-                    "recording_active": True,
-                    "message": "Идёт запись. Нажмите ещё раз, чтобы остановить.",
-                },
-            )
-        )
-        await self._publish_status_snapshot()
-
-    async def _stop_voice_capture(self) -> None:
-        if not self.recorder.recording:
-            await self._publish_status_snapshot(message="Запись не запущена.")
-            return
-
-        audio_path = self.recorder.stop()
-        await self.bus.publish(
-            Event(
-                topic=Topics.UI_UPDATE,
-                source=self.name,
-                payload={
-                    "recording_active": False,
-                    "message": "Распознаю голосовую реплику.",
-                },
-            )
-        )
-
-        payload = {
+    def _build_stt_payload(self, audio_path: str) -> dict[str, Any]:
+        return {
             "audio_path": audio_path,
             "model_name": self.settings.stt_model_name,
             "language": self.settings.stt_language,
@@ -209,6 +176,9 @@ class SpeechWorkerPlugin(ProcessorPlugin):
             "vad_filter": self.settings.stt_vad_filter,
             "hotwords": self.settings.stt_hotwords,
         }
+
+    async def _transcribe_audio_path(self, audio_path: str) -> None:
+        payload = self._build_stt_payload(audio_path)
         try:
             if self.settings.stt_device == "cpu":
                 response = await self.worker.request("transcribe_audio_file", payload)
@@ -324,10 +294,6 @@ class SpeechWorkerPlugin(ProcessorPlugin):
                 "available": speech_worker_available,
                 "detail": "Speech worker активен" if speech_worker_available else "Speech worker недоступен",
             },
-            "microphone": {
-                "available": self.recorder.available,
-                "detail": "Микрофонный ввод доступен" if self.recorder.available else "Микрофонный ввод недоступен",
-            },
             "stt": {
                 "available": stt_available,
                 "detail": f"STT ({self.settings.stt_model_name}, {self.settings.stt_compute_type}) доступен"
@@ -338,7 +304,6 @@ class SpeechWorkerPlugin(ProcessorPlugin):
         self._last_status = status
         payload: dict[str, Any] = {
             "worker_statuses": status,
-            "recording_active": self.recorder.recording,
         }
         if message:
             payload["message"] = message

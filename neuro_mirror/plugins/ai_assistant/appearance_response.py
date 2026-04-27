@@ -9,6 +9,7 @@ from typing import Any
 from urllib import error, request
 
 from neuro_mirror.core.gpu_scheduler import exclusive_gpu_task_sync
+from neuro_mirror.plugins.ai_assistant.rules import load_assistant_rules
 
 _log = logging.getLogger("neuro_mirror.appearance_response")
 
@@ -21,6 +22,11 @@ class AppearanceResponseComposer:
     ollama_model: str
     ollama_vision_model: str
     timeout_seconds: float
+    assistant_rules: str = ""
+
+    def _rules_block(self) -> str:
+        rules = self.assistant_rules.strip() or load_assistant_rules()
+        return f"Общие правила поведения ассистента:\n{rules}\n\n"
 
     async def compose(self, analysis: dict[str, Any]) -> str:
         # --- Step 1: try to get a rich visual description via Ollama Vision ---
@@ -53,8 +59,7 @@ class AppearanceResponseComposer:
         if not analysis.get("face_detected"):
             return (
                 "Я не смог уверенно рассмотреть лицо на кадре. "
-                "Попробуйте сесть чуть ближе к камере или добавить света, и я дам более точное описание. "
-                "Это не медицинская оценка."
+                "Попробуй сесть чуть ближе к камере или добавить света, и я дам более точное описание."
             )
 
         emotion = str(analysis.get("emotion") or "").strip().lower()
@@ -63,18 +68,48 @@ class AppearanceResponseComposer:
             str(analysis.get("appearance_description") or "").strip()
         )
 
+        # --- Emotion → opening line with vibe + atmosphere ---
         compliment_map = {
-            "радость": "Сегодня вы выглядите дружелюбно и очень живо.",
-            "спокойствие": "Сегодня вы выглядите спокойно и собранно.",
-            "удивление": "Сегодня у вас очень живое и выразительное лицо.",
-            "грусть": "Сегодня вы выглядите немного уставшей, но аккуратной и собранной.",
-            "злость": "Сегодня вы выглядите сосредоточенно и напряжённо.",
-            "страх": "Сегодня вы выглядите внимательной и немного напряжённой.",
-            "отвращение": "Сегодня вы выглядите серьёзно и сдержанно.",
-            "презрение": "Сегодня вы выглядите уверенно и немного строже обычного.",
+            "радость": (
+                "Ты выглядишь как человек с очень живой и открытой внешностью — "
+                "в тебе сразу чувствуется лёгкость и дружелюбие."
+            ),
+            "спокойствие": (
+                "Ты выглядишь как человек с уравновешенной, приятной внешностью — "
+                "в тебе сразу чувствуется спокойствие и уверенность."
+            ),
+            "удивление": (
+                "Ты выглядишь как человек с выразительной внешностью — "
+                "в тебе сразу чувствуется живость и любопытство."
+            ),
+            "грусть": (
+                "Ты выглядишь как человек с аккуратной, мягкой внешностью — "
+                "в тебе чувствуется задумчивость и глубина."
+            ),
+            "злость": (
+                "Ты выглядишь как человек с яркой, выразительной внешностью — "
+                "в тебе чувствуется решительность и внутренняя сила."
+            ),
+            "страх": (
+                "Ты выглядишь как человек с внимательной, чуткой внешностью — "
+                "в тебе чувствуется сосредоточенность и настороженность."
+            ),
+            "отвращение": (
+                "Ты выглядишь как человек с серьёзной, строгой внешностью — "
+                "в тебе чувствуется характер и сдержанность."
+            ),
+            "презрение": (
+                "Ты выглядишь как человек с уверенной, стильной внешностью — "
+                "в тебе чувствуется самодостаточность и твёрдость."
+            ),
         }
-        compliment = compliment_map.get(emotion, "Сегодня вы выглядите аккуратно и уверенно.")
+        opening = compliment_map.get(
+            emotion,
+            "Ты выглядишь как человек с приятной внешностью — "
+            "в тебе сразу чувствуется уверенность и аккуратность.",
+        )
 
+        # --- Rich description or basic observation ---
         if appearance_desc:
             observation = appearance_desc
         elif observed:
@@ -84,11 +119,35 @@ class AppearanceResponseComposer:
                 min_cyrillic_ratio=0.78,
                 max_foreign_tokens=1,
             ):
-                observation = "Лицо хорошо видно, а кадр получился достаточно чётким для общей оценки."
+                observation = self._generic_observation(emotion)
         else:
-            observation = "Лицо хорошо видно, а кадр получился достаточно чётким для общей оценки."
+            observation = self._generic_observation(emotion)
 
-        return f"{compliment} {observation} Это не медицинская оценка."
+        closing = (
+            "В целом, твой образ воспринимается гармонично и цельно — "
+            "в этом есть своя индивидуальность."
+        )
+
+        return f"{opening}\n\n{observation}\n\n{closing}"
+
+    @staticmethod
+    def _generic_observation(emotion: str) -> str:
+        """Fallback when no vision description is available."""
+        emotion_observation = {
+            "радость": "У тебя открытый, располагающий взгляд, который создаёт ощущение тепла.",
+            "спокойствие": "У тебя уверенный, спокойный взгляд, который создаёт ощущение гармонии.",
+            "удивление": "У тебя любопытный, живой взгляд, который создаёт ощущение энергии.",
+            "грусть": "У тебя задумчивый, глубокий взгляд, который создаёт ощущение искренности.",
+        }
+        base = emotion_observation.get(
+            emotion,
+            "У тебя уверенный взгляд, который создаёт приятное впечатление.",
+        )
+        return (
+            f"{base} "
+            "Лицо хорошо видно в кадре, но чтобы оценить волосы, стиль одежды и аксессуары, "
+            "нужен более детальный кадр — попробуй отодвинуться чуть дальше от камеры."
+        )
 
     def _describe_appearance_with_vision_sync(
         self, frame_base64: str, analysis: dict[str, Any]
@@ -104,29 +163,36 @@ class AppearanceResponseComposer:
         # --- Step A: get English description from vision model ---
         emotion_hint = f" The emotion model detected the mood as '{emotion}'." if emotion else ""
         prompt_en = (
-            "You are a friendly personal stylist assistant. "
-            "Describe the person's appearance in detail from the camera frame.\n"
-            "Cover these aspects in order (skip any that are not visible):\n"
-            "1. Overall impression and vibe (confident, calm, energetic, elegant, etc.)\n"
-            "2. Face and gaze — expression, eyes, skin tone\n"
-            "3. Hair — style, length, color, how it frames the face\n"
-            "4. Clothing — style, colors, how it fits\n"
-            "5. Accessories — glasses, jewelry, headphones, etc.\n"
-            "6. One-sentence summary of the overall look\n\n"
-            "Be warm, genuine and complimentary. Do not diagnose health conditions.\n"
-            "Answer in 4-6 short sentences in English.\n"
+            f"{self._rules_block()}"
+            "You are a warm, observant personal stylist giving a friend a genuine appearance review.\n\n"
+            "Describe the person from the camera frame. Follow this structure strictly — "
+            "skip any section that is NOT visible, but cover every section you CAN see:\n\n"
+            "1. OVERALL VIBE: What impression does this person make at first glance? "
+            "(confident, calm, energetic, elegant, cozy, edgy, etc.) — one sentence.\n"
+            "2. FACE & GAZE: Expression, eyes, how they look at the camera — one sentence.\n"
+            "3. HAIR (important!): Style, length, color, texture, how it frames the face, "
+            "whether it looks styled or natural. People invest effort into their hair — notice it.\n"
+            "4. CLOTHING (important!): What are they wearing? Colors, style (casual, formal, "
+            "streetwear, minimalist, etc.), how the outfit fits, what it says about their personality.\n"
+            "5. ACCESSORIES: Glasses, jewelry, watch, headphones, piercings, hat — anything visible. "
+            "Note how they complement the look.\n"
+            "6. PERSONAL GUESS: One sentence guessing something about their personality or lifestyle "
+            "based on the overall look (e.g., 'You look like someone who values comfort but "
+            "never compromises on style').\n\n"
+            "Rules:\n"
+            "- Be warm, genuine and complimentary — like a supportive friend, not a judge.\n"
+            "- Do NOT diagnose health conditions.\n"
+            "- Do NOT mention image quality, camera angle, or technical aspects.\n"
+            "- If hair, clothing or accessories are visible, you MUST mention them.\n"
+            "- Answer in 5-8 sentences in English.\n"
             f"{emotion_hint}"
-        )
-        prompt_en += (
-            "\nFocus especially on the details people consciously work on: hair, styling, clothing, "
-            "accessories and overall polish. If any of those are visible, mention them explicitly."
         )
         payload = {
             "model": vision_model,
             "prompt": prompt_en,
             "images": [frame_base64],
             "stream": False,
-            "options": {"temperature": 0.4, "num_predict": 250},
+            "options": {"temperature": 0.4, "num_predict": 400},
         }
         body = json.dumps(payload).encode("utf-8")
         req = request.Request(
@@ -151,19 +217,23 @@ class AppearanceResponseComposer:
 
         # --- Step B: translate English description to Russian via text model ---
         translate_model = self.ollama_model
-        translate_prompt = (
-            "Ты ассистент приложения Нейро-зеркало.\n"
-            "Переведи описание внешности ниже на русский язык.\n"
-            "Сделай текст тёплым, доброжелательным и естественным.\n"
-            "Сохрани все детали: лицо, волосы, одежду, аксессуары.\n"
-            "Ответь только переводом в 4-6 предложениях, без пояснений.\n\n"
-            f"{en_description}"
+        translate_prompt = self._rules_block() + (
+            "Переведи описание внешности ниже на русский язык.\n\n"
+            "Правила перевода:\n"
+            "- Сделай текст тёплым, доброжелательным и естественным — как комплимент от подруги.\n"
+            "- Обращайся на «ты».\n"
+            "- ОБЯЗАТЕЛЬНО сохрани ВСЕ упомянутые детали: волосы, одежда, аксессуары, "
+            "общее впечатление, предположение о характере.\n"
+            "- Если в оригинале упомянуты конкретные вещи (цвет одежды, тип причёски, "
+            "украшения) — они ДОЛЖНЫ быть в переводе.\n"
+            "- Ответь только переводом в 5-8 предложениях, без пояснений и заголовков.\n\n"
+            f"Оригинал:\n{en_description}"
         )
         translate_payload = {
             "model": translate_model,
             "prompt": translate_prompt,
             "stream": False,
-            "options": {"temperature": 0.3, "num_predict": 250},
+            "options": {"temperature": 0.3, "num_predict": 350},
         }
         translate_body = json.dumps(translate_payload).encode("utf-8")
         translate_req = request.Request(
@@ -196,31 +266,36 @@ class AppearanceResponseComposer:
             k: v for k, v in analysis.items()
             if k != "frame_base64" and v
         }
-        prompt = (
-            "Ты помощник интерфейса Нейро-зеркало.\n"
-            "Пользователь попросил оценить внешний вид — дай развёрнутую, тёплую оценку образа.\n\n"
-            "Структура ответа (4-6 предложений):\n"
-            "1. Общее впечатление и атмосфера образа (уверенность, спокойствие, лёгкость и т.д.)\n"
-            "2. Лицо и взгляд — выражение, настроение\n"
-            "3. Волосы — как уложены, как дополняют образ\n"
-            "4. Одежда — стиль, как подчёркивает характер\n"
-            "5. Аксессуары (если есть) — как дополняют\n"
-            "6. Фраза «Это не медицинская оценка.»\n\n"
-            "Если какой-то детали не видно в черновике — не выдумывай, просто пропусти.\n"
-            "Тон: доброжелательный, как комплимент от подруги.\n\n"
+        prompt = self._rules_block() + (
+            "Пользователь попросил оценить внешний вид — перепиши черновик в развёрнутую, "
+            "тёплую и персональную оценку образа.\n\n"
+            "Структура ответа (обязательно соблюдай порядок, пропускай только то, чего НЕТ в черновике):\n\n"
+            "1. ОБЩЕЕ ВПЕЧАТЛЕНИЕ: Какую атмосферу создаёт человек — уверенность, спокойствие, "
+            "лёгкость, загадочность? Одно предложение.\n"
+            "2. ЛИЦО И ВЗГЛЯД: Выражение, глаза, какое ощущение создаёт взгляд. Одно предложение.\n"
+            "3. ВОЛОСЫ (важно!): Как уложены, какой эффект создают — собранность, естественность, "
+            "динамику. Люди вкладываются в волосы — обязательно отметь. Одно-два предложения.\n"
+            "4. ОДЕЖДА (важно!): Стиль, как подчёркивает характер или индивидуальность. "
+            "Не надо выдумывать цвета или бренды, если их нет в черновике. Одно-два предложения.\n"
+            "5. АКСЕССУАРЫ: Если упомянуты в черновике — как дополняют образ, что добавляют "
+            "(изюминку, завершённость, характер). Одно предложение.\n"
+            "6. ПЕРСОНАЛЬНОЕ ПРЕДПОЛОЖЕНИЕ: Одно предложение-догадка о характере или стиле жизни "
+            "человека на основе образа. Например: «Мне кажется, ты из тех людей, кто ценит "
+            "комфорт, но не готов жертвовать стилем».\n\n"
+            "Правила:\n"
+            "- Обращайся на «ты».\n"
+            "- Тон: тёплый, доброжелательный, как искренний комплимент от подруги.\n"
+            "- Если детали НЕТ в черновике — НЕ выдумывай, просто пропусти этот пункт.\n"
+            "- Если деталь ЕСТЬ — обязательно упомяни, не сокращай.\n"
+            "- Ответ: 5-9 предложений на русском.\n\n"
             f"Черновик:\n{template}\n\n"
             f"Контекст анализа: {json.dumps(safe_analysis, ensure_ascii=False)}"
-        )
-        prompt += (
-            "\n\nAdditional instruction: answer in Russian with a fuller, more personal appearance review. "
-            "Do not stop at face and mood only. If visible, explicitly mention hair, clothing style, "
-            "accessories and the overall image the person creates. End exactly with: Это не медицинская оценка."
         )
         payload = {
             "model": self.ollama_model,
             "prompt": prompt,
             "stream": False,
-            "options": {"temperature": 0.35, "num_predict": 320},
+            "options": {"temperature": 0.35, "num_predict": 450},
         }
         body = json.dumps(payload).encode("utf-8")
         req = request.Request(
@@ -290,9 +365,7 @@ class AppearanceResponseComposer:
             return template
 
         sentence_count = sum(cleaned.count(mark) for mark in ".!?")
-        if len(cleaned) < 55 or sentence_count < 2:
-            return template
-        if "это не медицинская оценка" not in lowered:
+        if len(cleaned) < 80 or sentence_count < 3:
             return template
         if not AppearanceResponseComposer._is_safe_russian_output(cleaned):
             return template

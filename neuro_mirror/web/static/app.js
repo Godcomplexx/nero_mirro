@@ -1,3 +1,6 @@
+const WAKE_WORDS = ["зеркало", "привет зеркало", "hey mirror"];
+const WAKE_WORD_DISPLAY = "«Зеркало»";
+
 const state = {
   websocket: null,
   reconnectTimer: null,
@@ -8,10 +11,15 @@ const state = {
   audioContext: null,
   analyser: null,
   audioUnlocked: false,
+  currentSpeechAudio: null,
+  currentSpeechUrl: null,
+  ttsRequestId: 0,
   ttsEnabled: true,
   lastSpokenText: "",
   currentSpeechText: "",
   config: null,
+  deviceCatalog: { cameras: [], microphones: [] },
+  selectedDevices: { camera_id: "", microphone_id: "" },
   cameraActive: false,
   recording: false,
   busy: false,
@@ -20,26 +28,44 @@ const state = {
   live2dApp: null,
   live2dModel: null,
   live2dResizeHandler: null,
+  // Wake-word activation
+  wakeWordEnabled: false,
+  wakeWordRecognition: null,
+  wakeWordListening: false,
+  wakeWordCooldown: false,
 };
 
 const $ = (id) => document.getElementById(id);
 
 const el = {
   backendLabel: $("backend-label"),
+  telemetryBackend: $("telemetry-backend"),
   connectionDot: $("connection-dot"),
+  currentDate: $("current-date"),
+  currentTime: $("current-time"),
+  currentGreeting: $("current-greeting"),
   screenValue: $("screen-value"),
   sourceValue: $("source-value"),
   messageValue: $("message-value"),
   transcriptValue: $("transcript-value"),
   reportValue: $("report-value"),
   modulesValue: $("modules-value"),
+  detailsDrawer: $("details-drawer"),
   logValue: $("log-value"),
   logClear: $("log-clear"),
+  devicesForm: $("devices-form"),
+  devicesRefresh: $("devices-refresh"),
+  devicesSave: $("devices-save"),
+  devicesStatus: $("devices-status"),
+  devicesErrors: $("devices-errors"),
+  cameraSelect: $("camera-select"),
+  microphoneSelect: $("microphone-select"),
   assistantForm: $("assistant-form"),
   assistantInput: $("assistant-input"),
   askButton: $("ask-button"),
   cameraPreview: $("camera-preview"),
   cameraOverlay: $("camera-overlay"),
+  cameraOverlayText: $("camera-overlay-text"),
   cameraToggle: $("camera-toggle"),
   appearanceButton: $("appearance-button"),
   voiceButton: $("voice-button"),
@@ -47,6 +73,7 @@ const el = {
   voiceStatus: $("voice-status"),
   ttsEnabled: $("tts-enabled"),
   screeningButton: $("screening-button"),
+  mascotFloat: $("mascot-float"),
   mascot: $("mascot"),
   mascotState: $("mascot-state"),
   mascotMouth: $("mascot-mouth"),
@@ -55,6 +82,9 @@ const el = {
   mascotSpeechText: $("mascot-speech-text"),
   mascotImage: $("mascot-image"),
   mascotLive2d: $("mascot-live2d"),
+  wakeWordToggle: $("wake-word-toggle"),
+  wakeWordIndicator: $("wake-word-indicator"),
+  wakeWordHint: $("wake-word-hint"),
 };
 
 const SCREEN_LABELS = {
@@ -62,6 +92,7 @@ const SCREEN_LABELS = {
   assistant: "Assistant",
   screening: "Screening",
   summary: "Summary",
+  device_setup: "Device Setup",
 };
 
 const MODULE_ORDER = ["vision_worker", "camera", "emotiefflib", "speech_worker", "microphone", "stt"];
@@ -84,6 +115,22 @@ function setHidden(node, hidden) {
 
 function setDisabled(node, disabled) {
   if (node) node.disabled = disabled;
+}
+
+function setButtonLabel(button, label) {
+  if (!button) return;
+  button.title = label;
+  button.setAttribute("aria-label", label);
+}
+
+function setCameraOverlay(message) {
+  if (!el.cameraOverlay) return;
+  setHidden(el.cameraOverlay, false);
+  if (el.cameraOverlayText) {
+    setText(el.cameraOverlayText, message);
+    return;
+  }
+  setText(el.cameraOverlay, message);
 }
 
 function escapeHtml(value) {
@@ -148,14 +195,24 @@ function describeSttRun(payload, elapsedMs) {
 }
 
 function setMascotSpeech(text, options) {
-  const visible = options && options.visible === true;
   state.currentSpeechText = text || "";
-  setText(el.mascotSpeechText, state.currentSpeechText);
-  setHidden(el.mascotSpeech, !(visible && state.currentSpeechText));
+  setHidden(el.mascotSpeech, true);
+  if (el.mascotSpeech) {
+    el.mascotSpeech.style.display = "none";
+  }
+  if (el.mascotSpeechText) {
+    el.mascotSpeechText.textContent = "";
+  }
+}
+
+function shouldShowMascotSpeech(snapshot) {
+  return false;
 }
 
 function setMascotState(name) {
   if (el.mascot) el.mascot.dataset.state = name;
+  if (el.mascotFloat) el.mascotFloat.dataset.state = name;
+  document.body.dataset.uiState = name;
   setText(el.mascotState, name);
 
   if (!el.mascotMouth || state.analyser) return;
@@ -174,6 +231,33 @@ function setMascotState(name) {
 
 function setMascotLive2dStatus(status) {
   if (el.mascot) el.mascot.dataset.live2d = status;
+}
+
+function formatClockDate(value) {
+  return value.toLocaleDateString("ru-RU", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  }).replace(".", "");
+}
+
+function formatGreeting(hours) {
+  if (hours < 6) return "Глубокая ночь";
+  if (hours < 12) return "Доброе утро";
+  if (hours < 18) return "Добрый день";
+  return "Добрый вечер";
+}
+
+function updateClockDisplay() {
+  const now = new Date();
+  if (el.currentDate) setText(el.currentDate, formatClockDate(now));
+  if (el.currentTime) {
+    setText(
+      el.currentTime,
+      now.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })
+    );
+  }
+  if (el.currentGreeting) setText(el.currentGreeting, formatGreeting(now.getHours()));
 }
 
 async function loadExternalScript(url, test) {
@@ -395,11 +479,43 @@ async function loadConfig() {
   appendLogLine("[client] requesting /api/config");
   state.config = await fetchJson("/api/config");
   setText(el.backendLabel, state.config.assistant_backend_label || "web");
+  setText(el.telemetryBackend, state.config.assistant_backend_label || "web");
 
   if (state.config.live2d_model_url) {
     setText(el.mascotNote, "AIRI Hiyori Live2D URL is configured.");
   } else {
     setText(el.mascotNote, "AIRI Hiyori preview is loaded.");
+  }
+}
+
+async function loadDevices() {
+  appendLogLine("[client] requesting /api/devices");
+  const payload = await fetchJson("/api/devices");
+  renderDeviceWizard(payload);
+}
+
+async function submitDeviceSelection(event) {
+  event.preventDefault();
+  if (!el.cameraSelect || !el.microphoneSelect) return;
+
+  setButtonLoading(el.devicesSave, true);
+  try {
+    await fetchJson("/api/devices/select", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        camera_id: el.cameraSelect.value || "",
+        microphone_id: el.microphoneSelect.value || "",
+      }),
+    });
+    await new Promise((resolve) => window.setTimeout(resolve, 150));
+    await loadDevices();
+    if (el.detailsDrawer) el.detailsDrawer.open = true;
+  } catch (error) {
+    renderDeviceErrors([error.message || String(error)]);
+    appendLogLine(`[client] device selection error: ${error.message || error}`);
+  } finally {
+    setButtonLoading(el.devicesSave, false);
   }
 }
 
@@ -502,15 +618,95 @@ function renderLog(eventLog) {
   el.logValue.scrollTop = el.logValue.scrollHeight;
 }
 
+function normalizeSelectedDevices(raw) {
+  if (!raw || typeof raw !== "object") {
+    return { camera_id: "", microphone_id: "" };
+  }
+  return {
+    camera_id: String(raw.camera_id || raw.selected_camera_id || ""),
+    microphone_id: String(raw.microphone_id || raw.selected_microphone_id || ""),
+  };
+}
+
+function renderDeviceErrors(errors) {
+  if (!el.devicesErrors) return;
+  const items = Array.isArray(errors) ? errors.filter(Boolean) : [];
+  if (!items.length) {
+    el.devicesErrors.innerHTML = "";
+    setHidden(el.devicesErrors, true);
+    return;
+  }
+  el.devicesErrors.innerHTML = items.map((item) => `<div class="device-error">${escapeHtml(item)}</div>`).join("");
+  setHidden(el.devicesErrors, false);
+}
+
+function renderDeviceSelect(select, devices, selectedId) {
+  if (!select) return;
+  const items = Array.isArray(devices) ? devices : [];
+  const options = items.map((item) => {
+    const id = String(item.device_id || "");
+    const label = String(item.label || id || "Unknown device");
+    const suffix = item.available === false ? " (недоступно)" : "";
+    return `<option value="${escapeHtml(id)}">${escapeHtml(label + suffix)}</option>`;
+  });
+  select.innerHTML = options.join("") || '<option value="">Нет доступных устройств</option>';
+  if (selectedId && items.some((item) => String(item.device_id || "") === selectedId)) {
+    select.value = selectedId;
+    return;
+  }
+  select.value = items[0] && items[0].device_id != null ? String(items[0].device_id) : "";
+}
+
+function renderDeviceWizard(snapshot) {
+  const catalog = snapshot && snapshot.device_catalog ? snapshot.device_catalog : state.deviceCatalog;
+  const selected = normalizeSelectedDevices(snapshot && snapshot.selected_devices ? snapshot.selected_devices : state.selectedDevices);
+  const errors = snapshot && Array.isArray(snapshot.device_errors) ? snapshot.device_errors : [];
+
+  state.deviceCatalog = {
+    cameras: Array.isArray(catalog && catalog.cameras) ? catalog.cameras : [],
+    microphones: Array.isArray(catalog && catalog.microphones) ? catalog.microphones : [],
+  };
+  state.selectedDevices = selected;
+
+  renderDeviceSelect(el.cameraSelect, state.deviceCatalog.cameras, selected.camera_id);
+  renderDeviceSelect(el.microphoneSelect, state.deviceCatalog.microphones, selected.microphone_id);
+  renderDeviceErrors(errors);
+
+  if (el.devicesStatus) {
+    const selectedCamera = state.deviceCatalog.cameras.find((item) => String(item.device_id || "") === String(el.cameraSelect && el.cameraSelect.value || ""));
+    const selectedMicrophone = state.deviceCatalog.microphones.find((item) => String(item.device_id || "") === String(el.microphoneSelect && el.microphoneSelect.value || ""));
+    const hasCatalog = state.deviceCatalog.cameras.length > 0 || state.deviceCatalog.microphones.length > 0;
+    setText(
+      el.devicesStatus,
+      hasCatalog
+        ? `Камера: ${selectedCamera ? selectedCamera.label : "не выбрана"} • Микрофон: ${selectedMicrophone ? selectedMicrophone.label : "не выбран"}`
+        : "Каталог устройств пока пуст."
+    );
+  }
+}
+
+function syncDeviceSelectionStatus() {
+  renderDeviceWizard({
+    device_catalog: state.deviceCatalog,
+    selected_devices: {
+      camera_id: el.cameraSelect ? el.cameraSelect.value : "",
+      microphone_id: el.microphoneSelect ? el.microphoneSelect.value : "",
+    },
+    device_errors: [],
+  });
+}
+
 function renderSnapshot(snapshot) {
   setText(el.screenValue, SCREEN_LABELS[snapshot.screen] || snapshot.screen || "-");
   setText(el.sourceValue, snapshot.assistant_source || "-");
   setText(el.messageValue, snapshot.message || "-");
   setText(el.transcriptValue, snapshot.transcript_text ? `Transcript: ${snapshot.transcript_text}` : "");
+  setMascotSpeech(snapshot.message || "", { visible: shouldShowMascotSpeech(snapshot) });
 
   renderReport(snapshot.report);
   renderModules(snapshot.worker_statuses || {});
   renderLog(snapshot.event_log || []);
+  renderDeviceWizard(snapshot);
 
   // Override camera module status when browser camera is active
   if (state.cameraActive) {
@@ -524,16 +720,28 @@ function renderSnapshot(snapshot) {
   setMascotState(mascotState);
 
   setDisabled(el.appearanceButton, !state.cameraActive);
+  if (el.detailsDrawer && (snapshot.screen === "device_setup" || (snapshot.device_errors && snapshot.device_errors.length))) {
+    el.detailsDrawer.open = true;
+  }
 }
 
 function cleanupSpeechAudio() {
+  if (state.currentSpeechAudio) {
+    state.currentSpeechAudio.pause();
+    state.currentSpeechAudio.removeAttribute("src");
+    state.currentSpeechAudio.load();
+    state.currentSpeechAudio = null;
+  }
+  if (state.currentSpeechUrl) {
+    URL.revokeObjectURL(state.currentSpeechUrl);
+    state.currentSpeechUrl = null;
+  }
   if (state.audioContext) {
     state.audioContext.close().catch(() => {});
     state.audioContext = null;
   }
   state.analyser = null;
   setMascotState("idle");
-  setMascotSpeech("", { visible: false });
 }
 
 function animateMouth() {
@@ -567,12 +775,14 @@ async function maybeSpeak(snapshot) {
   if (screen !== "assistant" && screen !== "summary") return;
 
   state.lastSpokenText = snapshot.message;
-  setMascotSpeech(snapshot.message, { visible: true });
+  setMascotSpeech(snapshot.message, { visible: false });
 
   const spokenText = stripTrailingSpeechMeta(snapshot.message);
   if (!spokenText) return;
 
   // Cancel any playing speech before starting new one
+  const requestId = state.ttsRequestId + 1;
+  state.ttsRequestId = requestId;
   cleanupSpeechAudio();
 
   try {
@@ -586,66 +796,27 @@ async function maybeSpeak(snapshot) {
       throw new Error((await response.text()) || `${response.status}`);
     }
 
-    // Stream audio: start playback as soon as the first chunks arrive
-    const reader = response.body && response.body.getReader();
-    const chunks = [];
-    let firstChunkReady = false;
-    let audio = null;
-    let objectUrl = null;
+    const audioBlob = await response.blob();
+    if (!audioBlob.size) throw new Error("empty TTS audio");
+    if (requestId !== state.ttsRequestId) return;
 
-    if (reader) {
-      // Read chunks progressively
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        chunks.push(value);
+    const objectUrl = URL.createObjectURL(audioBlob);
+    const audio = new Audio(objectUrl);
+    state.currentSpeechAudio = audio;
+    state.currentSpeechUrl = objectUrl;
 
-        // After collecting ~8 KB, start playback immediately
-        if (!firstChunkReady) {
-          const totalBytes = chunks.reduce((sum, c) => sum + c.length, 0);
-          if (totalBytes >= 8192) {
-            firstChunkReady = true;
-            const partialBlob = new Blob(chunks, { type: "audio/mpeg" });
-            objectUrl = URL.createObjectURL(partialBlob);
-            audio = new Audio(objectUrl);
-            setupAudioAnalyser(audio);
-            setMascotState("speaking");
-            audio.play().catch(() => {});
-          }
-        }
-      }
-    }
+    audio.addEventListener("ended", () => {
+      if (state.currentSpeechAudio === audio) cleanupSpeechAudio();
+    }, { once: true });
+    audio.addEventListener("error", () => {
+      if (state.currentSpeechAudio === audio) cleanupSpeechAudio();
+    }, { once: true });
 
-    // If we never started early playback (short text), play the full audio now
-    if (!firstChunkReady) {
-      const fullBlob = new Blob(chunks, { type: "audio/mpeg" });
-      objectUrl = URL.createObjectURL(fullBlob);
-      audio = new Audio(objectUrl);
-      setupAudioAnalyser(audio);
-      setMascotState("speaking");
-      await audio.play();
-    } else if (audio) {
-      // Replace partial audio with full audio for clean playback
-      const currentTime = audio.currentTime;
-      const wasPlaying = !audio.paused;
-      const fullBlob = new Blob(chunks, { type: "audio/mpeg" });
-      const fullUrl = URL.createObjectURL(fullBlob);
-      audio.src = fullUrl;
-      audio.currentTime = Math.max(0, currentTime - 0.05);
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-      objectUrl = fullUrl;
-      if (wasPlaying) audio.play().catch(() => {});
-    }
-
-    if (audio) {
-      const capturedUrl = objectUrl;
-      audio.addEventListener("ended", () => {
-        if (capturedUrl) URL.revokeObjectURL(capturedUrl);
-        cleanupSpeechAudio();
-      }, { once: true });
-    }
+    setupAudioAnalyser(audio);
+    setMascotState("speaking");
+    await audio.play();
   } catch (error) {
-    cleanupSpeechAudio();
+    if (requestId === state.ttsRequestId) cleanupSpeechAudio();
     setText(el.mascotNote, "Click the page once to unlock browser audio.");
     console.error("TTS error", error);
   }
@@ -754,9 +925,8 @@ function stopCamera() {
     el.cameraPreview.srcObject = null;
   }
 
-  setHidden(el.cameraOverlay, false);
-  setText(el.cameraOverlay, "Camera is off");
-  setText(el.cameraToggle, "Turn camera on");
+  setCameraOverlay("Camera is off");
+  setButtonLabel(el.cameraToggle, "Turn camera on");
   setDisabled(el.appearanceButton, true);
   updateBrowserCameraModuleStatus(false);
 }
@@ -768,8 +938,7 @@ async function toggleCamera() {
   }
 
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    setText(el.cameraOverlay, "Browser camera API is unavailable");
-    setHidden(el.cameraOverlay, false);
+    setCameraOverlay("Browser camera API is unavailable");
     return;
   }
 
@@ -786,14 +955,12 @@ async function toggleCamera() {
   } catch (error) {
     const details = describeMediaError(error);
     appendLogLine(`[client] backend camera release failed: ${details}`);
-    setText(el.cameraOverlay, `Camera error: ${details}`);
-    setHidden(el.cameraOverlay, false);
+    setCameraOverlay(`Camera error: ${details}`);
     return;
   }
 
   setButtonLoading(el.cameraToggle, true);
-  setHidden(el.cameraOverlay, false);
-  setText(el.cameraOverlay, "Connecting camera...");
+  setCameraOverlay("Connecting camera...");
 
   try {
     const stream = await navigator.mediaDevices.getUserMedia({
@@ -833,15 +1000,14 @@ async function toggleCamera() {
 
     state.cameraActive = true;
     setHidden(el.cameraOverlay, true);
-    setText(el.cameraToggle, "Turn camera off");
+    setButtonLabel(el.cameraToggle, "Turn camera off");
     setDisabled(el.appearanceButton, false);
     updateBrowserCameraModuleStatus(true);
     appendLogLine(`[client] camera ready: ${JSON.stringify(track.getSettings ? track.getSettings() : {})}`);
   } catch (error) {
     const details = describeMediaError(error);
     stopCamera();
-    setText(el.cameraOverlay, `Camera error: ${details}`);
-    setHidden(el.cameraOverlay, false);
+    setCameraOverlay(`Camera error: ${details}`);
     appendLogLine(`[client] camera error: ${details}`);
   } finally {
     setButtonLoading(el.cameraToggle, false);
@@ -850,8 +1016,7 @@ async function toggleCamera() {
 
 async function analyzeAppearance() {
   if (!state.cameraActive || !el.cameraPreview) {
-    setHidden(el.cameraOverlay, false);
-    setText(el.cameraOverlay, "Turn on the camera first");
+    setCameraOverlay("Turn on the camera first");
     return;
   }
 
@@ -1031,9 +1196,271 @@ async function startScreening() {
 function stopVoiceRecording() {
   state.recording = false;
   el.voiceButton && el.voiceButton.classList.remove("recording");
-  setText(el.voiceButtonLabel, "Press and speak");
+  const label = state.wakeWordEnabled
+    ? `Скажите ${WAKE_WORD_DISPLAY} или нажмите`
+    : "Нажми и говори";
+  setText(el.voiceButtonLabel, label);
   state.mediaRecorder && state.mediaRecorder.stop();
 }
+
+// ---- Wake-word detection via Web Speech API ----
+
+function isSpeechRecognitionSupported() {
+  return !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+}
+
+function isSecureContext() {
+  // Web Speech API requires HTTPS in production; localhost is exempt
+  if (window.isSecureContext) return true;
+  const host = location.hostname;
+  return host === "localhost" || host === "127.0.0.1" || host === "::1";
+}
+
+function getWakeWordUnavailableReason() {
+  if (!isSpeechRecognitionSupported()) {
+    return "SpeechRecognition API не поддерживается этим браузером (используйте Chrome или Edge)";
+  }
+  if (!isSecureContext()) {
+    return "Голосовая активация требует HTTPS-соединения (или localhost)";
+  }
+  return "";
+}
+
+function createSpeechRecognition() {
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) return null;
+
+  const recognition = new SpeechRecognition();
+  recognition.continuous = true;
+  recognition.interimResults = true;
+  recognition.lang = "ru-RU";
+  recognition.maxAlternatives = 3;
+  return recognition;
+}
+
+function matchesWakeWord(transcript) {
+  const normalized = transcript.toLowerCase().trim().replace(/[.,!?;:]+/g, "");
+  for (const ww of WAKE_WORDS) {
+    if (normalized.includes(ww)) return true;
+  }
+  // Fuzzy: check if any word starts with "зеркал" (covers "зеркало", "зеркала", "зеркалу", etc.)
+  const words = normalized.split(/\s+/);
+  for (const w of words) {
+    if (w.startsWith("зеркал")) return true;
+  }
+  return false;
+}
+
+function startWakeWordListening() {
+  if (state.wakeWordListening) return;
+  const unavailableReason = getWakeWordUnavailableReason();
+  if (unavailableReason) {
+    setText(el.voiceStatus, unavailableReason);
+    appendLogLine(`[wake-word] unavailable: ${unavailableReason}`);
+    return;
+  }
+
+  const recognition = createSpeechRecognition();
+  if (!recognition) return;
+
+  state.wakeWordRecognition = recognition;
+  state.wakeWordListening = true;
+  updateWakeWordIndicator();
+
+  recognition.onresult = (event) => {
+    if (state.recording || state.busy || state.wakeWordCooldown) return;
+
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      const result = event.results[i];
+      for (let j = 0; j < result.length; j++) {
+        const transcript = result[j].transcript;
+        if (matchesWakeWord(transcript)) {
+          appendLogLine(`[wake-word] detected: "${transcript.trim()}"`);
+          triggerWakeWordActivation();
+          return;
+        }
+      }
+    }
+  };
+
+  recognition.onerror = (event) => {
+    // "no-speech" and "aborted" are normal during continuous listening
+    if (event.error === "no-speech" || event.error === "aborted") return;
+    appendLogLine(`[wake-word] error: ${event.error}`);
+    if (event.error === "not-allowed") {
+      setText(el.voiceStatus, "Микрофон не разрешён для голосовой активации");
+      stopWakeWordListening();
+      if (el.wakeWordToggle) el.wakeWordToggle.checked = false;
+      state.wakeWordEnabled = false;
+      return;
+    }
+  };
+
+  recognition.onend = () => {
+    // Auto-restart if still enabled and not currently recording
+    if (state.wakeWordEnabled && !state.recording && !state.busy) {
+      try {
+        recognition.start();
+      } catch (_) {
+        // May fail if already started; schedule a retry
+        setTimeout(() => {
+          if (state.wakeWordEnabled && !state.recording && !state.busy && state.wakeWordListening) {
+            try { recognition.start(); } catch (_e) { /* ignore */ }
+          }
+        }, 500);
+      }
+    } else {
+      state.wakeWordListening = false;
+      updateWakeWordIndicator();
+    }
+  };
+
+  try {
+    recognition.start();
+    appendLogLine(`[wake-word] listening started, wake word: ${WAKE_WORD_DISPLAY}`);
+    setText(el.voiceStatus, `Голосовая активация: скажите ${WAKE_WORD_DISPLAY}`);
+  } catch (error) {
+    appendLogLine(`[wake-word] start failed: ${error.message || error}`);
+    state.wakeWordListening = false;
+    updateWakeWordIndicator();
+  }
+}
+
+function stopWakeWordListening() {
+  state.wakeWordListening = false;
+  if (state.wakeWordRecognition) {
+    try {
+      state.wakeWordRecognition.abort();
+    } catch (_) { /* ignore */ }
+    state.wakeWordRecognition = null;
+  }
+  updateWakeWordIndicator();
+}
+
+function pauseWakeWordForRecording() {
+  if (state.wakeWordRecognition && state.wakeWordListening) {
+    try {
+      state.wakeWordRecognition.abort();
+    } catch (_) { /* ignore */ }
+  }
+}
+
+function resumeWakeWordAfterRecording() {
+  if (state.wakeWordEnabled && !state.wakeWordListening) {
+    // Small delay to avoid conflict with MediaRecorder mic release
+    setTimeout(() => {
+      if (state.wakeWordEnabled && !state.recording && !state.busy) {
+        startWakeWordListening();
+      }
+    }, 800);
+  }
+}
+
+function triggerWakeWordActivation() {
+  if (state.recording || state.busy) return;
+
+  // Cooldown to avoid double-triggering
+  state.wakeWordCooldown = true;
+  setTimeout(() => { state.wakeWordCooldown = false; }, 3000);
+
+  // Pause wake-word recognition before starting recording
+  pauseWakeWordForRecording();
+
+  // Play a short beep to confirm activation
+  playActivationBeep();
+
+  // Auto-start voice recording after a tiny delay for the beep
+  setTimeout(() => {
+    if (el.voiceButton && !state.recording && !state.busy) {
+      el.voiceButton.click();
+      // Auto-stop recording after configurable seconds
+      const autoStopMs = 8000;
+      setTimeout(() => {
+        if (state.recording) {
+          stopVoiceRecording();
+        }
+      }, autoStopMs);
+    }
+  }, 300);
+}
+
+function playActivationBeep() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(880, ctx.currentTime);
+    osc.frequency.setValueAtTime(1100, ctx.currentTime + 0.08);
+    gain.gain.setValueAtTime(0.15, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.2);
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 0.2);
+    setTimeout(() => ctx.close(), 300);
+  } catch (_) {
+    // Ignore audio context errors
+  }
+}
+
+function updateWakeWordIndicator() {
+  if (el.wakeWordIndicator) {
+    if (state.wakeWordListening) {
+      el.wakeWordIndicator.classList.add("active");
+      el.wakeWordIndicator.title = `Голосовая активация: слушаю ${WAKE_WORD_DISPLAY}`;
+    } else {
+      el.wakeWordIndicator.classList.remove("active");
+      el.wakeWordIndicator.title = "Голосовая активация выключена";
+    }
+  }
+  if (el.wakeWordHint) {
+    el.wakeWordHint.hidden = !state.wakeWordEnabled;
+  }
+  // Update voice button label if not recording
+  if (el.voiceButtonLabel && !state.recording) {
+    const label = state.wakeWordEnabled
+      ? `Скажите ${WAKE_WORD_DISPLAY} или нажмите`
+      : "Нажми и говори";
+    setText(el.voiceButtonLabel, label);
+  }
+}
+
+function setupWakeWord() {
+  if (!el.wakeWordToggle) return;
+
+  const unavailableReason = getWakeWordUnavailableReason();
+
+  if (unavailableReason) {
+    el.wakeWordToggle.disabled = true;
+    el.wakeWordToggle.parentElement.title = unavailableReason;
+    appendLogLine(`[wake-word] disabled: ${unavailableReason}`);
+    return;
+  }
+
+  // Restore saved preference
+  const saved = localStorage.getItem("neuro_mirror_wake_word");
+  if (saved === "true") {
+    state.wakeWordEnabled = true;
+    el.wakeWordToggle.checked = true;
+    // Delay start to not conflict with bootstrap
+    setTimeout(() => startWakeWordListening(), 2000);
+  }
+
+  el.wakeWordToggle.addEventListener("change", (event) => {
+    state.wakeWordEnabled = event.target.checked;
+    localStorage.setItem("neuro_mirror_wake_word", state.wakeWordEnabled ? "true" : "false");
+
+    if (state.wakeWordEnabled) {
+      startWakeWordListening();
+    } else {
+      stopWakeWordListening();
+      setText(el.voiceStatus, "");
+    }
+  });
+}
+
+// ---- Voice recording ----
 
 function setupVoiceRecorder() {
   if (!el.voiceButton) return;
@@ -1048,6 +1475,9 @@ function setupVoiceRecorder() {
       setText(el.voiceStatus, "Browser microphone API is unavailable");
       return;
     }
+
+    // Pause wake-word while recording to avoid mic conflict
+    pauseWakeWordForRecording();
 
     try {
       await unlockAudioPlayback();
@@ -1113,6 +1543,8 @@ function setupVoiceRecorder() {
           for (const track of stream.getTracks()) {
             track.stop();
           }
+          // Resume wake-word listening after recording finishes
+          resumeWakeWordAfterRecording();
         }
       };
 
@@ -1125,6 +1557,8 @@ function setupVoiceRecorder() {
     } catch (error) {
       setText(el.voiceStatus, `Microphone error: ${error.message || error}`);
       appendLogLine(`[client] microphone error: ${error.message || error}`);
+      // Resume wake-word if mic grab failed
+      resumeWakeWordAfterRecording();
     }
   });
 }
@@ -1151,14 +1585,28 @@ function bindEvents() {
   el.logClear && el.logClear.addEventListener("click", () => {
     if (el.logValue) el.logValue.textContent = "Log cleared.";
   });
+  el.devicesForm && el.devicesForm.addEventListener("submit", submitDeviceSelection);
+  el.devicesRefresh && el.devicesRefresh.addEventListener("click", () => {
+    loadDevices().catch((error) => {
+      renderDeviceErrors([error.message || String(error)]);
+    });
+  });
+  el.cameraSelect && el.cameraSelect.addEventListener("change", syncDeviceSelectionStatus);
+  el.microphoneSelect && el.microphoneSelect.addEventListener("change", syncDeviceSelectionStatus);
 
   setupVoiceRecorder();
+  setupWakeWord();
 }
 
 async function bootstrap() {
   appendLogLine("[client] bootstrap started");
+  updateClockDisplay();
+  window.setInterval(updateClockDisplay, 1000);
   await loadConfig();
+  await loadDevices();
   await setupLive2D();
+  setButtonLabel(el.cameraToggle, "Turn camera on");
+  setButtonLabel(el.appearanceButton, "Analyze appearance");
   appendLogLine("[client] requesting /api/state");
   const snapshot = await fetchJson("/api/state");
   renderSnapshot(snapshot);

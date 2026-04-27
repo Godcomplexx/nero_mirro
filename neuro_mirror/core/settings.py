@@ -24,6 +24,7 @@ class Settings:
     ollama_fallback_model: str = ""
     ollama_vision_model: str = "llava"
     ollama_timeout_seconds: float = 30.0
+    assistant_rules_path: str = ""
 
     weather_enabled: bool = True
     weather_location: str = ""
@@ -51,7 +52,7 @@ class Settings:
     stt_beam_size: int = 5
     stt_best_of: int = 5
     stt_vad_filter: bool = True
-    stt_hotwords: str = "камера, что у меня в руках, что в руках, в руках, в руке, держу, покажи, посмотри в камеру, как я выгляжу, оцени внешний вид, скрининг"
+    stt_hotwords: str = "камера, что у меня в руках, что в руках, в руках, в руке, держу, покажи, посмотри в камеру, как я выгляжу, оцени внешний вид, скрининг, президент, сша, юсей, usa"
     voice_sample_rate: int = 16000
     voice_channels: int = 1
     voice_max_record_seconds: float = 12.0
@@ -103,6 +104,7 @@ class Settings:
         raw_ollama_fallback_model = os.getenv("NEURO_MIRROR_OLLAMA_FALLBACK_MODEL", "").strip()
         raw_ollama_vision_model = os.getenv("NEURO_MIRROR_OLLAMA_VISION_MODEL", "llava").strip()
         raw_ollama_timeout = os.getenv("NEURO_MIRROR_OLLAMA_TIMEOUT_SECONDS", "30").strip()
+        raw_assistant_rules_path = os.getenv("NEURO_MIRROR_ASSISTANT_RULES_PATH", "").strip()
 
         raw_weather_enabled = os.getenv("NEURO_MIRROR_WEATHER_ENABLED", "1").strip().lower()
         raw_weather_location = os.getenv("NEURO_MIRROR_WEATHER_LOCATION", "").strip()
@@ -142,7 +144,7 @@ class Settings:
         raw_stt_vad_filter = os.getenv("NEURO_MIRROR_STT_VAD_FILTER", "1").strip().lower()
         raw_stt_hotwords = os.getenv(
             "NEURO_MIRROR_STT_HOTWORDS",
-            "камера, в руках, в руке, держу, скрининг, внешний вид",
+            "камера, в руках, в руке, держу, скрининг, внешний вид, президент, сша, юсей, usa",
         ).strip()
         if "РєР°РјРµСЂР°" in raw_stt_hotwords:
             raw_stt_hotwords = (
@@ -182,6 +184,7 @@ class Settings:
             ollama_fallback_model=raw_ollama_fallback_model,
             ollama_vision_model=raw_ollama_vision_model,
             ollama_timeout_seconds=float(raw_ollama_timeout),
+            assistant_rules_path=raw_assistant_rules_path,
             weather_enabled=raw_weather_enabled not in {"0", "false", "no"},
             weather_location=raw_weather_location,
             weather_base_url=raw_weather_base_url,

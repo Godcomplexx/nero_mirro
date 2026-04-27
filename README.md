@@ -72,6 +72,7 @@ python -m pip install sounddevice
 
 - `NEURO_MIRROR_AI_BACKEND=ollama`
 - `NEURO_MIRROR_OLLAMA_MODEL=gemma4:e2b`
+- `NEURO_MIRROR_ASSISTANT_RULES_PATH=` — путь к кастомному rules-файлу ассистента; пусто = встроенный `assistant_rules.md`
 - `NEURO_MIRROR_WEATHER_LOCATION=Samara`
 - `NEURO_MIRROR_CAMERA_INDEX=0`
 - `NEURO_MIRROR_PREVIEW_INTERVAL_SECONDS=1.2`

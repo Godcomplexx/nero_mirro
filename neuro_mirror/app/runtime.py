@@ -4,6 +4,7 @@ import asyncio
 from dataclasses import dataclass
 
 from neuro_mirror.core.event_bus import EventBus
+from neuro_mirror.core.device_manager import DeviceManager
 from neuro_mirror.core.plugin_manager import PluginManager
 from neuro_mirror.core.settings import Settings
 from neuro_mirror.interfaces.plugin import Plugin
@@ -12,6 +13,9 @@ from neuro_mirror.plugins.aggregator.plugin import AggregatorPlugin
 from neuro_mirror.plugins.ai_assistant.appearance_response import AppearanceResponseComposer
 from neuro_mirror.plugins.ai_assistant.backends import build_assistant_backend
 from neuro_mirror.plugins.ai_assistant.plugin import AIAssistantPlugin
+from neuro_mirror.plugins.ai_assistant.rules import load_assistant_rules
+from neuro_mirror.plugins.camera.plugin import CameraPlugin
+from neuro_mirror.plugins.microphone.plugin import MicrophonePlugin
 from neuro_mirror.plugins.speech_worker.plugin import SpeechWorkerPlugin
 from neuro_mirror.plugins.storage.plugin import StoragePlugin
 from neuro_mirror.plugins.video_analysis.plugin import VisionWorkerPlugin
@@ -80,6 +84,7 @@ def create_runtime(
         if settings.weather_location
         else "Автоматическое определение по IP"
     )
+    assistant_rules = load_assistant_rules(settings.assistant_rules_path)
 
     appearance_composer = AppearanceResponseComposer(
         enabled=settings.enable_ai_assistant,
@@ -88,10 +93,16 @@ def create_runtime(
         ollama_model=settings.ollama_model,
         ollama_vision_model=settings.ollama_vision_model,
         timeout_seconds=settings.ollama_timeout_seconds,
+        assistant_rules=assistant_rules,
     )
 
+    plugin_manager.register(DeviceManager(bus, settings=settings))
     plugin_manager.register(StoragePlugin(bus))
-    plugin_manager.register(VisionWorkerPlugin(bus, settings=settings))
+    plugin_manager.register(CameraPlugin(bus, settings=settings))
+    plugin_manager.register(MicrophonePlugin(bus, settings=settings))
+    plugin_manager.register(
+        VisionWorkerPlugin(bus, settings=settings, appearance_composer=appearance_composer)
+    )
     plugin_manager.register(SpeechWorkerPlugin(bus, settings=settings))
     plugin_manager.register(DemoVoiceTestPlugin(bus))
     plugin_manager.register(AggregatorPlugin(bus, appearance_composer=appearance_composer))
@@ -101,7 +112,8 @@ def create_runtime(
             AIAssistantPlugin(
                 bus,
                 enabled=settings.enable_ai_assistant,
-                backend=build_assistant_backend(settings),
+                backend=build_assistant_backend(settings, assistant_rules=assistant_rules),
+                settings=settings,
             )
         )
 
