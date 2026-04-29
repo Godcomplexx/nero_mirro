@@ -25,6 +25,8 @@ class Settings:
     ollama_vision_model: str = "llava"
     ollama_timeout_seconds: float = 30.0
     assistant_rules_path: str = ""
+    appearance_memory_path: str = "runtime/appearance_memory.json"
+    appearance_memory_limit: int = 20
 
     weather_enabled: bool = True
     weather_location: str = ""
@@ -105,6 +107,11 @@ class Settings:
         raw_ollama_vision_model = os.getenv("NEURO_MIRROR_OLLAMA_VISION_MODEL", "llava").strip()
         raw_ollama_timeout = os.getenv("NEURO_MIRROR_OLLAMA_TIMEOUT_SECONDS", "30").strip()
         raw_assistant_rules_path = os.getenv("NEURO_MIRROR_ASSISTANT_RULES_PATH", "").strip()
+        raw_appearance_memory_path = os.getenv(
+            "NEURO_MIRROR_APPEARANCE_MEMORY_PATH",
+            str(base_dir / "runtime" / "appearance_memory.json"),
+        ).strip()
+        raw_appearance_memory_limit = os.getenv("NEURO_MIRROR_APPEARANCE_MEMORY_LIMIT", "20").strip()
 
         raw_weather_enabled = os.getenv("NEURO_MIRROR_WEATHER_ENABLED", "1").strip().lower()
         raw_weather_location = os.getenv("NEURO_MIRROR_WEATHER_LOCATION", "").strip()
@@ -185,6 +192,8 @@ class Settings:
             ollama_vision_model=raw_ollama_vision_model,
             ollama_timeout_seconds=float(raw_ollama_timeout),
             assistant_rules_path=raw_assistant_rules_path,
+            appearance_memory_path=raw_appearance_memory_path,
+            appearance_memory_limit=max(1, int(raw_appearance_memory_limit)),
             weather_enabled=raw_weather_enabled not in {"0", "false", "no"},
             weather_location=raw_weather_location,
             weather_base_url=raw_weather_base_url,

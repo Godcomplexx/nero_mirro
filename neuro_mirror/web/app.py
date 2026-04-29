@@ -256,7 +256,7 @@ def create_app() -> FastAPI:
                     source="web.appearance",
                     payload={"image_path": temp_path},
                 ),
-                timeout=ctx.settings.ollama_timeout_seconds + 30,
+                timeout=max(ctx.settings.worker_request_timeout_seconds, ctx.settings.ollama_timeout_seconds + 90),
             )
         except asyncio.TimeoutError:
             raise HTTPException(status_code=504, detail="Анализ внешности занял слишком долго.")

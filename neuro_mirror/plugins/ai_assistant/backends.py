@@ -73,7 +73,7 @@ class OllamaAssistantBackend:
         currency_base_url: str = "https://api.frankfurter.dev",
         internet_fallback_enabled: bool = True,
         internet_fallback_base_url: str = "https://api.duckduckgo.com",
-        assistant_rules: str = "",
+        rules_path: str = "",
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.model = model
@@ -86,7 +86,7 @@ class OllamaAssistantBackend:
         self.currency_base_url = currency_base_url.rstrip("/")
         self.internet_fallback_enabled = internet_fallback_enabled
         self.internet_fallback_base_url = internet_fallback_base_url.rstrip("/")
-        self.assistant_rules = assistant_rules.strip() or load_assistant_rules()
+        self.rules_path = rules_path
         self.name = f"ollama:{model}"
         self._resolved_model_cache: str = ""
 
@@ -231,7 +231,8 @@ class OllamaAssistantBackend:
         )
 
     def _rules_block(self) -> str:
-        return f"Общие правила поведения ассистента:\n{self.assistant_rules}\n\n"
+        rules = load_assistant_rules(self.rules_path)
+        return f"Общие правила поведения ассистента:\n{rules}\n\n"
 
     def _build_prompt(self, utterance: str) -> str:
         return self._rules_block() + (
@@ -880,9 +881,8 @@ class _DuckDuckGoHTMLParser(HTMLParser):
             self._current["snippet"] = self._current.get("snippet", "") + data
 
 
-def build_assistant_backend(settings: Settings, *, assistant_rules: str = "") -> AssistantBackend:
+def build_assistant_backend(settings: Settings) -> AssistantBackend:
     if settings.ai_backend == "ollama":
-        effective_rules = assistant_rules or load_assistant_rules(settings.assistant_rules_path)
         return OllamaAssistantBackend(
             base_url=settings.ollama_base_url,
             model=settings.ollama_model,
@@ -895,7 +895,7 @@ def build_assistant_backend(settings: Settings, *, assistant_rules: str = "") ->
             currency_base_url=settings.currency_base_url,
             internet_fallback_enabled=settings.internet_fallback_enabled,
             internet_fallback_base_url=settings.internet_fallback_base_url,
-            assistant_rules=effective_rules,
+            rules_path=settings.assistant_rules_path,
         )
     return RuleBasedAssistantBackend()
 

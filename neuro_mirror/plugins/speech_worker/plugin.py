@@ -148,7 +148,11 @@ class SpeechWorkerPlugin(ProcessorPlugin):
         *,
         transcript_text: str | None = None,
     ) -> None:
-        ui_payload: dict[str, Any] = {"screen": "assistant", "message": message}
+        ui_payload: dict[str, Any] = {
+            "screen": "assistant",
+            "message": message,
+            "assistant_source": "",
+        }
         if transcript_text is not None:
             ui_payload["transcript_text"] = transcript_text
         await self.bus.publish(
@@ -216,6 +220,7 @@ class SpeechWorkerPlugin(ProcessorPlugin):
                         "transcript_text": "",
                         "recording_active": False,
                         "message": message,
+                        "assistant_source": "",
                     },
                 )
             )
@@ -237,6 +242,7 @@ class SpeechWorkerPlugin(ProcessorPlugin):
                         "transcript_text": transcript,
                         "recording_active": False,
                         "message": message,
+                        "assistant_source": "",
                     },
                 )
             )
@@ -250,6 +256,7 @@ class SpeechWorkerPlugin(ProcessorPlugin):
                     "transcript_text": transcript,
                     "recording_active": False,
                     "message": self._transcript_message(transcript, load_ms=load_ms, transcribe_ms=transcribe_ms),
+                    "assistant_source": "",
                 },
             )
         )

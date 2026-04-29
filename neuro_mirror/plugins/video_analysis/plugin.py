@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import base64
 import json
 import os
@@ -9,13 +8,19 @@ from pathlib import Path
 from typing import Any
 from urllib import error, request
 
+import asyncio
+import logging
+
 from neuro_mirror.core.gpu_scheduler import exclusive_gpu_task_sync
 from neuro_mirror.core.settings import Settings
 from neuro_mirror.core.worker_client import WorkerClient
 from neuro_mirror.interfaces.processor import ProcessorPlugin
 from neuro_mirror.models.events import Event, Topics
 from neuro_mirror.plugins.ai_assistant.appearance_response import AppearanceResponseComposer
-from neuro_mirror.utils.text import is_safe_russian_text, sanitize_vision_description
+from neuro_mirror.screening.video_analyzer import analyze_frames
+from neuro_mirror.utils.text import is_safe_russian_text
+
+logger = logging.getLogger(__name__)
 
 
 class VisionWorkerPlugin(ProcessorPlugin):
@@ -77,18 +82,9 @@ class VisionWorkerPlugin(ProcessorPlugin):
             return
 
         result = dict(response.result, source_backend="vision_worker:web")
-        frame_base64 = str(result.pop("frame_base64", "") or "").strip()
-        if frame_base64:
-            try:
-                vision_description = await asyncio.to_thread(
-                    self._call_ollama_vision_sync, frame_base64
-                )
-                vision_description = sanitize_vision_description(vision_description)
-                if vision_description:
-                    result["appearance_description"] = vision_description
-            except Exception as exc:
-                notes = str(result.get("notes") or "").strip()
-                result["notes"] = f"{notes} Ollama Vision: {exc}".strip()
+        # Keep frame_base64 in result so AppearanceResponseComposer can use
+        # its full 3-stage pipeline (Vision EN → translate RU → polish)
+        # instead of the simpler _call_ollama_vision_sync prompt.
 
         reply_text = ""
         if self.appearance_composer:
@@ -96,18 +92,31 @@ class VisionWorkerPlugin(ProcessorPlugin):
             if not is_safe_russian_text(reply_text):
                 result["appearance_description"] = ""
                 reply_text = self.appearance_composer._build_template(result)
+            if not result.get("appearance_description"):
+                vision_status = str(result.get("vision_status") or "").strip()
+                note = "Детальное vision-описание всего кадра не получено; видимые детали не выдумывались."
+                if vision_status:
+                    note = f"{note} Статус vision: {vision_status}."
+                existing_notes = str(result.get("notes") or "").strip()
+                result["notes"] = f"{existing_notes} {note}".strip()
+            # Remove heavy field before publishing
+            result.pop("frame_base64", None)
 
         report_payload = {
             "report_type": "appearance",
             "state": "completed",
             "compliment": reply_text,
             "observed": result.get("observed") or "",
-            "suggestion": "Можно повторить анализ при другом освещении или под другим углом камеры.",
+            "suggestion": "Если описание не появилось, проверь доступность Ollama и установленную vision-модель.",
             "face_detected": result.get("face_detected"),
             "face_count": result.get("face_count"),
             "confidence": result.get("confidence"),
             "emotion": result.get("emotion") or "",
             "appearance_description": result.get("appearance_description") or "",
+            "appearance_checklist": result.get("appearance_checklist") or {},
+            "appearance_memory_notes": result.get("appearance_memory_notes") or "",
+            "wellness_suggestion": result.get("wellness_suggestion") or "",
+            "vision_status": result.get("vision_status") or "",
             "emotiefflib_available": result.get("emotiefflib_available"),
             "notes": result.get("notes") or "",
             "source_backend": result.get("source_backend") or "vision_worker:web",
@@ -157,24 +166,8 @@ class VisionWorkerPlugin(ProcessorPlugin):
         if mode == "appearance_check":
             if response.ok:
                 result = dict(response.result, source_backend="vision_worker")
-                # Call Ollama Vision outside worker lock so preview keeps running
-                frame_b64 = result.pop("frame_base64", "")
-                if frame_b64:
-                    try:
-                        desc = await asyncio.to_thread(
-                            self._call_ollama_vision_sync, frame_b64
-                        )
-                        desc = sanitize_vision_description(desc)
-                        result["appearance_description"] = desc
-                        observed = result.get("observed", "")
-                        if desc:
-                            result["observed"] = f"{observed} {desc}".strip()
-                    except Exception as exc:
-                        notes = result.get("notes", "")
-                        result["notes"] = f"{notes} Ollama Vision: {exc}".strip()
-                        result["appearance_description"] = ""
-                else:
-                    result["appearance_description"] = ""
+                # Let AppearanceResponseComposer handle the full Vision pipeline
+                # (frame_base64 stays in result for the 3-stage EN→RU→polish flow)
 
                 await self.bus.publish(
                     Event(
@@ -209,21 +202,44 @@ class VisionWorkerPlugin(ProcessorPlugin):
 
         if response.ok:
             raw = dict(response.result)
+            await self._publish_status_snapshot(raw)
+
+            # Run real screening analysis on the frame
+            try:
+                frame_data = base64.b64decode(frame_base64) if frame_base64 else b""
+                video_result = await asyncio.to_thread(analyze_frames, [frame_data] if frame_data else [])
+                logger.info(
+                    "screening video analysis: attention=%.2f gaze=%.2f face=%s",
+                    video_result.attention_score,
+                    video_result.gaze_stability,
+                    video_result.face_detected,
+                )
+            except Exception as exc:
+                logger.exception("screening video analysis failed, using fallback")
+                from neuro_mirror.screening.video_analyzer import VideoAnalysisResult
+                video_result = VideoAnalysisResult(
+                    attention_score=0.5,
+                    face_detected=bool(raw.get("face_detected", False)),
+                    face_count=int(raw.get("face_count") or 0),
+                    notes=f"Fallback из-за ошибки анализа: {exc}",
+                )
+
             await self.bus.publish(
                 Event(
                     topic=Topics.ANALYSIS_RESULT,
                     source=self.name,
                     payload={
                         "analysis_type": "screening",
-                        "attention_score": 0.78 if raw.get("face_detected") else 0.42,
-                        "face_detected": bool(raw.get("face_detected", False)),
-                        "face_count": int(raw.get("face_count") or 0),
-                        "notes": raw.get("notes") or "Видео-скрининг использует кадр из CameraPlugin.",
-                        "source_backend": "vision_worker",
+                        "attention_score": video_result.attention_score,
+                        "gaze_stability": video_result.gaze_stability,
+                        "micro_expression_flags": list(video_result.micro_expression_flags),
+                        "face_detected": video_result.face_detected,
+                        "face_count": video_result.face_count,
+                        "notes": video_result.notes or raw.get("notes") or "",
+                        "source_backend": "vision_worker + screening_analyzer",
                     },
                 )
             )
-            await self._publish_status_snapshot(response.result)
             return
 
         await self.bus.publish(
@@ -232,7 +248,9 @@ class VisionWorkerPlugin(ProcessorPlugin):
                 source=self.name,
                 payload={
                     "analysis_type": "screening",
-                    "attention_score": 0.25,
+                    "attention_score": 0.0,
+                    "gaze_stability": 0.0,
+                    "micro_expression_flags": [],
                     "face_detected": False,
                     "face_count": 0,
                     "notes": f"Vision worker error: {response.error_message}",

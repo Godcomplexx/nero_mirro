@@ -138,8 +138,7 @@ summary {
   transition: opacity 500ms ease;
 }
 
-body[data-ui-state="listening"] .stage-halo,
-body[data-ui-state="speaking"] .stage-halo {
+body[data-ui-state="listening"] .stage-halo {
   opacity: 1;
 }
 
@@ -405,6 +404,8 @@ body[data-ui-state="speaking"] .stage-halo {
   bottom: calc(var(--bottom-drawer-clearance) + 300px);
   width: clamp(260px, 20vw, 360px);
   max-width: calc(100vw - 72px);
+  max-height: min(48vh, 520px);
+  overflow-y: auto;
   z-index: var(--controls-z);
   padding: 20px 22px;
   border-radius: 28px;
@@ -437,8 +438,8 @@ body[data-ui-state="speaking"] .stage-halo {
 .message-value {
   margin: 0;
   color: var(--fg);
-  font-size: clamp(18px, 2vw, 22px);
-  line-height: 1.55;
+  font-size: clamp(16px, 1.55vw, 20px);
+  line-height: 1.42;
   text-wrap: pretty;
 }
 

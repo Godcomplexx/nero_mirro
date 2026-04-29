@@ -774,6 +774,28 @@ async function maybeSpeak(snapshot) {
   const screen = snapshot.screen || "";
   if (screen !== "assistant" && screen !== "summary") return;
 
+  // Skip intermediate/status messages — only speak final assistant replies
+  const source = String(snapshot.assistant_source || "").toLowerCase();
+  if (source === "обработка запроса" || source === "ошибка ассистента") return;
+
+  const messageText = String(snapshot.message || "").trim().toLowerCase();
+  // Skip transcription echoes, status lines, and intermediate processing messages
+  if (
+    messageText.startsWith("обрабатываю запрос") ||
+    messageText.startsWith("запрос распознан") ||
+    messageText.startsWith("сейчас оцениваю") ||
+    messageText.startsWith("сейчас посмотрю") ||
+    messageText.startsWith("анализирую кадр") ||
+    messageText.startsWith("распознан текст:") ||
+    messageText.startsWith("распознано неуверенно") ||
+    messageText.startsWith("речь не распознана") ||
+    messageText.startsWith("запускаю скрининг") ||
+    messageText.includes("речь распознана неуверенно") ||
+    messageText.includes("это может занять")
+  ) {
+    return;
+  }
+
   state.lastSpokenText = snapshot.message;
   setMascotSpeech(snapshot.message, { visible: false });
 
@@ -1248,11 +1270,22 @@ function matchesWakeWord(transcript) {
   for (const w of words) {
     if (w.startsWith("зеркал")) return true;
   }
+  // Common STT misrecognitions for "зеркало"
+  const sttVariants = ["серкало", "серкала", "зиркало", "зиркала", "зёркало", "зеркола", "серкол"];
+  for (const w of words) {
+    for (const variant of sttVariants) {
+      if (w.startsWith(variant)) return true;
+    }
+  }
   return false;
 }
 
 function startWakeWordListening() {
-  if (state.wakeWordListening) return;
+  appendLogLine(`[wake-word] startWakeWordListening called: listening=${state.wakeWordListening}`);
+  if (state.wakeWordListening) {
+    appendLogLine("[wake-word] already listening, skip");
+    return;
+  }
   const unavailableReason = getWakeWordUnavailableReason();
   if (unavailableReason) {
     setText(el.voiceStatus, unavailableReason);
@@ -1261,21 +1294,35 @@ function startWakeWordListening() {
   }
 
   const recognition = createSpeechRecognition();
-  if (!recognition) return;
+  if (!recognition) {
+    appendLogLine("[wake-word] failed to create SpeechRecognition");
+    return;
+  }
 
   state.wakeWordRecognition = recognition;
   state.wakeWordListening = true;
   updateWakeWordIndicator();
 
   recognition.onresult = (event) => {
-    if (state.recording || state.busy || state.wakeWordCooldown) return;
+    // Log every STT result for debugging wake-word recognition
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      const result = event.results[i];
+      const isFinal = result.isFinal;
+      const texts = [];
+      for (let j = 0; j < result.length; j++) {
+        texts.push(result[j].transcript.trim());
+      }
+      appendLogLine(`[wake-word] STT ${isFinal ? "final" : "interim"}: ${JSON.stringify(texts)}`);
+    }
+
+    if (state.recording || state.wakeWordCooldown) return;
 
     for (let i = event.resultIndex; i < event.results.length; i++) {
       const result = event.results[i];
       for (let j = 0; j < result.length; j++) {
         const transcript = result[j].transcript;
         if (matchesWakeWord(transcript)) {
-          appendLogLine(`[wake-word] detected: "${transcript.trim()}"`);
+          appendLogLine(`[wake-word] ✓ MATCH: "${transcript.trim()}"`);
           triggerWakeWordActivation();
           return;
         }
@@ -1284,9 +1331,9 @@ function startWakeWordListening() {
   };
 
   recognition.onerror = (event) => {
+    appendLogLine(`[wake-word] error: ${event.error}`);
     // "no-speech" and "aborted" are normal during continuous listening
     if (event.error === "no-speech" || event.error === "aborted") return;
-    appendLogLine(`[wake-word] error: ${event.error}`);
     if (event.error === "not-allowed") {
       setText(el.voiceStatus, "Микрофон не разрешён для голосовой активации");
       stopWakeWordListening();
@@ -1298,19 +1345,24 @@ function startWakeWordListening() {
 
   recognition.onend = () => {
     // Auto-restart if still enabled and not currently recording
-    if (state.wakeWordEnabled && !state.recording && !state.busy) {
+    if (state.wakeWordEnabled && !state.recording) {
       try {
         recognition.start();
-      } catch (_) {
-        // May fail if already started; schedule a retry
+      } catch (err) {
+        appendLogLine(`[wake-word] restart failed: ${err.message || err}, will retry`);
+        state.wakeWordListening = false;
+        state.wakeWordRecognition = null;
+        updateWakeWordIndicator();
+        // Retry with a fresh recognition instance
         setTimeout(() => {
-          if (state.wakeWordEnabled && !state.recording && !state.busy && state.wakeWordListening) {
-            try { recognition.start(); } catch (_e) { /* ignore */ }
+          if (state.wakeWordEnabled && !state.recording) {
+            startWakeWordListening();
           }
-        }, 500);
+        }, 1000);
       }
     } else {
       state.wakeWordListening = false;
+      state.wakeWordRecognition = null;
       updateWakeWordIndicator();
     }
   };
@@ -1339,29 +1391,46 @@ function stopWakeWordListening() {
 
 function pauseWakeWordForRecording() {
   if (state.wakeWordRecognition && state.wakeWordListening) {
+    appendLogLine("[wake-word] pausing for recording");
+    state.wakeWordListening = false;
     try {
       state.wakeWordRecognition.abort();
     } catch (_) { /* ignore */ }
+    state.wakeWordRecognition = null;
+    updateWakeWordIndicator();
   }
 }
 
 function resumeWakeWordAfterRecording() {
+  appendLogLine(`[wake-word] resumeWakeWordAfterRecording called: enabled=${state.wakeWordEnabled}, listening=${state.wakeWordListening}, recording=${state.recording}`);
   if (state.wakeWordEnabled && !state.wakeWordListening) {
-    // Small delay to avoid conflict with MediaRecorder mic release
+    // Longer delay to ensure browser fully releases the mic after MediaRecorder/getUserMedia
+    appendLogLine("[wake-word] scheduling resume in 1500ms");
     setTimeout(() => {
-      if (state.wakeWordEnabled && !state.recording && !state.busy) {
+      appendLogLine(`[wake-word] resume timer fired: enabled=${state.wakeWordEnabled}, recording=${state.recording}, listening=${state.wakeWordListening}`);
+      if (state.wakeWordEnabled && !state.recording) {
         startWakeWordListening();
       }
-    }, 800);
+    }, 1500);
   }
 }
 
 function triggerWakeWordActivation() {
-  if (state.recording || state.busy) return;
+  if (state.recording) return;
 
   // Cooldown to avoid double-triggering
   state.wakeWordCooldown = true;
-  setTimeout(() => { state.wakeWordCooldown = false; }, 3000);
+  setTimeout(() => { state.wakeWordCooldown = false; }, 1500);
+
+  // Stop current TTS playback if active, so user can speak immediately
+  if (state.currentSpeechAudio) {
+    try {
+      state.currentSpeechAudio.pause();
+      state.currentSpeechAudio.currentTime = 0;
+    } catch (_) { /* ignore */ }
+    state.currentSpeechAudio = null;
+  }
+  state.busy = false;
 
   // Pause wake-word recognition before starting recording
   pauseWakeWordForRecording();
@@ -1371,7 +1440,7 @@ function triggerWakeWordActivation() {
 
   // Auto-start voice recording after a tiny delay for the beep
   setTimeout(() => {
-    if (el.voiceButton && !state.recording && !state.busy) {
+    if (el.voiceButton && !state.recording) {
       el.voiceButton.click();
       // Auto-stop recording after configurable seconds
       const autoStopMs = 8000;
