@@ -2,20 +2,26 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from pathlib import Path
 
 from neuro_mirror.core.event_bus import EventBus
+from neuro_mirror.core.device_manager import DeviceManager
 from neuro_mirror.core.plugin_manager import PluginManager
 from neuro_mirror.core.settings import Settings
 from neuro_mirror.interfaces.plugin import Plugin
 from neuro_mirror.models.events import Event, Topics
 from neuro_mirror.plugins.aggregator.plugin import AggregatorPlugin
 from neuro_mirror.plugins.ai_assistant.appearance_response import AppearanceResponseComposer
+from neuro_mirror.plugins.ai_assistant.appearance_memory import AppearanceMemoryStore
 from neuro_mirror.plugins.ai_assistant.backends import build_assistant_backend
 from neuro_mirror.plugins.ai_assistant.plugin import AIAssistantPlugin
+from neuro_mirror.plugins.camera.plugin import CameraPlugin
+from neuro_mirror.plugins.microphone.plugin import MicrophonePlugin
 from neuro_mirror.plugins.speech_worker.plugin import SpeechWorkerPlugin
 from neuro_mirror.plugins.storage.plugin import StoragePlugin
 from neuro_mirror.plugins.video_analysis.plugin import VisionWorkerPlugin
-from neuro_mirror.plugins.voice_test.plugin import DemoVoiceTestPlugin
+from neuro_mirror.plugins.voice_test.plugin import VoiceTestPlugin
+from neuro_mirror.plugins.moca_test.plugin import MocaTestPlugin
 
 
 @dataclass(slots=True)
@@ -80,7 +86,6 @@ def create_runtime(
         if settings.weather_location
         else "Автоматическое определение по IP"
     )
-
     appearance_composer = AppearanceResponseComposer(
         enabled=settings.enable_ai_assistant,
         ai_backend=settings.ai_backend,
@@ -88,12 +93,23 @@ def create_runtime(
         ollama_model=settings.ollama_model,
         ollama_vision_model=settings.ollama_vision_model,
         timeout_seconds=settings.ollama_timeout_seconds,
+        rules_path=settings.assistant_rules_path,
+        memory_store=AppearanceMemoryStore(
+            path=Path(settings.appearance_memory_path or "runtime/appearance_memory.json"),
+            limit=settings.appearance_memory_limit,
+        ),
     )
 
+    plugin_manager.register(DeviceManager(bus, settings=settings))
     plugin_manager.register(StoragePlugin(bus))
-    plugin_manager.register(VisionWorkerPlugin(bus, settings=settings))
+    plugin_manager.register(CameraPlugin(bus, settings=settings))
+    plugin_manager.register(MicrophonePlugin(bus, settings=settings))
+    plugin_manager.register(
+        VisionWorkerPlugin(bus, settings=settings, appearance_composer=appearance_composer)
+    )
     plugin_manager.register(SpeechWorkerPlugin(bus, settings=settings))
-    plugin_manager.register(DemoVoiceTestPlugin(bus))
+    plugin_manager.register(VoiceTestPlugin(bus, settings=settings))
+    plugin_manager.register(MocaTestPlugin(bus, settings=settings))
     plugin_manager.register(AggregatorPlugin(bus, appearance_composer=appearance_composer))
 
     if include_ai_plugin:
@@ -102,6 +118,7 @@ def create_runtime(
                 bus,
                 enabled=settings.enable_ai_assistant,
                 backend=build_assistant_backend(settings),
+                settings=settings,
             )
         )
 

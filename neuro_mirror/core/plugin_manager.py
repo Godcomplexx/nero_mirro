@@ -18,3 +18,4 @@ class PluginManager:
         for plugin in reversed(self._plugins):
             await plugin.stop()
 
+

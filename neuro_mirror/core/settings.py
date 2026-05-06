@@ -24,6 +24,9 @@ class Settings:
     ollama_fallback_model: str = ""
     ollama_vision_model: str = "llava"
     ollama_timeout_seconds: float = 30.0
+    assistant_rules_path: str = ""
+    appearance_memory_path: str = "runtime/appearance_memory.json"
+    appearance_memory_limit: int = 20
 
     weather_enabled: bool = True
     weather_location: str = ""
@@ -51,10 +54,13 @@ class Settings:
     stt_beam_size: int = 5
     stt_best_of: int = 5
     stt_vad_filter: bool = True
-    stt_hotwords: str = "камера, что у меня в руках, что в руках, в руках, в руке, держу, покажи, посмотри в камеру, как я выгляжу, оцени внешний вид, скрининг"
+    stt_hotwords: str = "зеркало, камера, что у меня в руках, что в руках, в руках, в руке, держу, покажи, посмотри в камеру, как я выгляжу, оцени внешний вид, скрининг, погода, время, привет, как дела, расскажи, включи, выключи"
     voice_sample_rate: int = 16000
     voice_channels: int = 1
     voice_max_record_seconds: float = 12.0
+    voice_silence_threshold: float = 0.012
+    voice_silence_duration: float = 1.8
+    voice_min_speech_duration: float = 0.4
     tts_voice: str = "ru-RU-SvetlanaNeural"
     tts_rate: str = "+15%"
 
@@ -103,6 +109,12 @@ class Settings:
         raw_ollama_fallback_model = os.getenv("NEURO_MIRROR_OLLAMA_FALLBACK_MODEL", "").strip()
         raw_ollama_vision_model = os.getenv("NEURO_MIRROR_OLLAMA_VISION_MODEL", "llava").strip()
         raw_ollama_timeout = os.getenv("NEURO_MIRROR_OLLAMA_TIMEOUT_SECONDS", "30").strip()
+        raw_assistant_rules_path = os.getenv("NEURO_MIRROR_ASSISTANT_RULES_PATH", "").strip()
+        raw_appearance_memory_path = os.getenv(
+            "NEURO_MIRROR_APPEARANCE_MEMORY_PATH",
+            str(base_dir / "runtime" / "appearance_memory.json"),
+        ).strip()
+        raw_appearance_memory_limit = os.getenv("NEURO_MIRROR_APPEARANCE_MEMORY_LIMIT", "20").strip()
 
         raw_weather_enabled = os.getenv("NEURO_MIRROR_WEATHER_ENABLED", "1").strip().lower()
         raw_weather_location = os.getenv("NEURO_MIRROR_WEATHER_LOCATION", "").strip()
@@ -142,7 +154,7 @@ class Settings:
         raw_stt_vad_filter = os.getenv("NEURO_MIRROR_STT_VAD_FILTER", "1").strip().lower()
         raw_stt_hotwords = os.getenv(
             "NEURO_MIRROR_STT_HOTWORDS",
-            "камера, в руках, в руке, держу, скрининг, внешний вид",
+            "камера, в руках, в руке, держу, скрининг, внешний вид, президент, сша, юсей, usa",
         ).strip()
         if "РєР°РјРµСЂР°" in raw_stt_hotwords:
             raw_stt_hotwords = (
@@ -150,6 +162,9 @@ class Settings:
                 "покажи, посмотри в камеру, как я выгляжу, оцени внешний вид, скрининг"
             )
         raw_voice_sample_rate = os.getenv("NEURO_MIRROR_VOICE_SAMPLE_RATE", "16000").strip()
+        raw_voice_silence_threshold = os.getenv("NEURO_MIRROR_VOICE_SILENCE_THRESHOLD", "0.012").strip()
+        raw_voice_silence_duration = os.getenv("NEURO_MIRROR_VOICE_SILENCE_DURATION", "1.8").strip()
+        raw_voice_min_speech_duration = os.getenv("NEURO_MIRROR_VOICE_MIN_SPEECH_DURATION", "0.4").strip()
         if raw_stt_hotwords.startswith("\u0420") and "\u043a\u0430\u043c\u0435\u0440\u0430" not in raw_stt_hotwords.lower():
             raw_stt_hotwords = (
                 "\u043a\u0430\u043c\u0435\u0440\u0430, \u0447\u0442\u043e \u0443 \u043c\u0435\u043d\u044f \u0432 \u0440\u0443\u043a\u0430\u0445, "
@@ -182,6 +197,9 @@ class Settings:
             ollama_fallback_model=raw_ollama_fallback_model,
             ollama_vision_model=raw_ollama_vision_model,
             ollama_timeout_seconds=float(raw_ollama_timeout),
+            assistant_rules_path=raw_assistant_rules_path,
+            appearance_memory_path=raw_appearance_memory_path,
+            appearance_memory_limit=max(1, int(raw_appearance_memory_limit)),
             weather_enabled=raw_weather_enabled not in {"0", "false", "no"},
             weather_location=raw_weather_location,
             weather_base_url=raw_weather_base_url,
@@ -210,6 +228,9 @@ class Settings:
             voice_sample_rate=int(raw_voice_sample_rate),
             voice_channels=int(raw_voice_channels),
             voice_max_record_seconds=float(raw_voice_max_seconds),
+            voice_silence_threshold=float(raw_voice_silence_threshold),
+            voice_silence_duration=float(raw_voice_silence_duration),
+            voice_min_speech_duration=float(raw_voice_min_speech_duration),
             tts_voice=raw_tts_voice,
             tts_rate=raw_tts_rate,
         )

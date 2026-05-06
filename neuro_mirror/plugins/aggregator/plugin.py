@@ -11,6 +11,7 @@ from neuro_mirror.plugins.ai_assistant.appearance_response import AppearanceResp
 class SessionState(str, Enum):
     IDLE = "idle"
     SCREENING = "screening"
+    MOCA = "moca"
     APPEARANCE = "appearance"
     REPORTING = "reporting"
 
@@ -33,14 +34,18 @@ class AggregatorPlugin(ProcessorPlugin):
         self.state = SessionState.IDLE
         self.history_count = 0
         self._latest_results: dict[str, dict[str, Any]] = {}
+        self._pending_capture_mode = ""
 
     def subscribed_topics(self) -> tuple[str, ...]:
         return (
             Topics.SYSTEM_BOOTSTRAP,
             Topics.UI_ACTION,
             Topics.AI_COMMAND,
+            Topics.DEVICE_SELECTION_RESOLVED,
+            Topics.DEVICE_VALIDATION_FAILED,
             Topics.ANALYSIS_RESULT,
             Topics.VOICE_TEST_RESULT,
+            Topics.MOCA_TEST_RESULT,
             Topics.STORAGE_READ_RESULT,
         )
 
@@ -57,6 +62,14 @@ class AggregatorPlugin(ProcessorPlugin):
             await self._handle_action(event.payload)
             return
 
+        if event.topic == Topics.DEVICE_SELECTION_RESOLVED:
+            await self._handle_devices_resolved(event.payload)
+            return
+
+        if event.topic == Topics.DEVICE_VALIDATION_FAILED:
+            await self._handle_device_validation_failed(event.payload)
+            return
+
         if event.topic == Topics.ANALYSIS_RESULT:
             if self.state == SessionState.APPEARANCE:
                 await self._finish_appearance_analysis(event.payload)
@@ -69,6 +82,11 @@ class AggregatorPlugin(ProcessorPlugin):
         if event.topic == Topics.VOICE_TEST_RESULT:
             self._latest_results["voice"] = event.payload
             await self._maybe_finish_screening()
+            return
+
+        if event.topic == Topics.MOCA_TEST_RESULT:
+            self._latest_results["moca"] = event.payload
+            await self._finish_moca()
 
     async def _handle_bootstrap(self) -> None:
         await self.bus.publish(
@@ -105,6 +123,16 @@ class AggregatorPlugin(ProcessorPlugin):
             await self._start_appearance_analysis()
             return
 
+        if action == "stop_moca":
+            await self.bus.publish(Event(topic=Topics.MOCA_STOP, source=self.name, payload={}))
+            self.state = SessionState.IDLE
+            await self.bus.publish(Event(
+                topic=Topics.UI_UPDATE,
+                source=self.name,
+                payload={"screen": "idle", "message": "Тест MoCA прерван."},
+            ))
+            return
+
         await self.bus.publish(
             Event(
                 topic=Topics.UI_UPDATE,
@@ -119,6 +147,7 @@ class AggregatorPlugin(ProcessorPlugin):
     async def _start_screening(self) -> None:
         self.state = SessionState.SCREENING
         self._latest_results.clear()
+        self._pending_capture_mode = "daily_fast"
 
         await self.bus.publish(
             Event(
@@ -134,22 +163,16 @@ class AggregatorPlugin(ProcessorPlugin):
         )
         await self.bus.publish(
             Event(
-                topic=Topics.START_CAPTURE,
+                topic=Topics.PREPARE_SESSION,
                 source=self.name,
-                payload={"mode": "daily_fast"},
-            )
-        )
-        await self.bus.publish(
-            Event(
-                topic=Topics.START_TEST,
-                source=self.name,
-                payload={"test_id": "speech_baseline"},
+                payload={"mode": "daily_fast", "require_microphone": False},
             )
         )
 
     async def _start_appearance_analysis(self) -> None:
         self.state = SessionState.APPEARANCE
         self._latest_results.clear()
+        self._pending_capture_mode = "appearance_check"
 
         await self.bus.publish(
             Event(
@@ -164,9 +187,49 @@ class AggregatorPlugin(ProcessorPlugin):
         )
         await self.bus.publish(
             Event(
+                topic=Topics.PREPARE_SESSION,
+                source=self.name,
+                payload={"mode": "appearance_check", "require_microphone": False},
+            )
+        )
+
+    async def _handle_devices_resolved(self, payload: dict[str, Any]) -> None:
+        mode = str(payload.get("mode") or self._pending_capture_mode)
+        if not mode:
+            return
+
+        await self.bus.publish(
+            Event(
                 topic=Topics.START_CAPTURE,
                 source=self.name,
-                payload={"mode": "appearance_check"},
+                payload={
+                    "mode": mode,
+                    "selected_devices": payload.get("selected_devices") or {},
+                },
+            )
+        )
+
+        # Voice baseline test is no longer launched here —
+        # MoCA is started after face scan completes (see _maybe_finish_screening)
+
+        self._pending_capture_mode = ""
+
+    async def _handle_device_validation_failed(self, payload: dict[str, Any]) -> None:
+        self.state = SessionState.IDLE
+        self._pending_capture_mode = ""
+        errors = payload.get("errors") or []
+        message = "Не удалось подготовить устройства."
+        if errors:
+            message = f"{message} {'; '.join(map(str, errors))}"
+        await self.bus.publish(
+            Event(
+                topic=Topics.UI_UPDATE,
+                source=self.name,
+                payload={
+                    "screen": "idle",
+                    "message": message,
+                    "assistant_source": "устройства",
+                },
             )
         )
 
@@ -179,6 +242,9 @@ class AggregatorPlugin(ProcessorPlugin):
             "compliment": response_text,
             "observed": payload.get("observed") or "",
             "appearance_description": payload.get("appearance_description") or "",
+            "appearance_checklist": payload.get("appearance_checklist") or {},
+            "appearance_memory_notes": payload.get("appearance_memory_notes") or "",
+            "wellness_suggestion": payload.get("wellness_suggestion") or "",
             "suggestion": "Можно повторить анализ после изменения света или положения камеры.",
             "face_detected": payload.get("face_detected"),
             "face_count": payload.get("face_count"),
@@ -209,23 +275,61 @@ class AggregatorPlugin(ProcessorPlugin):
         self.state = SessionState.IDLE
 
     async def _maybe_finish_screening(self) -> None:
+        """Called when face scan result arrives — launch MoCA test next."""
         if self.state != SessionState.SCREENING:
             return
+        if "video" not in self._latest_results:
+            return
 
-        if "video" not in self._latest_results or "voice" not in self._latest_results:
+        # Face scan done — now start MoCA voice test
+        self.state = SessionState.MOCA
+        await self.bus.publish(
+            Event(
+                topic=Topics.UI_UPDATE,
+                source=self.name,
+                payload={
+                    "screen": "moca",
+                    "message": (
+                        "Скрининг лица завершён. "
+                        "Сейчас начнётся голосовой тест — следуйте инструкциям."
+                    ),
+                    "moca_task_index": 0,
+                    "moca_task_total": 11,
+                },
+            )
+        )
+        # Brief pause so patient sees the transition message
+        await self.bus.publish(
+            Event(
+                topic=Topics.MOCA_START,
+                source=self.name,
+                payload={},
+            )
+        )
+
+    async def _finish_moca(self) -> None:
+        """Called when MoCA test result arrives — compile and publish final report."""
+        if self.state != SessionState.MOCA:
             return
 
         self.state = SessionState.REPORTING
+
+        video = self._latest_results.get("video", {})
+        moca = self._latest_results.get("moca", {})
 
         report_payload = {
             "report_type": "screening",
             "state": "needs_review",
             "domains": {
-                "attention": self._latest_results["video"].get("attention_score"),
-                "speech": self._latest_results["voice"].get("speech_score"),
-                "reaction": self._latest_results["voice"].get("reaction_ms"),
+                "attention": video.get("attention_score"),
+                "gaze": video.get("gaze_stability"),
+                "moca_tasks": moca.get("tasks", []),
+                "moca_task_count": moca.get("task_count", 0),
             },
-            "sources": self._latest_results,
+            "sources": {
+                "video": video,
+                "moca": moca,
+            },
         }
 
         await self.bus.publish(Event(topic=Topics.REPORT_DATA, source=self.name, payload=report_payload))
@@ -236,9 +340,9 @@ class AggregatorPlugin(ProcessorPlugin):
                 source=self.name,
                 payload={
                     "screen": "summary",
-                    "message": "Скрининг завершён.",
+                    "message": "Скрининг завершён. Все задания выполнены.",
                     "report": report_payload,
-                    "assistant_source": "скрининг",
+                    "assistant_source": "скрининг MoCA",
                 },
             )
         )

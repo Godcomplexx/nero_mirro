@@ -249,6 +249,8 @@ def _run_transcription(
     vad_filter: bool,
     hotwords: str,
 ):
+    # temperature fallback list: start greedy, step up if model is uncertain
+    temperatures = [0.0, 0.2, 0.4, 0.6, 0.8, 1.0]
     return model.transcribe(
         audio_path,
         language=language,
@@ -257,11 +259,14 @@ def _run_transcription(
         condition_on_previous_text=False,
         vad_filter=vad_filter,
         without_timestamps=True,
-        temperature=0.0,
+        temperature=temperatures,
+        compression_ratio_threshold=2.4,
+        log_prob_threshold=-1.0,
+        no_speech_threshold=0.6,
         hotwords=hotwords or None,
         initial_prompt=(
-            "Это короткий голосовой запрос для домашнего ассистента на русском языке. "
-            "Точно распознавай названия городов, сериалов, продуктов и бытовых вопросов."
+            "Разговорная речь на русском языке. Короткие фразы и вопросы. "
+            "Имена, города, бытовые слова. Зеркало, камера, погода, время."
         ),
     )
 
@@ -310,30 +315,33 @@ def _estimate_confidence(
     if not transcript.strip():
         return 0.0
 
-    score = 0.62
+    score = 0.65
     word_count = len(transcript.split())
-    if word_count <= 2:
-        score -= 0.12
+    # Short commands (1-2 words) are normal for a voice assistant — only penalise single
+    # characters or obvious noise (single letter / punctuation only)
+    if word_count == 1:
+        score -= 0.06
 
     if average_logprob is not None:
         if average_logprob < -1.4:
-            score -= 0.28
+            score -= 0.25
         elif average_logprob < -1.0:
-            score -= 0.16
+            score -= 0.12
         elif average_logprob < -0.7:
-            score -= 0.07
+            score -= 0.05
         else:
             score += 0.08
 
     if max_no_speech_prob is not None:
         if max_no_speech_prob > 0.75:
             score -= 0.25
-        elif max_no_speech_prob > 0.45:
-            score -= 0.12
+        elif max_no_speech_prob > 0.5:
+            score -= 0.10
 
+    # Single character output is almost always a hallucination
     cleaned = transcript.strip(" .,!?:;\"'")
-    if cleaned and len(cleaned) <= 4:
-        score -= 0.1
+    if cleaned and len(cleaned) <= 2:
+        score -= 0.15
 
     return round(max(0.0, min(1.0, score)), 3)
 

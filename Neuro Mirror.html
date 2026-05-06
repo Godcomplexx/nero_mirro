@@ -1,0 +1,890 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<title>Нейрозеркало — Neuro Mirror</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Manrope:wght@200;300;400;500;600&display=swap" rel="stylesheet" />
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<style>
+  :root {
+    --bg: #06080b;
+    --fg: #e9eef5;
+    --fg-dim: rgba(233, 238, 245, 0.56);
+    --fg-faint: rgba(233, 238, 245, 0.28);
+    --hair: rgba(255, 255, 255, 0.08);
+    --hair-strong: rgba(255, 255, 255, 0.16);
+    --accent: #7bdcff;   /* cyan */
+    --accent-2: #a98bff; /* violet */
+    --glass: rgba(10, 14, 20, 0.32);
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: 'Manrope', system-ui, -apple-system, sans-serif;
+    font-weight: 300;
+    letter-spacing: 0.01em;
+    overflow: hidden;
+    height: 100%;
+    -webkit-font-smoothing: antialiased;
+  }
+  .mono { font-family: 'JetBrains Mono', ui-monospace, monospace; font-weight: 300; letter-spacing: 0.04em; }
+
+  /* Stage */
+  .stage {
+    position: fixed; inset: 0;
+    overflow: hidden;
+    background: #000;
+  }
+  .mirror {
+    position: absolute; inset: 0;
+    /* Scale-x(-1) simulates a mirror. */
+    transform: scaleX(-1);
+    background-size: cover;
+    background-position: center;
+    filter: saturate(0.85) contrast(1.02) brightness(0.78);
+  }
+  /* Subtle vignette + edge darkening so HUD reads, center stays clear */
+  .vignette {
+    position: absolute; inset: 0;
+    pointer-events: none;
+    background:
+      radial-gradient(120% 85% at 50% 45%, transparent 45%, rgba(0,0,0,0.55) 100%),
+      linear-gradient(180deg, rgba(0,0,0,0.35) 0%, transparent 18%, transparent 72%, rgba(0,0,0,0.5) 100%);
+  }
+  .grain {
+    position: absolute; inset: 0;
+    pointer-events: none; opacity: 0.06; mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+  }
+  /* Accent halo that blooms during listen / respond */
+  .halo {
+    position: absolute; left: 50%; top: 50%;
+    width: 88vmin; height: 88vmin;
+    transform: translate(-50%, -50%);
+    border-radius: 50%;
+    pointer-events: none;
+    background: radial-gradient(circle at center, color-mix(in oklab, var(--accent) 12%, transparent) 0%, transparent 55%);
+    opacity: 0; transition: opacity 700ms ease;
+  }
+  .halo.on { opacity: 1; }
+
+  /* HUD layout */
+  .hud {
+    position: absolute; inset: 0;
+    pointer-events: none;
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+  }
+  .hud > * { pointer-events: auto; }
+
+  /* TOP BAR */
+  .top {
+    display: flex; align-items: flex-start; justify-content: space-between;
+    padding: 28px 36px 0;
+    gap: 24px;
+  }
+  .brand {
+    display: flex; align-items: center; gap: 14px;
+    color: var(--fg);
+  }
+  .brand-mark {
+    width: 22px; height: 22px;
+    position: relative;
+  }
+  .brand-mark::before, .brand-mark::after {
+    content: ""; position: absolute; inset: 0;
+    border-radius: 50%;
+  }
+  .brand-mark::before {
+    border: 1px solid rgba(255,255,255,0.55);
+  }
+  .brand-mark::after {
+    inset: 5px;
+    background: radial-gradient(circle, var(--accent) 0%, transparent 70%);
+    filter: blur(1px);
+  }
+  .brand-name {
+    font-size: 12px; letter-spacing: 0.32em; text-transform: uppercase;
+    color: rgba(255,255,255,0.78);
+  }
+  .brand-sub {
+    font-size: 10px; letter-spacing: 0.24em; text-transform: uppercase;
+    color: var(--fg-faint);
+    margin-top: 3px;
+  }
+
+  .top-right {
+    display: flex; flex-direction: column; align-items: flex-end; gap: 10px;
+  }
+  .pill {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 6px 12px;
+    border-radius: 999px;
+    font-size: 10.5px; letter-spacing: 0.18em; text-transform: uppercase;
+    color: rgba(255,255,255,0.82);
+    background: rgba(255,255,255,0.04);
+    border: 1px solid var(--hair);
+    backdrop-filter: blur(14px) saturate(1.2);
+    -webkit-backdrop-filter: blur(14px) saturate(1.2);
+  }
+  .dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: #7df0b8;
+    box-shadow: 0 0 10px #7df0b8;
+  }
+
+  /* CENTER (corner brackets + time) */
+  .center {
+    position: relative;
+    display: grid;
+    place-items: center;
+  }
+  .brackets {
+    position: absolute; inset: 7% 6%;
+    pointer-events: none;
+  }
+  .bracket {
+    position: absolute;
+    width: 42px; height: 42px;
+    border: 1px solid rgba(255,255,255,0.22);
+  }
+  .bracket.tl { top: 0; left: 0; border-right: none; border-bottom: none; }
+  .bracket.tr { top: 0; right: 0; border-left: none; border-bottom: none; }
+  .bracket.bl { bottom: 0; left: 0; border-right: none; border-top: none; }
+  .bracket.br { bottom: 0; right: 0; border-left: none; border-top: none; }
+
+  .big-time {
+    position: absolute;
+    top: 28px; left: 50%; transform: translateX(-50%);
+    font-size: 11px; letter-spacing: 0.32em; text-transform: uppercase;
+    color: rgba(255,255,255,0.5);
+    display: flex; gap: 18px; align-items: baseline;
+  }
+  .big-time strong { color: var(--fg); font-weight: 400; letter-spacing: 0.2em; }
+
+  /* LEFT column (telemetry) */
+  .left-col {
+    position: absolute;
+    left: 36px; top: 50%; transform: translateY(-50%);
+    display: flex; flex-direction: column; gap: 18px;
+    color: var(--fg-dim);
+    font-size: 10.5px; letter-spacing: 0.22em; text-transform: uppercase;
+    transition: opacity 400ms ease, transform 400ms ease;
+  }
+  .left-col.hide {
+    opacity: 0;
+    transform: translateY(-50%) translateX(-10px);
+    pointer-events: none;
+  }
+  .tm {
+    display: flex; flex-direction: column; gap: 4px;
+    padding-left: 14px;
+    border-left: 1px solid rgba(255,255,255,0.1);
+  }
+  .tm .k { color: var(--fg-faint); font-size: 9.5px; }
+  .tm .v { color: var(--fg); font-size: 12px; letter-spacing: 0.12em; }
+
+  /* Right column (session id) */
+  .right-col {
+    position: absolute;
+    right: 36px; top: 50%; transform: translateY(-50%);
+    display: flex; flex-direction: column; gap: 18px;
+    color: var(--fg-dim);
+    font-size: 10.5px; letter-spacing: 0.22em; text-transform: uppercase;
+    align-items: flex-end; text-align: right;
+  }
+  .tm.right { padding-left: 0; padding-right: 14px; border-left: none; border-right: 1px solid rgba(255,255,255,0.1); align-items: flex-end; }
+
+  /* BOTTOM */
+  .bottom {
+    padding: 0 36px 32px;
+    display: flex; flex-direction: column; align-items: center; gap: 18px;
+  }
+
+  /* Mic button / orb */
+  .orb-wrap {
+    position: relative;
+    width: 84px; height: 84px;
+    display: grid; place-items: center;
+  }
+  .orb {
+    width: 64px; height: 64px; border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, rgba(255,255,255,0.22), rgba(255,255,255,0.02) 55%), rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.22);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    display: grid; place-items: center;
+    cursor: pointer;
+    transition: transform 400ms cubic-bezier(.2,.7,.2,1), box-shadow 400ms ease, border-color 400ms ease;
+    position: relative;
+    color: var(--fg);
+  }
+  .orb:hover { transform: scale(1.04); }
+  .orb svg { width: 22px; height: 22px; opacity: 0.92; }
+  .orb.active {
+    border-color: color-mix(in oklab, var(--accent) 60%, white);
+    box-shadow:
+      0 0 0 1px color-mix(in oklab, var(--accent) 30%, transparent),
+      0 0 32px color-mix(in oklab, var(--accent) 45%, transparent),
+      inset 0 0 20px color-mix(in oklab, var(--accent) 20%, transparent);
+  }
+  .ring {
+    position: absolute; inset: 0;
+    border-radius: 50%;
+    border: 1px solid color-mix(in oklab, var(--accent) 50%, transparent);
+    opacity: 0;
+  }
+  .orb.active .ring.r1 { animation: pulseRing 2.6s ease-out infinite; }
+  .orb.active .ring.r2 { animation: pulseRing 2.6s ease-out 0.8s infinite; }
+  .orb.active .ring.r3 { animation: pulseRing 2.6s ease-out 1.6s infinite; }
+  @keyframes pulseRing {
+    0%   { transform: scale(0.9); opacity: 0.7; }
+    80%  { opacity: 0; }
+    100% { transform: scale(1.9); opacity: 0; }
+  }
+
+  /* Waveform */
+  .wave {
+    display: flex; align-items: center; gap: 4px;
+    height: 28px;
+  }
+  .wave span {
+    display: block; width: 3px; border-radius: 2px;
+    background: linear-gradient(180deg, color-mix(in oklab, var(--accent) 80%, white), color-mix(in oklab, var(--accent-2) 60%, transparent));
+    opacity: 0.9;
+    animation: waveA 1.2s ease-in-out infinite;
+  }
+  .wave span:nth-child(1) { animation-delay: 0.00s; }
+  .wave span:nth-child(2) { animation-delay: 0.08s; }
+  .wave span:nth-child(3) { animation-delay: 0.16s; }
+  .wave span:nth-child(4) { animation-delay: 0.24s; }
+  .wave span:nth-child(5) { animation-delay: 0.32s; }
+  .wave span:nth-child(6) { animation-delay: 0.40s; }
+  .wave span:nth-child(7) { animation-delay: 0.48s; }
+  .wave span:nth-child(8) { animation-delay: 0.56s; }
+  .wave span:nth-child(9) { animation-delay: 0.64s; }
+  .wave span:nth-child(10) { animation-delay: 0.72s; }
+  .wave span:nth-child(11) { animation-delay: 0.80s; }
+  .wave span:nth-child(12) { animation-delay: 0.40s; }
+  .wave span:nth-child(13) { animation-delay: 0.32s; }
+  .wave span:nth-child(14) { animation-delay: 0.24s; }
+  .wave span:nth-child(15) { animation-delay: 0.16s; }
+  .wave span:nth-child(16) { animation-delay: 0.08s; }
+  @keyframes waveA {
+    0%, 100% { height: 4px; }
+    50% { height: 24px; }
+  }
+
+  /* Caption under orb */
+  .cap {
+    color: var(--fg-dim);
+    font-size: 11px; letter-spacing: 0.28em; text-transform: uppercase;
+    min-height: 14px;
+    text-align: center;
+  }
+  .cap strong { color: var(--fg); font-weight: 400; }
+
+  /* Side icons row (cam, text) */
+  .side-icons {
+    position: absolute;
+    right: 36px; bottom: 40px;
+    display: flex; gap: 10px;
+  }
+  .icon-btn {
+    width: 40px; height: 40px; border-radius: 50%;
+    border: 1px solid var(--hair);
+    background: rgba(10,14,20,0.28);
+    backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+    display: grid; place-items: center;
+    color: rgba(255,255,255,0.78);
+    cursor: pointer;
+    transition: all 220ms ease;
+  }
+  .icon-btn:hover { color: white; border-color: var(--hair-strong); transform: translateY(-1px); }
+  .icon-btn svg { width: 16px; height: 16px; }
+  .icon-btn.active { color: var(--accent); border-color: color-mix(in oklab, var(--accent) 40%, var(--hair)); }
+
+  /* Text input, slides up when activated */
+  .composer {
+    position: absolute;
+    left: 50%; bottom: 140px; transform: translateX(-50%) translateY(10px);
+    width: min(520px, 72vw);
+    padding: 10px 14px;
+    border-radius: 999px;
+    background: rgba(10,14,20,0.35);
+    border: 1px solid var(--hair);
+    backdrop-filter: blur(22px) saturate(1.2);
+    -webkit-backdrop-filter: blur(22px) saturate(1.2);
+    display: flex; align-items: center; gap: 10px;
+    opacity: 0; pointer-events: none;
+    transition: opacity 300ms ease, transform 300ms ease;
+  }
+  .composer.show { opacity: 1; pointer-events: auto; transform: translateX(-50%) translateY(0); }
+  .composer input {
+    flex: 1; background: transparent; border: none; outline: none;
+    color: var(--fg); font-family: inherit; font-size: 14px; font-weight: 300;
+  }
+  .composer input::placeholder { color: var(--fg-faint); }
+
+  /* Response text */
+  .response {
+    position: absolute;
+    left: 36px;
+    top: 50%;
+    transform: translateY(-50%);
+    max-width: 380px;
+    color: var(--fg);
+    opacity: 0;
+    transition: opacity 400ms ease;
+  }
+  .response.show { opacity: 1; }
+  .response .lbl {
+    font-size: 10px; letter-spacing: 0.32em; text-transform: uppercase;
+    color: color-mix(in oklab, var(--accent) 80%, white);
+    margin-bottom: 10px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .response .lbl::before {
+    content: ""; display: block; width: 18px; height: 1px;
+    background: color-mix(in oklab, var(--accent) 80%, white);
+  }
+  .response p {
+    margin: 0;
+    font-size: 19px; line-height: 1.55; font-weight: 300;
+    text-wrap: pretty;
+  }
+  .response .word {
+    opacity: 0.35;
+    transition: opacity 220ms ease, color 220ms ease;
+  }
+  .response .word.live { opacity: 1; color: color-mix(in oklab, var(--accent) 45%, white); }
+  .response .word.past { opacity: 1; color: var(--fg); }
+
+  /* Thinking dots */
+  .thinking {
+    display: inline-flex; gap: 6px; align-items: center;
+  }
+  .thinking i {
+    display: block; width: 6px; height: 6px; border-radius: 50%;
+    background: color-mix(in oklab, var(--accent) 70%, white);
+    opacity: 0.4;
+    animation: dot 1.2s ease-in-out infinite;
+  }
+  .thinking i:nth-child(2) { animation-delay: 0.15s; }
+  .thinking i:nth-child(3) { animation-delay: 0.30s; }
+  @keyframes dot {
+    0%, 100% { opacity: 0.35; transform: translateY(0); }
+    50% { opacity: 1; transform: translateY(-3px); }
+  }
+
+  /* State switcher (diegetic HUD control) */
+  .states {
+    position: absolute;
+    left: 50%; bottom: 40px; transform: translateX(-50%);
+    display: none;
+  }
+  /* Tweaks panel */
+  .tweaks {
+    position: fixed;
+    right: 20px; bottom: 20px;
+    width: 280px;
+    padding: 16px;
+    background: rgba(10,14,20,0.7);
+    border: 1px solid var(--hair-strong);
+    border-radius: 14px;
+    backdrop-filter: blur(20px);
+    color: var(--fg);
+    font-size: 12px;
+    z-index: 100;
+    display: none;
+  }
+  .tweaks.show { display: block; }
+  .tweaks h4 {
+    margin: 0 0 10px; font-size: 10px; letter-spacing: 0.3em; text-transform: uppercase; color: var(--fg-dim); font-weight: 500;
+  }
+  .tweaks .row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 8px 0; }
+  .tweaks .row label { color: var(--fg-dim); font-size: 11px; }
+  .tweaks .seg {
+    display: inline-flex; background: rgba(255,255,255,0.05); border-radius: 8px; padding: 2px;
+  }
+  .tweaks .seg button {
+    border: none; background: transparent; color: var(--fg-dim);
+    padding: 4px 8px; border-radius: 6px; font-size: 11px; cursor: pointer;
+    font-family: inherit;
+  }
+  .tweaks .seg button.on { background: rgba(255,255,255,0.1); color: var(--fg); }
+  .tweaks select {
+    background: rgba(255,255,255,0.05); color: var(--fg); border: 1px solid var(--hair);
+    border-radius: 6px; padding: 4px 6px; font-family: inherit; font-size: 11px;
+  }
+
+  /* Diegetic state switcher (top-center segmented) */
+  .state-seg {
+    position: absolute;
+    top: 28px; left: 50%; transform: translateX(-50%);
+    display: inline-flex;
+    background: rgba(10,14,20,0.35);
+    border: 1px solid var(--hair);
+    backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+    border-radius: 999px;
+    padding: 4px;
+    gap: 2px;
+  }
+  .state-seg button {
+    border: none; background: transparent; color: var(--fg-dim);
+    padding: 7px 14px; border-radius: 999px;
+    font-family: inherit; font-size: 10.5px; letter-spacing: 0.22em; text-transform: uppercase;
+    cursor: pointer;
+    transition: all 220ms ease;
+  }
+  .state-seg button.on {
+    color: var(--fg);
+    background: rgba(255,255,255,0.06);
+    box-shadow: inset 0 0 0 1px var(--hair-strong);
+  }
+
+  /* Responding transcript line on wave (active word) */
+  .cap .transcript-span {
+    color: var(--fg);
+    letter-spacing: 0.06em;
+    text-transform: none;
+    font-size: 13px;
+    font-family: 'Manrope', sans-serif;
+  }
+
+  /* Fade utility */
+  .fade-in { animation: fadeIn 600ms ease both; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+
+  /* Hint near orb */
+  .hint {
+    position: absolute;
+    bottom: 46px; left: 50%; transform: translateX(-50%);
+    display: flex; gap: 10px; align-items: center;
+    color: var(--fg-faint);
+    font-size: 10px; letter-spacing: 0.24em; text-transform: uppercase;
+  }
+  .kbd {
+    border: 1px solid var(--hair);
+    padding: 2px 6px; border-radius: 4px;
+    color: var(--fg-dim);
+    background: rgba(255,255,255,0.03);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useMemo, useRef } = React;
+
+// -------- Tweakable defaults (editable via Tweaks toggle) --------
+const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "accent": "cyan",
+  "density": "standard",
+  "subject": "portrait-2",
+  "language": "ru"
+}/*EDITMODE-END*/;
+
+const ACCENTS = {
+  cyan:    { a: "#7bdcff", b: "#a98bff" },
+  violet:  { a: "#b794ff", b: "#7bdcff" },
+  mint:    { a: "#7df0b8", b: "#7bdcff" },
+  amber:   { a: "#ffc27b", b: "#ff8fb1" },
+};
+
+// Cinematic portrait placeholders (Unsplash, low-light portraits to read as "mirror at night")
+const SUBJECTS = {
+  "portrait-1": "https://images.unsplash.com/photo-1531123897727-8f129e1688ce?auto=format&fit=crop&w=2000&q=80",
+  "portrait-2": "https://images.unsplash.com/photo-1438761681033-6461ffad8d80?auto=format&fit=crop&w=2000&q=80",
+  "portrait-3": "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?auto=format&fit=crop&w=2000&q=80",
+  "room":      "https://images.unsplash.com/photo-1519710164239-da123dc03ef4?auto=format&fit=crop&w=2000&q=80",
+};
+
+const RESPONSE_TEXT = {
+  ru: "Сегодня у тебя спокойное утро. Я вижу, ты немного уставший — советую начать с воды и десяти минут тишины. Встреча с командой в одиннадцать, я напомню за пятнадцать минут.",
+  en: "Your morning looks calm. You seem a little tired — start with water and ten minutes of quiet. Team sync at eleven; I'll remind you fifteen minutes before."
+};
+
+const HEARD_TEXT = {
+  ru: "как я выгляжу сегодня",
+  en: "how do I look today"
+};
+
+// -------- Hooks --------
+function useClock() {
+  const [t, setT] = useState(() => new Date());
+  useEffect(() => {
+    const id = setInterval(() => setT(new Date()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  return t;
+}
+
+function fmtTime(d) {
+  return d.toTimeString().slice(0,5);
+}
+function fmtDate(d, lang) {
+  try {
+    return d.toLocaleDateString(lang === "ru" ? "ru-RU" : "en-US", { weekday: "short", day: "numeric", month: "short" });
+  } catch { return d.toDateString(); }
+}
+
+// Type-out words word-by-word when responding
+function useWordStream(text, active) {
+  const words = useMemo(() => text.split(/(\s+)/), [text]);
+  const [idx, setIdx] = useState(0);
+  useEffect(() => {
+    if (!active) { setIdx(0); return; }
+    setIdx(0);
+    let i = 0;
+    const id = setInterval(() => {
+      i += 1;
+      setIdx(i);
+      if (i >= words.length) clearInterval(id);
+    }, 120);
+    return () => clearInterval(id);
+  }, [active, text]);
+  return { words, idx };
+}
+
+// -------- Subcomponents --------
+function TopBar({ state, lang, tweaksOn, setTweaksOn }) {
+  const statusLabel = {
+    ru: "Локальный AI · Онлайн",
+    en: "Local AI · Online"
+  }[lang];
+  return (
+    <div className="top">
+      <div className="brand">
+        <div className="brand-mark" />
+        <div>
+          <div className="brand-name">Нейрозеркало</div>
+          <div className="brand-sub mono">neuro · mirror · v0.4</div>
+        </div>
+      </div>
+      <div className="top-right">
+        <div className="pill"><span className="dot" />{statusLabel}</div>
+        <div className="pill mono" style={{letterSpacing:"0.14em"}}>
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="6" width="18" height="12" rx="2"/><circle cx="12" cy="12" r="3"/></svg>
+          CAM · 1080p
+        </div>
+        <button className="pill" style={{cursor:"pointer", textTransform:"uppercase"}} onClick={() => setTweaksOn(v => !v)}>
+          {tweaksOn ? "Close tweaks" : "Tweaks"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function SideTelemetry({ lang, hideLeft }) {
+  const L = lang === "ru";
+  return (
+    <>
+      <div className={"left-col" + (hideLeft ? " hide" : "")}>
+        <div className="tm">
+          <span className="k">{L ? "Сессия" : "Session"}</span>
+          <span className="v mono">0x4A·12</span>
+        </div>
+        <div className="tm">
+          <span className="k">{L ? "Модель" : "Model"}</span>
+          <span className="v mono">Local · 8B</span>
+        </div>
+        <div className="tm">
+          <span className="k">{L ? "Задержка" : "Latency"}</span>
+          <span className="v mono">42 ms</span>
+        </div>
+      </div>
+      <div className="right-col">
+        <div className="tm right">
+          <span className="k">{L ? "Свет" : "Light"}</span>
+          <span className="v mono">—12 EV</span>
+        </div>
+        <div className="tm right">
+          <span className="k">{L ? "Шум" : "Noise"}</span>
+          <span className="v mono">−48 dB</span>
+        </div>
+        <div className="tm right">
+          <span className="k">{L ? "Привычка" : "Routine"}</span>
+          <span className="v mono">{L ? "Утро" : "Morning"}</span>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function Brackets() {
+  return (
+    <div className="brackets">
+      <span className="bracket tl" />
+      <span className="bracket tr" />
+      <span className="bracket bl" />
+      <span className="bracket br" />
+    </div>
+  );
+}
+
+function BigTime({ lang }) {
+  const t = useClock();
+  const L = lang === "ru";
+  return (
+    <div className="big-time mono">
+      <span>{fmtDate(t, lang).toUpperCase()}</span>
+      <strong>{fmtTime(t)}</strong>
+      <span>{L ? "Доброе утро" : "Good morning"}</span>
+    </div>
+  );
+}
+
+function Wave() {
+  const bars = Array.from({length: 16});
+  return (
+    <div className="wave" aria-hidden>
+      {bars.map((_,i) => <span key={i} />)}
+    </div>
+  );
+}
+
+function Thinking() {
+  return (
+    <div className="thinking"><i/><i/><i/></div>
+  );
+}
+
+function Orb({ state, onClick }) {
+  const active = state === "listening" || state === "responding";
+  const iconMic = (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="9" y="3" width="6" height="12" rx="3"/>
+      <path d="M5 11a7 7 0 0 0 14 0"/>
+      <path d="M12 18v3"/>
+    </svg>
+  );
+  const iconStop = (
+    <svg viewBox="0 0 24 24" fill="currentColor"><rect x="7" y="7" width="10" height="10" rx="2"/></svg>
+  );
+  return (
+    <div className="orb-wrap">
+      <div className={"orb" + (active ? " active" : "")} onClick={onClick} role="button" aria-label="microphone">
+        <span className="ring r1"/><span className="ring r2"/><span className="ring r3"/>
+        {state === "listening" ? iconStop : iconMic}
+      </div>
+    </div>
+  );
+}
+
+function Response({ show, lang }) {
+  const text = RESPONSE_TEXT[lang];
+  const { words, idx } = useWordStream(text, show);
+  return (
+    <div className={"response" + (show ? " show" : "")}>
+      <div className="lbl mono">{lang === "ru" ? "Ответ" : "Response"}</div>
+      <p>
+        {words.map((w, i) => {
+          const cls = i < idx - 1 ? "word past" : i === idx - 1 ? "word live" : "word";
+          return <span key={i} className={cls}>{w}</span>;
+        })}
+      </p>
+    </div>
+  );
+}
+
+function StateSeg({ state, setState, lang }) {
+  const L = lang === "ru";
+  const items = [
+    { k: "idle",       t: L ? "Ожидание"   : "Idle" },
+    { k: "listening",  t: L ? "Слушает"    : "Listening" },
+    { k: "thinking",   t: L ? "Думает"     : "Thinking" },
+    { k: "responding", t: L ? "Отвечает"   : "Responding" },
+  ];
+  return (
+    <div className="state-seg">
+      {items.map(it => (
+        <button key={it.k} className={state === it.k ? "on" : ""} onClick={() => setState(it.k)}>
+          {it.t}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function Tweaks({ show, val, set }) {
+  return (
+    <div className={"tweaks" + (show ? " show" : "")}>
+      <h4>Tweaks</h4>
+      <div className="row">
+        <label>Accent</label>
+        <div className="seg">
+          {Object.keys(ACCENTS).map(k => (
+            <button key={k} className={val.accent === k ? "on" : ""} onClick={() => set({accent: k})}>{k}</button>
+          ))}
+        </div>
+      </div>
+      <div className="row">
+        <label>Density</label>
+        <div className="seg">
+          {["minimal","standard"].map(k => (
+            <button key={k} className={val.density === k ? "on" : ""} onClick={() => set({density: k})}>{k}</button>
+          ))}
+        </div>
+      </div>
+      <div className="row">
+        <label>Language</label>
+        <div className="seg">
+          {["ru","en"].map(k => (
+            <button key={k} className={val.language === k ? "on" : ""} onClick={() => set({language: k})}>{k}</button>
+          ))}
+        </div>
+      </div>
+      <div className="row">
+        <label>Mirror subject</label>
+        <select value={val.subject} onChange={e => set({subject: e.target.value})}>
+          {Object.keys(SUBJECTS).map(k => <option key={k} value={k}>{k}</option>)}
+        </select>
+      </div>
+      <div style={{fontSize:10, color:"var(--fg-faint)", marginTop:10, lineHeight:1.5}}>
+        Note: live camera isn't available in a mockup — using a cinematic portrait placeholder, mirrored horizontally.
+      </div>
+    </div>
+  );
+}
+
+// -------- App --------
+function App() {
+  const [state, setState] = useState("idle");
+  const [tweaks, setTweaks] = useState(TWEAK_DEFAULTS);
+  const [tweaksOn, setTweaksOn] = useState(false);
+  const [composerOn, setComposerOn] = useState(false);
+
+  const accent = ACCENTS[tweaks.accent] || ACCENTS.cyan;
+  const lang = tweaks.language;
+  const subject = SUBJECTS[tweaks.subject] || SUBJECTS["portrait-1"];
+
+  // Expose accent to CSS
+  useEffect(() => {
+    document.documentElement.style.setProperty("--accent", accent.a);
+    document.documentElement.style.setProperty("--accent-2", accent.b);
+  }, [accent]);
+
+  // Auto-progress demo: listening -> thinking -> responding -> idle, when user clicks orb
+  const demoTimer = useRef();
+  function startDemo() {
+    clearTimeout(demoTimer.current);
+    if (state === "idle") {
+      setState("listening");
+      demoTimer.current = setTimeout(() => {
+        setState("thinking");
+        demoTimer.current = setTimeout(() => {
+          setState("responding");
+          demoTimer.current = setTimeout(() => {
+            setState("idle");
+          }, 8500);
+        }, 1800);
+      }, 2200);
+    } else {
+      setState("idle");
+    }
+  }
+  useEffect(() => () => clearTimeout(demoTimer.current), []);
+
+  // --- Tweaks protocol (host toggle) ---
+  useEffect(() => {
+    function onMsg(e) {
+      const d = e.data || {};
+      if (d.type === "__activate_edit_mode") setTweaksOn(true);
+      if (d.type === "__deactivate_edit_mode") setTweaksOn(false);
+    }
+    window.addEventListener("message", onMsg);
+    // announce availability
+    try { window.parent.postMessage({type:"__edit_mode_available"}, "*"); } catch {}
+    return () => window.removeEventListener("message", onMsg);
+  }, []);
+
+  function setTweakKeys(patch) {
+    setTweaks(v => {
+      const next = { ...v, ...patch };
+      try { window.parent.postMessage({type:"__edit_mode_set_keys", edits: patch}, "*"); } catch {}
+      return next;
+    });
+  }
+
+  const caption = (() => {
+    if (state === "idle")       return lang === "ru" ? <span><strong>Скажи</strong> «Зеркало…» или нажми</span> : <span><strong>Say</strong> "Mirror…" or tap</span>;
+    if (state === "listening")  return <span className="transcript-span">"{HEARD_TEXT[lang]}"</span>;
+    if (state === "thinking")   return <span style={{display:"inline-flex", gap:10, alignItems:"center"}}><Thinking/>{lang === "ru" ? "Обдумываю" : "Thinking"}</span>;
+    if (state === "responding") return lang === "ru" ? "Отвечаю…" : "Speaking…";
+  })();
+
+  return (
+    <div className="stage" data-screen-label={"01 " + state}>
+      <div className="mirror" style={{backgroundImage: `url("${subject}")`}} />
+      <div className={"halo" + ((state === "listening" || state === "responding") ? " on" : "")} />
+      <div className="vignette" />
+      <div className="grain" />
+
+      <div className="hud">
+        <TopBar state={state} lang={lang} tweaksOn={tweaksOn} setTweaksOn={setTweaksOn} />
+
+        <div className="center">
+          <Brackets />
+          <BigTime lang={lang} />
+          <SideTelemetry lang={lang} hideLeft={state === "responding"} />
+          <StateSeg state={state} setState={setState} lang={lang} />
+
+          <Response show={state === "responding"} lang={lang} />
+
+          <div className={"composer" + (composerOn ? " show" : "")}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" style={{opacity:0.6}}>
+              <path d="M4 6h16M4 12h10M4 18h16"/>
+            </svg>
+            <input placeholder={lang === "ru" ? "Скажи или напиши…" : "Speak or type…"} />
+            <button className="icon-btn" style={{width:28, height:28}} onClick={() => setComposerOn(false)}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"><path d="M6 6l12 12M18 6L6 18"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <div className="bottom">
+          <div style={{height: state === "listening" || state === "responding" ? 28 : 0, transition: "height 300ms ease", overflow:"hidden"}}>
+            {state === "listening" || state === "responding" ? <Wave/> : null}
+          </div>
+          <Orb state={state} onClick={startDemo} />
+          <div className="cap mono">{caption}</div>
+        </div>
+
+        <div className="side-icons">
+          <button className="icon-btn" title="Text input" onClick={() => setComposerOn(v => !v)}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"><path d="M4 7h16M4 12h10M4 17h16"/></svg>
+          </button>
+          <button className="icon-btn" title="Analyse view">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="3.2"/>
+              <path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/>
+            </svg>
+          </button>
+          <button className="icon-btn" title="Settings">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 0 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 0 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 0 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 0 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <Tweaks show={tweaksOn} val={tweaks} set={setTweakKeys} />
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
