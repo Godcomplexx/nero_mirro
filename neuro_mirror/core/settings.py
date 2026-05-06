@@ -54,10 +54,13 @@ class Settings:
     stt_beam_size: int = 5
     stt_best_of: int = 5
     stt_vad_filter: bool = True
-    stt_hotwords: str = "камера, что у меня в руках, что в руках, в руках, в руке, держу, покажи, посмотри в камеру, как я выгляжу, оцени внешний вид, скрининг, президент, сша, юсей, usa"
+    stt_hotwords: str = "зеркало, камера, что у меня в руках, что в руках, в руках, в руке, держу, покажи, посмотри в камеру, как я выгляжу, оцени внешний вид, скрининг, погода, время, привет, как дела, расскажи, включи, выключи"
     voice_sample_rate: int = 16000
     voice_channels: int = 1
     voice_max_record_seconds: float = 12.0
+    voice_silence_threshold: float = 0.012
+    voice_silence_duration: float = 1.8
+    voice_min_speech_duration: float = 0.4
     tts_voice: str = "ru-RU-SvetlanaNeural"
     tts_rate: str = "+15%"
 
@@ -159,6 +162,9 @@ class Settings:
                 "покажи, посмотри в камеру, как я выгляжу, оцени внешний вид, скрининг"
             )
         raw_voice_sample_rate = os.getenv("NEURO_MIRROR_VOICE_SAMPLE_RATE", "16000").strip()
+        raw_voice_silence_threshold = os.getenv("NEURO_MIRROR_VOICE_SILENCE_THRESHOLD", "0.012").strip()
+        raw_voice_silence_duration = os.getenv("NEURO_MIRROR_VOICE_SILENCE_DURATION", "1.8").strip()
+        raw_voice_min_speech_duration = os.getenv("NEURO_MIRROR_VOICE_MIN_SPEECH_DURATION", "0.4").strip()
         if raw_stt_hotwords.startswith("\u0420") and "\u043a\u0430\u043c\u0435\u0440\u0430" not in raw_stt_hotwords.lower():
             raw_stt_hotwords = (
                 "\u043a\u0430\u043c\u0435\u0440\u0430, \u0447\u0442\u043e \u0443 \u043c\u0435\u043d\u044f \u0432 \u0440\u0443\u043a\u0430\u0445, "
@@ -222,6 +228,9 @@ class Settings:
             voice_sample_rate=int(raw_voice_sample_rate),
             voice_channels=int(raw_voice_channels),
             voice_max_record_seconds=float(raw_voice_max_seconds),
+            voice_silence_threshold=float(raw_voice_silence_threshold),
+            voice_silence_duration=float(raw_voice_silence_duration),
+            voice_min_speech_duration=float(raw_voice_min_speech_duration),
             tts_voice=raw_tts_voice,
             tts_rate=raw_tts_rate,
         )

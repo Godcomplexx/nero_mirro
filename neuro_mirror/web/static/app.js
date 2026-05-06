@@ -1,4 +1,4 @@
-const WAKE_WORDS = ["зеркало", "привет зеркало", "hey mirror"];
+const WAKE_WORDS = ["зеркало", "привет зеркало", "hey mirror", "зеркала", "зеркалу", "зеркалом"];
 const WAKE_WORD_DISPLAY = "«Зеркало»";
 
 const state = {
@@ -91,6 +91,7 @@ const SCREEN_LABELS = {
   idle: "Idle",
   assistant: "Assistant",
   screening: "Screening",
+  moca: "Тест MoCA",
   summary: "Summary",
   device_setup: "Device Setup",
 };
@@ -697,6 +698,15 @@ function syncDeviceSelectionStatus() {
 }
 
 function renderSnapshot(snapshot) {
+  // During MoCA test — only update the MoCA panel, suppress all other UI output
+  if (snapshot.screen === "moca") {
+    renderMoca(snapshot);
+    return;
+  }
+
+  // Hide MoCA panel when screen is no longer "moca"
+  renderMoca(snapshot);
+
   setText(el.screenValue, SCREEN_LABELS[snapshot.screen] || snapshot.screen || "-");
   setText(el.sourceValue, snapshot.assistant_source || "-");
   setText(el.messageValue, snapshot.message || "-");
@@ -723,6 +733,125 @@ function renderSnapshot(snapshot) {
   if (el.detailsDrawer && (snapshot.screen === "device_setup" || (snapshot.device_errors && snapshot.device_errors.length))) {
     el.detailsDrawer.open = true;
   }
+}
+
+// ---- MoCA test UI ----
+
+let _mocaPanel = null;
+
+function _getMocaPanel() {
+  if (_mocaPanel) return _mocaPanel;
+  _mocaPanel = document.getElementById("moca-panel");
+  if (!_mocaPanel) {
+    // Create panel dynamically if not in HTML
+    _mocaPanel = document.createElement("div");
+    _mocaPanel.id = "moca-panel";
+    _mocaPanel.style.cssText = [
+      "position:fixed", "top:0", "left:0", "width:100%", "height:100%",
+      "background:rgba(0,0,0,0.85)", "color:#fff", "display:none",
+      "flex-direction:column", "align-items:center", "justify-content:center",
+      "z-index:9999", "font-family:sans-serif", "padding:32px", "box-sizing:border-box",
+    ].join(";");
+    _mocaPanel.innerHTML = `
+      <div style="max-width:640px;width:100%;text-align:center">
+        <div id="moca-domain" style="font-size:14px;opacity:.6;margin-bottom:8px"></div>
+        <div id="moca-progress-bar" style="width:100%;height:6px;background:#333;border-radius:3px;margin-bottom:24px">
+          <div id="moca-progress-fill" style="height:6px;background:#6ee7b7;border-radius:3px;width:0%;transition:width .4s"></div>
+        </div>
+        <div id="moca-hint" style="font-size:22px;font-weight:600;margin-bottom:20px;line-height:1.4"></div>
+        <div id="moca-status" style="font-size:16px;opacity:.7;margin-bottom:16px"></div>
+        <div id="moca-mic-indicator" style="display:none;margin-top:20px;align-items:center;justify-content:center;gap:12px">
+          <span style="width:16px;height:16px;border-radius:50%;background:#ef4444;animation:moca-pulse 1s infinite;flex-shrink:0"></span>
+          <span style="font-size:20px;font-weight:700;letter-spacing:.5px">Говорите...</span>
+        </div>
+        <button id="moca-stop-btn" onclick="stopMocaTest()" style="
+          margin-top:32px;padding:10px 28px;background:transparent;
+          border:1px solid rgba(255,255,255,0.3);color:#fff;border-radius:8px;
+          font-size:14px;cursor:pointer;opacity:.6
+        ">Прервать тест</button>
+      </div>
+      <style>
+        @keyframes moca-pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+        #moca-stop-btn:hover { opacity:1; border-color:#fff; }
+      </style>
+    `;
+    document.body.appendChild(_mocaPanel);
+  }
+  return _mocaPanel;
+}
+
+function renderMoca(snapshot) {
+  if (snapshot.screen !== "moca") {
+    const panel = document.getElementById("moca-panel");
+    if (panel) panel.style.display = "none";
+    return;
+  }
+
+  const panel = _getMocaPanel();
+  panel.style.display = "flex";
+
+  const idx = typeof snapshot.moca_task_index === "number" ? snapshot.moca_task_index : 0;
+  const total = typeof snapshot.moca_task_total === "number" ? snapshot.moca_task_total : 11;
+  const pct = total > 0 ? Math.round((idx / total) * 100) : 0;
+
+  const fill = document.getElementById("moca-progress-fill");
+  if (fill) fill.style.width = pct + "%";
+
+  const domain = document.getElementById("moca-domain");
+  if (domain) domain.textContent = snapshot.moca_domain
+    ? `${snapshot.moca_domain} — задание ${idx + 1} из ${total}`
+    : `Задание ${idx + 1} из ${total}`;
+
+  const taskId = snapshot.moca_task_id || "";
+  const isRecording = !!snapshot.moca_recording;
+  // Hide hint for ALL tasks while recording — patient must answer from memory
+  const hideHint = isRecording;
+
+  // hint = task description, visible only while NOT recording (for memory tasks)
+  const hint = document.getElementById("moca-hint");
+  if (hint) {
+    if (snapshot.moca_hint) hint.textContent = snapshot.moca_hint;
+    hint.style.display = hideHint ? "none" : "block";
+  }
+
+  // status line: show only neutral status, never "Говорите" (that's the mic indicator)
+  const status = document.getElementById("moca-status");
+  if (status) {
+    const msg = snapshot.message || "";
+    // Don't echo "Говорите..." in the status text — the mic indicator handles that
+    status.textContent = (isRecording || msg === "Говорите...") ? "" : msg;
+  }
+
+  const mic = document.getElementById("moca-mic-indicator");
+  if (mic) mic.style.display = isRecording ? "flex" : "none";
+
+  // Auto-play TTS prompt when server sends moca_tts_text
+  if (snapshot.moca_tts_text && snapshot.moca_tts_text !== window._lastMocaTts) {
+    window._lastMocaTts = snapshot.moca_tts_text;
+    _mocaPlayTts(snapshot.moca_tts_text);
+  }
+}
+
+async function stopMocaTest() {
+  try {
+    await fetch("/api/actions/stop_moca", { method: "POST" });
+  } catch (_) {}
+}
+
+async function _mocaPlayTts(text) {
+  try {
+    const resp = await fetch("/api/tts/speak", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    });
+    if (!resp.ok) return;
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    const audio = new Audio(url);
+    audio.onended = () => URL.revokeObjectURL(url);
+    await audio.play();
+  } catch (_) {}
 }
 
 function cleanupSpeechAudio() {
@@ -1261,166 +1390,189 @@ function createSpeechRecognition() {
 }
 
 function matchesWakeWord(transcript) {
-  const normalized = transcript.toLowerCase().trim().replace(/[.,!?;:]+/g, "");
+  const normalized = transcript.toLowerCase().trim().replace(/[.,!?;:«»"']+/g, "");
   for (const ww of WAKE_WORDS) {
     if (normalized.includes(ww)) return true;
   }
-  // Fuzzy: check if any word starts with "зеркал" (covers "зеркало", "зеркала", "зеркалу", etc.)
+  // Fuzzy: any word starting with "зеркал" covers all inflections
   const words = normalized.split(/\s+/);
   for (const w of words) {
     if (w.startsWith("зеркал")) return true;
   }
-  // Common STT misrecognitions for "зеркало"
-  const sttVariants = ["серкало", "серкала", "зиркало", "зиркала", "зёркало", "зеркола", "серкол"];
+  // Common STT misrecognitions for "зеркало" (Chrome/Edge on Russian)
+  const sttVariants = [
+    "серкало", "серкала", "зиркало", "зиркала", "зёркало", "зеркола", "серкол",
+    "зерколо", "зеркаль", "зеркалл", "зиркал", "серкал", "зерк",
+    "mirror", "зеркала", "зерколе",
+  ];
   for (const w of words) {
     for (const variant of sttVariants) {
       if (w.startsWith(variant)) return true;
     }
   }
+  // Levenshtein-distance-1 check against "зеркало" for very short words
+  if (words.some((w) => w.length >= 5 && levenshtein(w, "зеркало") <= 2)) return true;
   return false;
 }
 
-function startWakeWordListening() {
-  appendLogLine(`[wake-word] startWakeWordListening called: listening=${state.wakeWordListening}`);
-  if (state.wakeWordListening) {
-    appendLogLine("[wake-word] already listening, skip");
-    return;
-  }
-  const unavailableReason = getWakeWordUnavailableReason();
-  if (unavailableReason) {
-    setText(el.voiceStatus, unavailableReason);
-    appendLogLine(`[wake-word] unavailable: ${unavailableReason}`);
-    return;
-  }
-
-  const recognition = createSpeechRecognition();
-  if (!recognition) {
-    appendLogLine("[wake-word] failed to create SpeechRecognition");
-    return;
-  }
-
-  state.wakeWordRecognition = recognition;
-  state.wakeWordListening = true;
-  updateWakeWordIndicator();
-
-  recognition.onresult = (event) => {
-    // Log every STT result for debugging wake-word recognition
-    for (let i = event.resultIndex; i < event.results.length; i++) {
-      const result = event.results[i];
-      const isFinal = result.isFinal;
-      const texts = [];
-      for (let j = 0; j < result.length; j++) {
-        texts.push(result[j].transcript.trim());
-      }
-      appendLogLine(`[wake-word] STT ${isFinal ? "final" : "interim"}: ${JSON.stringify(texts)}`);
+function levenshtein(a, b) {
+  const m = a.length, n = b.length;
+  const dp = Array.from({ length: m + 1 }, (_, i) => [i, ...Array(n).fill(0)]);
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      dp[i][j] = a[i - 1] === b[j - 1]
+        ? dp[i - 1][j - 1]
+        : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
     }
+  }
+  return dp[m][n];
+}
 
-    if (state.recording || state.wakeWordCooldown) return;
+// ---- Wake-word engine (single persistent recognition object) ----
+// Design: one recognition object lives for the whole page session.
+// Instead of destroying/recreating it, we use a `wakeWordPaused` flag.
+// When paused, onresult is ignored. onend always restarts unless fully stopped.
 
-    for (let i = event.resultIndex; i < event.results.length; i++) {
-      const result = event.results[i];
-      for (let j = 0; j < result.length; j++) {
-        const transcript = result[j].transcript;
-        if (matchesWakeWord(transcript)) {
-          appendLogLine(`[wake-word] ✓ MATCH: "${transcript.trim()}"`);
-          triggerWakeWordActivation();
-          return;
+const _ww = {
+  recognition: null,   // the single SpeechRecognition instance
+  running: false,      // recognition.start() has been called and not yet ended
+  paused: false,       // mic is in use by MediaRecorder — ignore results
+  enabled: false,      // user toggle
+  cooldown: false,     // debounce after a match
+  retryTimer: null,    // pending restart timer
+};
+// expose for console debugging: type `ww` in browser console to see state
+window.ww = _ww;
+
+function _wwScheduleRetry(delayMs) {
+  if (_ww.retryTimer) return;
+  _ww.retryTimer = setTimeout(() => {
+    _ww.retryTimer = null;
+    _wwEnsureRunning();
+  }, delayMs);
+}
+
+function _wwEnsureRunning() {
+  if (!_ww.enabled || _ww.paused || _ww.running) return;
+  if (getWakeWordUnavailableReason()) return;
+  if (!_ww.recognition) {
+    const r = createSpeechRecognition();
+    if (!r) return;
+    _ww.recognition = r;
+
+    r.onresult = (event) => {
+      if (_ww.paused || _ww.cooldown || state.recording) return;
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const result = event.results[i];
+        const isFinal = result.isFinal;
+        const texts = Array.from({ length: result.length }, (_, j) => result[j].transcript.trim());
+        appendLogLine(`[wake-word] STT ${isFinal ? "final" : "interim"}: ${JSON.stringify(texts)}`);
+        for (let j = 0; j < result.length; j++) {
+          if (matchesWakeWord(result[j].transcript)) {
+            appendLogLine(`[wake-word] ✓ MATCH (${isFinal ? "final" : "interim"}): "${result[j].transcript.trim()}"`);
+            triggerWakeWordActivation();
+            return;
+          }
         }
       }
-    }
-  };
+    };
 
-  recognition.onerror = (event) => {
-    appendLogLine(`[wake-word] error: ${event.error}`);
-    // "no-speech" and "aborted" are normal during continuous listening
-    if (event.error === "no-speech" || event.error === "aborted") return;
-    if (event.error === "not-allowed") {
-      setText(el.voiceStatus, "Микрофон не разрешён для голосовой активации");
-      stopWakeWordListening();
-      if (el.wakeWordToggle) el.wakeWordToggle.checked = false;
-      state.wakeWordEnabled = false;
-      return;
-    }
-  };
-
-  recognition.onend = () => {
-    // Auto-restart if still enabled and not currently recording
-    if (state.wakeWordEnabled && !state.recording) {
-      try {
-        recognition.start();
-      } catch (err) {
-        appendLogLine(`[wake-word] restart failed: ${err.message || err}, will retry`);
-        state.wakeWordListening = false;
-        state.wakeWordRecognition = null;
+    r.onerror = (event) => {
+      appendLogLine(`[wake-word] error: ${event.error}`);
+      if (event.error === "not-allowed") {
+        _ww.enabled = false;
+        _ww.running = false;
+        stopWakeWordListening();
+        if (el.wakeWordToggle) el.wakeWordToggle.checked = false;
+        state.wakeWordEnabled = false;
         updateWakeWordIndicator();
-        // Retry with a fresh recognition instance
-        setTimeout(() => {
-          if (state.wakeWordEnabled && !state.recording) {
-            startWakeWordListening();
-          }
-        }, 1000);
+        return;
       }
-    } else {
-      state.wakeWordListening = false;
-      state.wakeWordRecognition = null;
-      updateWakeWordIndicator();
-    }
-  };
+      // no-speech / aborted / audio-capture — all transient, onend will retry
+    };
+
+    r.onend = () => {
+      _ww.running = false;
+      appendLogLine(`[wake-word] onend: enabled=${_ww.enabled} paused=${_ww.paused}`);
+      if (_ww.enabled && !_ww.paused) {
+        // Small gap lets the browser breathe before restart
+        _wwScheduleRetry(300);
+      }
+    };
+  }
 
   try {
-    recognition.start();
-    appendLogLine(`[wake-word] listening started, wake word: ${WAKE_WORD_DISPLAY}`);
+    _ww.recognition.start();
+    _ww.running = true;
+    appendLogLine("[wake-word] recognition started");
     setText(el.voiceStatus, `Голосовая активация: скажите ${WAKE_WORD_DISPLAY}`);
-  } catch (error) {
-    appendLogLine(`[wake-word] start failed: ${error.message || error}`);
-    state.wakeWordListening = false;
     updateWakeWordIndicator();
+  } catch (err) {
+    _ww.running = false;
+    appendLogLine(`[wake-word] start error: ${err.message || err}, retry in 1000ms`);
+    _wwScheduleRetry(1000);
   }
 }
 
+function startWakeWordListening() {
+  appendLogLine("[wake-word] startWakeWordListening");
+  _ww.enabled = true;
+  state.wakeWordEnabled = true;
+  state.wakeWordListening = true;
+  _ww.paused = false;
+  updateWakeWordIndicator();
+  _wwEnsureRunning();
+}
+
 function stopWakeWordListening() {
+  appendLogLine("[wake-word] stopWakeWordListening");
+  _ww.enabled = false;
+  state.wakeWordEnabled = false;
   state.wakeWordListening = false;
-  if (state.wakeWordRecognition) {
-    try {
-      state.wakeWordRecognition.abort();
-    } catch (_) { /* ignore */ }
-    state.wakeWordRecognition = null;
+  _ww.paused = false;
+  if (_ww.retryTimer) { clearTimeout(_ww.retryTimer); _ww.retryTimer = null; }
+  if (_ww.recognition) {
+    try { _ww.recognition.abort(); } catch (_) {}
+    _ww.recognition = null;
+    _ww.running = false;
   }
   updateWakeWordIndicator();
 }
 
 function pauseWakeWordForRecording() {
-  if (state.wakeWordRecognition && state.wakeWordListening) {
-    appendLogLine("[wake-word] pausing for recording");
-    state.wakeWordListening = false;
-    try {
-      state.wakeWordRecognition.abort();
-    } catch (_) { /* ignore */ }
-    state.wakeWordRecognition = null;
-    updateWakeWordIndicator();
+  if (!_ww.enabled) return;
+  appendLogLine("[wake-word] pausing for recording");
+  _ww.paused = true;
+  state.wakeWordListening = false;
+  if (_ww.retryTimer) { clearTimeout(_ww.retryTimer); _ww.retryTimer = null; }
+  if (_ww.recognition && _ww.running) {
+    try { _ww.recognition.abort(); } catch (_) {}
+    // running will be set false in onend
   }
+  updateWakeWordIndicator();
 }
 
 function resumeWakeWordAfterRecording() {
-  appendLogLine(`[wake-word] resumeWakeWordAfterRecording called: enabled=${state.wakeWordEnabled}, listening=${state.wakeWordListening}, recording=${state.recording}`);
-  if (state.wakeWordEnabled && !state.wakeWordListening) {
-    // Longer delay to ensure browser fully releases the mic after MediaRecorder/getUserMedia
-    appendLogLine("[wake-word] scheduling resume in 1500ms");
-    setTimeout(() => {
-      appendLogLine(`[wake-word] resume timer fired: enabled=${state.wakeWordEnabled}, recording=${state.recording}, listening=${state.wakeWordListening}`);
-      if (state.wakeWordEnabled && !state.recording) {
-        startWakeWordListening();
-      }
-    }, 1500);
-  }
+  appendLogLine("[wake-word] resumeWakeWordAfterRecording");
+  if (!_ww.enabled) return;
+  // Wait for browser to release mic before restarting recognition
+  setTimeout(() => {
+    appendLogLine("[wake-word] resume timer fired");
+    _ww.paused = false;
+    state.wakeWordListening = true;
+    updateWakeWordIndicator();
+    _wwEnsureRunning();
+  }, 1500);
 }
 
 function triggerWakeWordActivation() {
   if (state.recording) return;
 
   // Cooldown to avoid double-triggering
+  _ww.cooldown = true;
   state.wakeWordCooldown = true;
-  setTimeout(() => { state.wakeWordCooldown = false; }, 1500);
+  setTimeout(() => { _ww.cooldown = false; state.wakeWordCooldown = false; }, 2000);
 
   // Stop current TTS playback if active, so user can speak immediately
   if (state.currentSpeechAudio) {
@@ -1442,8 +1594,8 @@ function triggerWakeWordActivation() {
   setTimeout(() => {
     if (el.voiceButton && !state.recording) {
       el.voiceButton.click();
-      // Auto-stop recording after configurable seconds
-      const autoStopMs = 8000;
+      // Fallback hard-stop — VAD in the audio backend stops earlier on silence
+      const autoStopMs = 15000;
       setTimeout(() => {
         if (state.recording) {
           stopVoiceRecording();
@@ -1517,10 +1669,8 @@ function setupWakeWord() {
   }
 
   el.wakeWordToggle.addEventListener("change", (event) => {
-    state.wakeWordEnabled = event.target.checked;
-    localStorage.setItem("neuro_mirror_wake_word", state.wakeWordEnabled ? "true" : "false");
-
-    if (state.wakeWordEnabled) {
+    localStorage.setItem("neuro_mirror_wake_word", event.target.checked ? "true" : "false");
+    if (event.target.checked) {
       startWakeWordListening();
     } else {
       stopWakeWordListening();
@@ -1563,11 +1713,59 @@ function setupVoiceRecorder() {
       state.mediaRecorder = new MediaRecorder(stream, { mimeType });
       state.mediaChunks = [];
 
+      // --- Browser-side VAD via AudioContext ---
+      let vadAudioCtx = null;
+      let vadInterval = null;
+      const VAD_SILENCE_THRESHOLD = 0.012; // RMS below this = silence
+      const VAD_SILENCE_MS = 1800;         // stop after 1.8s of silence post-speech
+      const VAD_MIN_SPEECH_MS = 400;       // must hear speech for at least 400ms first
+      let vadSpeechMs = 0;
+      let vadSilenceMs = 0;
+      let vadSpeechStarted = false;
+
+      function stopVad() {
+        if (vadInterval) { clearInterval(vadInterval); vadInterval = null; }
+        if (vadAudioCtx) { try { vadAudioCtx.close(); } catch (_) {} vadAudioCtx = null; }
+      }
+
+      try {
+        vadAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const source = vadAudioCtx.createMediaStreamSource(stream);
+        const analyser = vadAudioCtx.createAnalyser();
+        analyser.fftSize = 512;
+        source.connect(analyser);
+        const buf = new Float32Array(analyser.fftSize);
+
+        vadInterval = setInterval(() => {
+          if (!state.recording) { stopVad(); return; }
+          analyser.getFloatTimeDomainData(buf);
+          let sum = 0;
+          for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+          const rms = Math.sqrt(sum / buf.length);
+
+          if (rms >= VAD_SILENCE_THRESHOLD) {
+            vadSpeechMs += 50;
+            vadSilenceMs = 0;
+            if (vadSpeechMs >= VAD_MIN_SPEECH_MS) vadSpeechStarted = true;
+          } else {
+            vadSilenceMs += 50;
+            if (vadSpeechStarted && vadSilenceMs >= VAD_SILENCE_MS) {
+              appendLogLine(`[vad] silence detected after speech, stopping recording`);
+              stopVad();
+              stopVoiceRecording();
+            }
+          }
+        }, 50);
+      } catch (vadErr) {
+        appendLogLine(`[vad] AudioContext unavailable: ${vadErr.message || vadErr}`);
+      }
+
       state.mediaRecorder.ondataavailable = (event) => {
         if (event.data && event.data.size > 0) state.mediaChunks.push(event.data);
       };
 
       state.mediaRecorder.onstop = async () => {
+        stopVad();
         const blob = new Blob(state.mediaChunks, { type: state.mediaRecorder.mimeType || "audio/webm" });
         const formData = new FormData();
         formData.append("audio", blob, "voice.webm");

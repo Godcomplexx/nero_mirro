@@ -21,10 +21,22 @@ class VoiceRecorder:
     ``VoiceTestPlugin`` (timed screening recording).
     """
 
-    def __init__(self, *, sample_rate: int, channels: int, max_seconds: float) -> None:
+    def __init__(
+        self,
+        *,
+        sample_rate: int,
+        channels: int,
+        max_seconds: float,
+        silence_threshold: float = 0.012,
+        silence_duration: float = 1.8,
+        min_speech_duration: float = 0.4,
+    ) -> None:
         self.sample_rate = sample_rate
         self.channels = channels
         self.max_seconds = max_seconds
+        self.silence_threshold = silence_threshold
+        self.silence_duration = silence_duration
+        self.min_speech_duration = min_speech_duration
         self._stream = None
         self._wave_file: wave.Wave_write | None = None
         self._file_path = ""
@@ -56,16 +68,36 @@ class VoiceRecorder:
         wave_file.setframerate(self.sample_rate)
         self._wave_file = wave_file
         max_frames = int(self.sample_rate * self.max_seconds)
+        min_speech_frames = int(self.sample_rate * self.min_speech_duration)
+        silence_stop_frames = int(self.sample_rate * self.silence_duration)
+
+        # Mutable state for VAD inside the callback
+        vad = {"speech_frames": 0, "silence_frames": 0}
 
         def callback(indata, frames, _time, status) -> None:
             if status:
                 return
             pcm = (np.clip(indata, -1.0, 1.0) * 32767).astype(np.int16).tobytes()
+            rms = float(np.sqrt(np.mean(indata ** 2)))
+
             with self._lock:
                 if self._wave_file is not None:
                     self._wave_file.writeframes(pcm)
                     self._captured_frames += frames
+
+                if rms >= self.silence_threshold:
+                    vad["speech_frames"] += frames
+                    vad["silence_frames"] = 0
+                else:
+                    vad["silence_frames"] += frames
+
+                speech_started = vad["speech_frames"] >= min_speech_frames
+                silence_long_enough = vad["silence_frames"] >= silence_stop_frames
+
                 if self._captured_frames >= max_frames:
+                    raise sd.CallbackStop()
+                # Stop early only after user has spoken and then gone silent
+                if speech_started and silence_long_enough:
                     raise sd.CallbackStop()
 
         self._stream = sd.InputStream(

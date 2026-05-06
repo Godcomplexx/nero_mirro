@@ -33,32 +33,45 @@ class AppearanceMemoryStore:
         if not any(safe_snapshot.get(field) for field in MEMORY_FIELDS if field != "created_at"):
             return
 
-        items = self._read_items()
+        items, request_count = self._read_state()
+        request_count += 1
+        if request_count % 10 == 0 and items:
+            items.pop(0)
         items.append(safe_snapshot)
         items = items[-max(1, self.limit):]
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.write_text(
-            json.dumps({"items": items}, ensure_ascii=False, indent=2),
+            json.dumps({"request_count": request_count, "items": items}, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
 
     def _read_items(self) -> list[dict[str, Any]]:
+        items, _ = self._read_state()
+        return items
+
+    def _read_state(self) -> tuple[list[dict[str, Any]], int]:
         try:
             raw = json.loads(self.path.read_text(encoding="utf-8"))
         except FileNotFoundError:
-            return []
+            return [], 0
         except (OSError, json.JSONDecodeError):
-            return []
+            return [], 0
 
-        raw_items = raw.get("items") if isinstance(raw, dict) else raw
+        if isinstance(raw, dict):
+            raw_items = raw.get("items")
+            request_count = int(raw.get("request_count") or 0)
+        else:
+            raw_items = raw
+            request_count = 0
+
         if not isinstance(raw_items, list):
-            return []
+            return [], request_count
 
         items: list[dict[str, Any]] = []
         for item in raw_items:
             if isinstance(item, dict):
                 items.append(self._sanitize_snapshot(item))
-        return items[-max(1, self.limit):]
+        return items[-max(1, self.limit):], request_count
 
     @staticmethod
     def _sanitize_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
@@ -79,32 +92,40 @@ def build_memory_note(current: dict[str, Any], recent: list[dict[str, Any]]) -> 
     if not previous:
         return ""
 
-    notes: list[str] = []
-    hair_note = _changed_note(
-        current.get("hair"),
-        previous.get("hair"),
-        "Волосы сегодня выглядят иначе, чем раньше, и это хорошо освежает образ.",
-    )
-    if hair_note:
-        notes.append(hair_note)
+    changes: list[str] = []
 
-    clothing_note = _changed_note(
-        current.get("clothing"),
-        previous.get("clothing"),
-        "Одежда сегодня отличается от прошлого образа и смотрится аккуратно.",
-    )
-    if clothing_note:
-        notes.append(clothing_note)
+    if _is_changed(current.get("hair"), previous.get("hair")):
+        prev_hair = str(previous.get("hair") or "").strip()
+        curr_hair = str(current.get("hair") or "").strip()
+        changes.append(
+            f"причёска изменилась (было: {prev_hair}; сейчас: {curr_hair})"
+            if prev_hair and curr_hair else "причёска изменилась"
+        )
 
-    accessories_note = _changed_note(
-        current.get("accessories"),
-        previous.get("accessories"),
-        "Аксессуары сегодня заметно меняют впечатление от образа.",
-    )
-    if accessories_note:
-        notes.append(accessories_note)
+    if _is_changed(current.get("clothing"), previous.get("clothing")):
+        prev_cl = str(previous.get("clothing") or "").strip()
+        curr_cl = str(current.get("clothing") or "").strip()
+        changes.append(
+            f"одежда другая (было: {prev_cl}; сейчас: {curr_cl})"
+            if prev_cl and curr_cl else "одежда другая"
+        )
 
-    return " ".join(notes[:2])
+    if _is_changed(current.get("accessories"), previous.get("accessories")):
+        changes.append("аксессуары изменились")
+
+    return "; ".join(changes[:2])
+
+
+def _is_changed(current: Any, previous: Any) -> bool:
+    c = _normalize_compare_text(current)
+    p = _normalize_compare_text(previous)
+    if not c or not p:
+        return False
+    if c == p:
+        return False
+    if c in p or p in c:
+        return False
+    return True
 
 
 def _changed_note(current: Any, previous: Any, note: str) -> str:

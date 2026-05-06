@@ -20,7 +20,8 @@ from neuro_mirror.plugins.microphone.plugin import MicrophonePlugin
 from neuro_mirror.plugins.speech_worker.plugin import SpeechWorkerPlugin
 from neuro_mirror.plugins.storage.plugin import StoragePlugin
 from neuro_mirror.plugins.video_analysis.plugin import VisionWorkerPlugin
-from neuro_mirror.plugins.voice_test.plugin import DemoVoiceTestPlugin
+from neuro_mirror.plugins.voice_test.plugin import VoiceTestPlugin
+from neuro_mirror.plugins.moca_test.plugin import MocaTestPlugin
 
 
 @dataclass(slots=True)
@@ -107,7 +108,8 @@ def create_runtime(
         VisionWorkerPlugin(bus, settings=settings, appearance_composer=appearance_composer)
     )
     plugin_manager.register(SpeechWorkerPlugin(bus, settings=settings))
-    plugin_manager.register(DemoVoiceTestPlugin(bus))
+    plugin_manager.register(VoiceTestPlugin(bus, settings=settings))
+    plugin_manager.register(MocaTestPlugin(bus, settings=settings))
     plugin_manager.register(AggregatorPlugin(bus, appearance_composer=appearance_composer))
 
     if include_ai_plugin:

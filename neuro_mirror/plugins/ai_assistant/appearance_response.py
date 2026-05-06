@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 import re
 from dataclasses import dataclass
 from typing import Any
@@ -16,6 +17,28 @@ from neuro_mirror.plugins.ai_assistant.appearance_memory import (
 from neuro_mirror.plugins.ai_assistant.rules import load_assistant_rules
 
 _log = logging.getLogger("neuro_mirror.appearance_response")
+
+
+_EMOTION_FALLBACK: dict[str, str] = {
+    "positive": "Ты выглядишь тепло и располагающе.",
+    "negative": "У тебя выразительный и запоминающийся взгляд.",
+    "neutral": "Ты выглядишь уверенно и спокойно.",
+}
+_POSITIVE_EMOTIONS: frozenset[str] = frozenset({"радость", "удивление"})
+_NEGATIVE_EMOTIONS: frozenset[str] = frozenset({"грусть", "злость", "страх", "отвращение", "презрение"})
+
+
+def _is_health_alert(wellness_suggestion: str) -> bool:
+    lowered = wellness_suggestion.lower()
+    return any(marker in lowered for marker in ("покрасн", "давлен", "скрининг", "груст", "задумч", "устал"))
+
+
+def _emotion_fallback(emotion: str) -> str:
+    if emotion in _POSITIVE_EMOTIONS:
+        return _EMOTION_FALLBACK["positive"]
+    if emotion in _NEGATIVE_EMOTIONS:
+        return _EMOTION_FALLBACK["negative"]
+    return _EMOTION_FALLBACK["neutral"]
 
 
 @dataclass(slots=True)
@@ -174,6 +197,8 @@ class AppearanceResponseComposer:
 
     async def compose(self, analysis: dict[str, Any]) -> str:
         # --- Step 1: try to get a rich visual description via Ollama Vision ---
+        _t_start = time.perf_counter()
+        emotion_val = str(analysis.get("emotion") or "").strip().lower()
         if self.enabled and self.ai_backend == "ollama":
             frame_b64 = str(analysis.get("frame_base64") or "").strip()
             has_desc = bool(analysis.get("appearance_description"))
@@ -190,33 +215,117 @@ class AppearanceResponseComposer:
             )
             if frame_b64 and not has_desc:
                 try:
-                    _log.info("compose: starting 3-stage Vision pipeline (EN→RU→polish)")
-                    vision_desc = await asyncio.to_thread(
-                        self._describe_appearance_with_vision_sync, frame_b64, analysis
+                    # If subclass overrides _describe_appearance_with_vision_sync (e.g. tests),
+                    # use that method directly (sequential). Otherwise use the parallel path.
+                    _overridden = (
+                        type(self)._describe_appearance_with_vision_sync
+                        is not AppearanceResponseComposer._describe_appearance_with_vision_sync
                     )
-                    if vision_desc:
-                        _log.info("compose: Vision pipeline returned %d chars", len(vision_desc))
-                        analysis["appearance_description"] = vision_desc
-                        analysis["vision_status"] = "ok:en_to_ru"
-                    else:
-                        _log.warning("compose: Vision pipeline returned empty result")
-                        analysis["vision_status"] = "empty:en_to_ru"
-                        direct_desc = await asyncio.to_thread(
-                            self._describe_appearance_direct_russian_sync, frame_b64, analysis
+                    if _overridden:
+                        vision_desc = await asyncio.to_thread(
+                            self._describe_appearance_with_vision_sync, frame_b64, analysis
                         )
-                        if direct_desc:
-                            _log.info("compose: direct RU Vision fallback returned %d chars", len(direct_desc))
-                            analysis["appearance_description"] = direct_desc
-                            analysis["vision_status"] = "ok:direct_ru"
+                        inferred_result: dict[str, str] | BaseException = {}
+                        if vision_desc:
+                            analysis["appearance_description"] = vision_desc
+                            analysis["vision_status"] = "ok:en_to_ru"
+                            try:
+                                inferred_result = await asyncio.to_thread(
+                                    self._infer_all_sync, vision_desc, emotion_val
+                                )
+                            except Exception:
+                                pass
                         else:
-                            _log.warning("compose: direct RU Vision fallback also returned empty result")
-                            analysis["vision_status"] = "empty:direct_ru"
+                            analysis["vision_status"] = "empty:en_to_ru"
+                        if isinstance(inferred_result, dict):
+                            if inferred_result.get("style"):
+                                analysis["inferred_style"] = inferred_result["style"]
+                            if inferred_result.get("mood"):
+                                analysis["inferred_mood"] = inferred_result["mood"]
+                            if inferred_result.get("wellness"):
+                                analysis["inferred_wellness"] = inferred_result["wellness"]
+                            if inferred_result.get("opening"):
+                                analysis["emotion_opening"] = inferred_result["opening"]
+                    else:
+                        _log.info("compose: Step A — getting EN description from vision model")
+                        _t_a = time.perf_counter()
+                        en_desc = await asyncio.to_thread(
+                            self._vision_get_en_description_sync, frame_b64, emotion_val
+                        )
+                        if en_desc:
+                            _log.info("compose: EN ready (%d chars) in %.1fs, running translation + inference in parallel", len(en_desc), time.perf_counter() - _t_a)
+                            _t_b = time.perf_counter()
+                            ru_desc, inferred = await asyncio.gather(
+                                asyncio.to_thread(self._translate_en_description_sync, en_desc),
+                                asyncio.to_thread(self._infer_all_sync, en_desc, emotion_val),
+                                return_exceptions=True,
+                            )
+                            _log.info("compose: translate+infer gather done in %.1fs", time.perf_counter() - _t_b)
+                            if isinstance(ru_desc, str) and ru_desc:
+                                analysis["appearance_description"] = ru_desc
+                                analysis["vision_status"] = "ok:en_to_ru"
+                            else:
+                                _log.warning("compose: translation empty, trying direct RU fallback")
+                                analysis["vision_status"] = "empty:en_to_ru"
+                                direct_desc = await asyncio.to_thread(
+                                    self._describe_appearance_direct_russian_sync, frame_b64, analysis
+                                )
+                                if direct_desc:
+                                    analysis["appearance_description"] = direct_desc
+                                    analysis["vision_status"] = "ok:direct_ru"
+                                else:
+                                    analysis["vision_status"] = "empty:direct_ru"
+                            if isinstance(inferred, dict):
+                                if inferred.get("style"):
+                                    analysis["inferred_style"] = inferred["style"]
+                                if inferred.get("mood"):
+                                    analysis["inferred_mood"] = inferred["mood"]
+                                if inferred.get("wellness"):
+                                    analysis["inferred_wellness"] = inferred["wellness"]
+                                if inferred.get("opening"):
+                                    analysis["emotion_opening"] = inferred["opening"]
+                        else:
+                            _log.warning("compose: EN description empty, trying direct RU fallback")
+                            analysis["vision_status"] = "empty:en_to_ru"
+                            direct_desc = await asyncio.to_thread(
+                                self._describe_appearance_direct_russian_sync, frame_b64, analysis
+                            )
+                            if direct_desc:
+                                analysis["appearance_description"] = direct_desc
+                                analysis["vision_status"] = "ok:direct_ru"
+                            else:
+                                analysis["vision_status"] = "empty:direct_ru"
                 except Exception as exc:
                     _log.warning("Vision appearance description failed: %s", exc)
                     analysis["vision_status"] = f"error:{exc}"
         else:
             _log.info("compose: skipping Vision pipeline (enabled=%s, backend=%s)", self.enabled, self.ai_backend)
             analysis["vision_status"] = "skipped"
+
+        # If inference hasn't run yet (no frame_b64 path), run it now on existing description
+        desc_for_inference = str(analysis.get("appearance_description") or "").strip()
+        if (
+            self.enabled
+            and self.ai_backend == "ollama"
+            and desc_for_inference
+            and "inferred_style" not in analysis
+            and "emotion_opening" not in analysis
+        ):
+            try:
+                inferred = await asyncio.to_thread(
+                    self._infer_all_sync, desc_for_inference, emotion_val
+                )
+                if isinstance(inferred, dict):
+                    if inferred.get("style"):
+                        analysis["inferred_style"] = inferred["style"]
+                    if inferred.get("mood"):
+                        analysis["inferred_mood"] = inferred["mood"]
+                    if inferred.get("wellness"):
+                        analysis["inferred_wellness"] = inferred["wellness"]
+                    if inferred.get("opening"):
+                        analysis["emotion_opening"] = inferred["opening"]
+            except Exception:
+                pass
 
         checklist = self._build_appearance_checklist(analysis)
         if self._has_checklist_info(checklist):
@@ -227,20 +336,44 @@ class AppearanceResponseComposer:
             analysis["appearance_checklist"] = checklist
             analysis["appearance_memory_notes"] = memory_note
             analysis["wellness_suggestion"] = wellness_suggestion
-            reply = self._build_personal_appearance_reply(
-                checklist,
-                memory_note=memory_note,
-                wellness_suggestion=wellness_suggestion,
-            )
+
+            if self.enabled and self.ai_backend == "ollama":
+                try:
+                    # Pass wellness_suggestion only as context for LLM when it's not a health alert
+                    llm_wellness = wellness_suggestion if not _is_health_alert(wellness_suggestion) else ""
+                    reply = await asyncio.to_thread(
+                        self._build_reply_with_llm_sync,
+                        checklist, memory_note, llm_wellness,
+                    )
+                except Exception:
+                    reply = ""
+            else:
+                reply = ""
+            if not reply:
+                reply = self._build_personal_appearance_reply(
+                    checklist,
+                    memory_note=memory_note,
+                    wellness_suggestion=wellness_suggestion,
+                )
             if self.memory_store is not None and analysis.get("appearance_description"):
                 self.memory_store.append(checklist)
-            return self._shorten_voice_reply(reply, max_sentences=3, max_chars=430)
+
+            # Health-alert wellness is appended after shortening so it's never truncated
+            if wellness_suggestion and _is_health_alert(wellness_suggestion):
+                short_reply = self._shorten_voice_reply(reply, max_sentences=2, max_chars=280)
+                result = f"{short_reply.rstrip()} {wellness_suggestion}"
+            else:
+                result = self._shorten_voice_reply(reply, max_sentences=3, max_chars=430)
+            _log.info("compose: done via checklist path in %.1fs total", time.perf_counter() - _t_start)
+            return result
 
         # --- Step 2: build template from analysis data ---
         template = self._build_template(analysis)
         if str(analysis.get("vision_status") or "").startswith("ok:"):
+            _log.info("compose: done via template(ok) path in %.1fs total", time.perf_counter() - _t_start)
             return self._shorten_voice_reply(template)
         if not self.enabled or self.ai_backend != "ollama":
+            _log.info("compose: done via template(offline) path in %.1fs total", time.perf_counter() - _t_start)
             return self._shorten_voice_reply(template)
 
         # --- Step 3: polish the template with LLM rewrite ---
@@ -248,8 +381,10 @@ class AppearanceResponseComposer:
             polished = await asyncio.to_thread(self._rewrite_with_ollama_sync, template, analysis)
         except Exception:
             _log.warning("compose: LLM rewrite failed, returning template")
+            _log.info("compose: done via rewrite-fallback path in %.1fs total", time.perf_counter() - _t_start)
             return template
 
+        _log.info("compose: done via rewrite path in %.1fs total", time.perf_counter() - _t_start)
         return self._shorten_voice_reply(self._sanitize_polished_response(polished, template))
 
     def _build_template(self, analysis: dict[str, Any]) -> str:
@@ -267,45 +402,10 @@ class AppearanceResponseComposer:
                 "Проверь, что кадр дошёл до анализа и Ollama vision-модель доступна."
             )
 
-        # --- Emotion → opening line with vibe + atmosphere ---
-        compliment_map = {
-            "радость": (
-                "Ты выглядишь как человек с очень живой и открытой внешностью — "
-                "в тебе сразу чувствуется лёгкость и дружелюбие."
-            ),
-            "спокойствие": (
-                "Ты выглядишь как человек с уравновешенной, приятной внешностью — "
-                "в тебе сразу чувствуется спокойствие и уверенность."
-            ),
-            "удивление": (
-                "Ты выглядишь как человек с выразительной внешностью — "
-                "в тебе сразу чувствуется живость и любопытство."
-            ),
-            "грусть": (
-                "Ты выглядишь как человек с аккуратной, мягкой внешностью — "
-                "в тебе чувствуется задумчивость и глубина."
-            ),
-            "злость": (
-                "Ты выглядишь как человек с яркой, выразительной внешностью — "
-                "в тебе чувствуется решительность и внутренняя сила."
-            ),
-            "страх": (
-                "Ты выглядишь как человек с внимательной, чуткой внешностью — "
-                "в тебе чувствуется сосредоточенность и настороженность."
-            ),
-            "отвращение": (
-                "Ты выглядишь как человек с серьёзной, строгой внешностью — "
-                "в тебе чувствуется характер и сдержанность."
-            ),
-            "презрение": (
-                "Ты выглядишь как человек с уверенной, стильной внешностью — "
-                "в тебе чувствуется самодостаточность и твёрдость."
-            ),
-        }
-        opening = compliment_map.get(
-            emotion,
-            "Ты выглядишь как человек с приятной внешностью — "
-            "в тебе сразу чувствуется уверенность и аккуратность.",
+        # --- Emotion → opening line (LLM-generated or 3-bucket fallback) ---
+        opening = (
+            str(analysis.get("emotion_opening") or "").strip()
+            or _emotion_fallback(emotion)
         )
 
         # --- Rich description or basic observation ---
@@ -360,9 +460,18 @@ class AppearanceResponseComposer:
                 description,
                 ("наушник", "очки", "серёж", "сереж", "украшен", "цепоч", "аксесс", "час"),
             ),
-            "style": self._infer_style(description) if has_vision_description else "",
-            "mood": self._infer_mood(description, emotion),
-            "wellness": self._infer_wellness_observation(description, emotion),
+            "style": (
+                str(analysis.get("inferred_style") or "").strip()
+                or (self._infer_style(description) if has_vision_description else "")
+            ),
+            "mood": (
+                str(analysis.get("inferred_mood") or "").strip()
+                or self._infer_mood(description, emotion)
+            ),
+            "wellness": (
+                str(analysis.get("inferred_wellness") or "").strip()
+                or self._infer_wellness_observation(description, emotion)
+            ),
             "summary": self._find_sentence(
                 description,
                 ("аккурат", "опрят", "ухож", "спокой", "сосредоточ", "образ", "впечатлен", "впечатл"),
@@ -399,6 +508,46 @@ class AppearanceResponseComposer:
             if any(keyword in lowered for keyword in keywords):
                 return sentence.strip().rstrip(".!?")
         return ""
+
+    def _infer_all_sync(
+        self, description: str, emotion: str
+    ) -> dict[str, str]:
+        """Single LLM call that returns style, mood, wellness, and emotion_opening together."""
+        emotion_line = f"Эмоция по модели: «{emotion}».\n" if emotion else ""
+        prompt = (
+            "Извлеки из описания ниже только то, что явно упомянуто. "
+            "Ответь строго JSON без пояснений, markdown и лишних символов.\n"
+            "Если информации для поля нет — оставь пустую строку.\n"
+            "НЕ додумывай и НЕ домысливай ничего, чего нет в описании.\n\n"
+            "{\n"
+            '  "style": "<фраза вида \'спокойный сдержанный образ\' на основе цветов, без типов одежды, иначе пустая строка>",\n'
+            '  "mood": "<одно прилагательное или короткая фраза: \'спокойный\', \'немного грустный\' — ТОЛЬКО если явно в описании, иначе пустая строка>",\n'
+            '  "wellness": "<самочувствие ТОЛЬКО если явный визуальный признак в описании, иначе пустая строка>",\n'
+            '  "opening": "<1 тёплое предложение о конкретных деталях из описания, обращение на ты, без домыслов>"\n'
+            "}\n\n"
+            f"{emotion_line}"
+            f"Описание: {description[:400]}"
+        )
+        result = self._generate_text_with_fallback_sync(
+            prompt,
+            options={"temperature": 0.5, "num_predict": 140},
+            timeout_seconds=max(self.timeout_seconds, 20.0),
+            purpose="Appearance inference",
+        )
+        try:
+            json_start = result.find("{")
+            json_end = result.rfind("}") + 1
+            if json_start >= 0 and json_end > json_start:
+                parsed = json.loads(result[json_start:json_end])
+                out: dict[str, str] = {}
+                for key in ("style", "mood", "wellness", "opening"):
+                    val = " ".join(str(parsed.get(key) or "").split()).strip()
+                    if val:
+                        out[key] = val
+                return out
+        except (json.JSONDecodeError, AttributeError):
+            pass
+        return {}
 
     @staticmethod
     def _infer_style(description: str) -> str:
@@ -437,7 +586,13 @@ class AppearanceResponseComposer:
         wellness = str(checklist.get("wellness") or "").lower()
         mood = str(checklist.get("mood") or "").lower()
         emotion = str(analysis.get("emotion") or "").lower()
-        if "покрас" in wellness or "красн" in wellness:
+        description = str(analysis.get("appearance_description") or analysis.get("observed") or "").lower()
+        # Always check raw description for redness — LLM wellness field may miss it
+        redness_signal = (
+            "покрас" in wellness or "красн" in wellness
+            or any(w in description for w in ("покрасн", "красное лицо", "лицо красн", "румян"))
+        )
+        if redness_signal:
             return (
                 "Лицо выглядит немного покрасневшим; это может быть свет, жара или усталость. "
                 "Если чувствуешь себя неважно, лучше измерить давление или пройти короткий скрининг."
@@ -445,6 +600,54 @@ class AppearanceResponseComposer:
         if any(marker in f"{wellness} {mood} {emotion}" for marker in ("груст", "печал", "устал", "задум")):
             return "Взгляд кажется немного грустным или задумчивым; если хочешь, можем пройти короткий скрининг или просто поговорить."
         return ""
+
+    def _build_reply_with_llm_sync(
+        self,
+        checklist: dict[str, str],
+        memory_note: str,
+        wellness_suggestion: str,
+    ) -> str:
+        details_lines = []
+        for key in ("hair", "clothing", "accessories", "face_expression", "style", "mood"):
+            val = str(checklist.get(key) or "").strip()
+            if val:
+                details_lines.append(f"- {key}: {val}")
+        details_block = "\n".join(details_lines) if details_lines else "(детали не определены)"
+
+        memory_block = f"Изменения по сравнению с прошлым визитом: {memory_note}" if memory_note else ""
+        wellness_block = f"Наблюдение о самочувствии: {wellness_suggestion}" if wellness_suggestion else ""
+
+        context_parts = [details_block]
+        if memory_block:
+            context_parts.append(memory_block)
+        if wellness_block:
+            context_parts.append(wellness_block)
+
+        prompt = (
+            "Ты — ассистент умного зеркала. Пользователь спросил, как он выглядит.\n"
+            "Напиши тёплый живой ответ из 2–3 предложений СТРОГО на основе наблюдений ниже.\n\n"
+            "ПРАВИЛА (нарушение делает ответ плохим):\n"
+            "- Упоминай ТОЛЬКО то, что есть в наблюдениях — не домысливай позу, настроение, намерения.\n"
+            "- Не называй тип одежды (куртка, рубашка, худи и т.д.) — говори о цветах и общем впечатлении.\n"
+            "- Если видны цвета — скажи, что этот цвет или сочетание тебе идёт.\n"
+            "- Обращайся на «ты», тон тёплый и конкретный.\n"
+            "- Не начинай с «Ты выглядишь аккуратно» — придумай другое начало.\n"
+            "- Если есть изменения по сравнению с прошлым — упомяни их естественно.\n"
+            "- Максимум 3 коротких предложения. Не перечисляй всё подряд.\n"
+            "- Ответь только текстом, без заголовков, кавычек и пояснений.\n\n"
+            "Наблюдения:\n"
+            + "\n".join(context_parts)
+        )
+        result = self._generate_text_with_fallback_sync(
+            prompt,
+            options={"temperature": 0.45, "num_predict": 120},
+            timeout_seconds=max(self.timeout_seconds, 20.0),
+            purpose="Appearance reply",
+        )
+        cleaned = " ".join(result.split()).strip()
+        if not self._is_safe_russian_output(cleaned, min_cyrillic_ratio=0.70, max_foreign_tokens=4):
+            return ""
+        return cleaned
 
     def _build_personal_appearance_reply(
         self,
@@ -456,12 +659,13 @@ class AppearanceResponseComposer:
         detail = self._best_compliment_detail(checklist)
         opening = "Ты выглядишь аккуратно и ухоженно"
         if detail:
-            opening = f"{opening}: {detail}"
+            opening = f"{opening}: {detail}."
         else:
-            style = checklist.get("style") or "образ выглядит спокойным и собранным"
-            opening = f"{opening}, {style}."
-        if opening[-1] not in ".!?":
-            opening = f"{opening}."
+            style = checklist.get("style") or ""
+            if style:
+                opening = f"{opening}. {self._style_as_sentence(style)}"
+            else:
+                opening = f"{opening}."
 
         parts = [opening]
         if memory_note:
@@ -469,10 +673,33 @@ class AppearanceResponseComposer:
         if wellness_suggestion:
             parts.append(wellness_suggestion)
         elif checklist.get("mood"):
-            parts.append(f"По настроению ты кажешься {checklist['mood']}; если нужно, я рядом и могу помочь.")
+            parts.append(f"{self._mood_as_sentence(checklist['mood'])} Если нужно — я рядом.")
         else:
-            parts.append("В целом образ выглядит спокойным, мягким и приятным.")
+            parts.append("В целом образ выглядит спокойным и приятным.")
         return " ".join(parts)
+
+    @staticmethod
+    def _style_as_sentence(style: str) -> str:
+        """Turn a style value into a grammatically correct Russian sentence."""
+        s = style.strip().rstrip(".")
+        lowered = s.lower()
+        # already a full sentence-like phrase with a noun
+        if any(w in lowered for w in ("образ", "стиль", "look", "вид")):
+            return s[0].upper() + s[1:] + "."
+        # adjectives only (no noun) — wrap into sentence
+        return f"Образ смотрится {lowered}."
+
+    @staticmethod
+    def _mood_as_sentence(mood: str) -> str:
+        """Turn a mood value into a grammatically correct Russian sentence."""
+        s = mood.strip().rstrip(".")
+        lowered = s.lower()
+        # already contains a verb-compatible phrasing
+        if any(w in lowered for w in ("настроение", "состояние")):
+            # e.g. "спокойное и сосредоточенное настроение" → "У тебя спокойное настроение."
+            return f"У тебя {lowered}."
+        # short adjective / phrase — wrap naturally
+        return f"Выглядишь {lowered}."
 
     @staticmethod
     def _best_compliment_detail(checklist: dict[str, str]) -> str:
@@ -480,8 +707,10 @@ class AppearanceResponseComposer:
         hair = str(checklist.get("hair") or "").strip()
         accessories = str(checklist.get("accessories") or "").strip()
         if clothing:
-            item = AppearanceResponseComposer._clothing_item_name(clothing)
-            return f"{item} смотрится на тебе спокойно и тебе идёт"
+            color = AppearanceResponseComposer._extract_color_phrase(clothing)
+            if color:
+                return f"{color} тебе очень идёт"
+            return "это цветовое сочетание смотрится на тебе гармонично"
         if hair:
             return "волосы выглядят аккуратно и хорошо обрамляют лицо"
         if accessories:
@@ -489,23 +718,23 @@ class AppearanceResponseComposer:
         return ""
 
     @staticmethod
-    def _clothing_item_name(clothing: str) -> str:
-        lowered = clothing.lower()
-        keyword_items = (
-            ("кофт", "эта кофта"),
-            ("худи", "это худи"),
-            ("толстов", "эта толстовка"),
-            ("блуз", "эта блузка"),
-            ("футбол", "эта футболка"),
-            ("свитер", "этот свитер"),
-            ("рубаш", "эта рубашка"),
-            ("плать", "это платье"),
-            ("куртк", "эта куртка"),
+    def _extract_color_phrase(text: str) -> str:
+        lowered = text.lower()
+        color_words = (
+            "чёрн", "черн", "бел", "серый", "серо", "синий", "синего", "голуб",
+            "красн", "зелён", "зелен", "жёлт", "желт", "коричнев", "бежев",
+            "розов", "фиолет", "оранж", "тёмн", "темн", "светл",
         )
-        for marker, item in keyword_items:
-            if marker in lowered:
-                return item
-        return "эта одежда"
+        found = [w for w in color_words if w in lowered]
+        if not found:
+            return ""
+        # return first matched word as it appears in original text (title-cased)
+        for word in found:
+            idx = lowered.find(word)
+            if idx >= 0:
+                fragment = text[idx: idx + len(word) + 4].split()[0]
+                return f"этот {fragment.lower()} цвет"
+        return ""
 
     @staticmethod
     def _is_generic_observation(observed: str) -> bool:
@@ -548,38 +777,28 @@ class AppearanceResponseComposer:
             "Лицо видно в кадре, но детальная vision-модель сейчас не вернула описание волос, одежды, аксессуаров и фона."
         )
 
-    def _describe_appearance_with_vision_sync(
-        self, frame_base64: str, analysis: dict[str, Any]
+    def _vision_get_en_description_sync(
+        self, frame_base64: str, emotion: str
     ) -> str:
-        """Ask Ollama Vision model to describe the person's appearance from the camera frame.
-
-        Uses English prompt for llava (better quality), then translates to Russian
-        via the main text model.
-        """
+        """Step A: ask vision model for English description. Returns raw EN text or empty string."""
         vision_model = self._resolve_vision_model_sync()
-        emotion = str(analysis.get("emotion") or "").strip()
-
-        # --- Step A: get English description from vision model ---
         emotion_hint = f" The emotion model detected the mood as '{emotion}'." if emotion else ""
         prompt_en = (
-            "You are a careful visual assistant for a smart mirror.\n\n"
-            "Describe everything clearly visible in the camera frame. Follow this structure strictly, "
-            "skipping only sections that are not visible:\n\n"
-            "1. SCENE OVERVIEW: what is visible in the frame overall — one sentence.\n"
-            "2. PERSON: pose, position in frame, face/gaze/expression — one or two sentences.\n"
-            "3. HAIR: style, length, color, texture, how it frames the face, if visible.\n"
-            "4. CLOTHING: garments, colors, style, fit, visible logos or patterns, if visible.\n"
-            "5. ACCESSORIES: glasses, jewelry, watch, headphones, hat, phone, etc., if visible.\n"
-            "6. OBJECTS AND BACKGROUND: furniture, walls, room items, lighting, and anything else visible.\n"
-            "7. OVERALL IMPRESSION: one warm, grounded impression based only on visible details.\n\n"
-            "Rules:\n"
-            "- Mention all clearly visible objects and background details, not only the person.\n"
-            "- Be warm and concrete, but do not over-compliment.\n"
-            "- Do NOT diagnose health conditions.\n"
-            "- Do NOT mention image quality, camera angle, or technical aspects.\n"
-            "- Do NOT infer age, ethnicity, identity, profession, or sensitive traits.\n"
-            "- Do NOT invent details that are not visible.\n"
-            "- Answer in 4-6 concise sentences in English.\n"
+            "You are a visual assistant for a smart mirror. Describe ONLY what is unmistakably visible.\n\n"
+            "Use this order, skip any section you are not 100% certain about:\n"
+            "- HAIR: color and length only if clearly visible (e.g. 'dark red shoulder-length hair')\n"
+            "- CLOTHING COLOR: state the single most dominant color you can clearly see on the clothing — if you are not certain, skip this entirely\n"
+            "- ACCESSORIES: headphones, glasses, earrings — only if unambiguously visible\n"
+            "- FACE: one word for expression (e.g. 'neutral', 'slight smile')\n\n"
+            "STRICT RULES:\n"
+            "- If you are not certain about the clothing color — DO NOT mention clothing at all\n"
+            "- Do NOT name garment types (jacket, shirt, hoodie, blouse, etc.)\n"
+            "- Do NOT describe texture, patterns, or contrast unless unmistakably obvious\n"
+            "- Do NOT describe posture, body language, or actions\n"
+            "- Do NOT infer mood, age, profession, or identity\n"
+            "- Do NOT use 'appears to', 'seems to', 'looks like'\n"
+            "- Do NOT invent any detail — uncertainty = omit\n"
+            "- Answer in 2-3 short factual sentences in English.\n"
             f"{emotion_hint}"
         )
         payload = {
@@ -587,7 +806,7 @@ class AppearanceResponseComposer:
             "prompt": prompt_en,
             "images": [frame_base64],
             "stream": False,
-            "options": {"temperature": 0.2, "num_predict": 360},
+            "options": {"temperature": 0.15, "num_predict": 200},
         }
         body = json.dumps(payload).encode("utf-8")
         req = request.Request(
@@ -613,38 +832,48 @@ class AppearanceResponseComposer:
         if len(en_description) < 15:
             _log.warning("Vision returned too short response: %r", en_description)
             return ""
+        return en_description
 
-        # --- Step B: translate English description to Russian via text model ---
+    def _describe_appearance_with_vision_sync(
+        self, frame_base64: str, analysis: dict[str, Any]
+    ) -> str:
+        """Sequential EN→RU pipeline kept for subclass overrides in tests."""
+        emotion = str(analysis.get("emotion") or "").strip()
+        en_desc = self._vision_get_en_description_sync(frame_base64, emotion)
+        if not en_desc:
+            return ""
+        return self._translate_en_description_sync(en_desc)
+
+    def _translate_en_description_sync(self, en_description: str) -> str:
         translate_prompt = self._rules_block() + (
             "Переведи описание всего кадра ниже на русский язык.\n\n"
             "Правила перевода:\n"
             "- Сделай текст тёплым, доброжелательным и естественным.\n"
             "- Обращайся на «ты».\n"
-            "- ОБЯЗАТЕЛЬНО сохрани ВСЕ упомянутые детали: человека, лицо, волосы, одежду, аксессуары, предметы, фон и освещение.\n"
-            "- Если в оригинале упомянуты конкретные вещи (цвет одежды, тип причёски, "
-            "украшения) — они ДОЛЖНЫ быть в переводе.\n"
+            "- ОБЯЗАТЕЛЬНО сохрани ВСЕ упомянутые детали: человека, лицо, волосы, цвета одежды, аксессуары, предметы, фон и освещение.\n"
+            "- Если в оригинале упомянуты цвета одежды или тип причёски — они ДОЛЖНЫ быть в переводе.\n"
+            "- НЕ называй тип одежды (куртка, рубашка, худи и т.д.) — говори только о цветах.\n"
             "- Не делай полный пересказ: выбери самые важные видимые детали и обобщи их.\n"
             "- Ответь только переводом-резюме в 2-4 коротких предложениях, без пояснений и заголовков.\n\n"
             f"Оригинал:\n{en_description}"
         )
         ru_description = self._generate_text_with_fallback_sync(
             translate_prompt,
-            options={"temperature": 0.25, "num_predict": 180},
+            options={"temperature": 0.35, "num_predict": 180},
             timeout_seconds=max(self.timeout_seconds, 20.0),
             purpose="Vision translation",
         )
         _log.info("Vision RU translation (%d chars): %.200s", len(ru_description), ru_description)
-
         if len(ru_description) < 15:
             _log.warning("Translation too short (%d chars), discarding", len(ru_description))
             return ""
         if not self._is_mostly_cyrillic(ru_description):
             _log.warning("Translated response still not Cyrillic: %.120s...", ru_description)
             return ""
-        cleaned_description = self._normalize_generated_description(ru_description)
-        if len(cleaned_description) < 20:
+        cleaned = self._normalize_generated_description(ru_description)
+        if len(cleaned) < 20:
             return ""
-        return cleaned_description
+        return cleaned
 
     def _describe_appearance_direct_russian_sync(
         self, frame_base64: str, analysis: dict[str, Any]
@@ -653,13 +882,17 @@ class AppearanceResponseComposer:
         emotion = str(analysis.get("emotion") or "").strip()
         emotion_hint = f"\nМодель эмоций определила настроение как: {emotion}." if emotion else ""
         prompt = (
-            "Ты vision-модель. Твоя задача — описать только изображение, которое передано вместе с запросом.\n"
-            "Опиши всё, что видно в кадре, на русском языке.\n"
-            "Опирайся только на видимые детали. Обязательно упомяни, если видно: человека, лицо, волосы, одежду, аксессуары, предметы, фон, освещение и расположение объектов.\n"
-            "Не выдумывай цвета, предметы, бренды или детали, которых не видно.\n"
-            "Не пересказывай правила и команды приложения.\n"
-            "Не упоминай качество камеры и не ставь диагнозов.\n"
-            "Ответь 2-4 короткими предложениями, доброжелательно, но конкретно."
+            "Опиши только то, в чём ты на 100% уверен на изображении.\n"
+            "Упомяни только если явно видно: волосы (цвет, длина), основной цвет одежды (только один — если не уверен, пропусти одежду вообще), "
+            "аксессуары (только если однозначно видны), выражение лица (одно слово).\n"
+            "Строгие правила:\n"
+            "- Если цвет одежды неочевиден — НЕ упоминай одежду совсем.\n"
+            "- НЕ называй тип одежды (куртка, рубашка, худи и т.д.).\n"
+            "- НЕ описывай текстуру, узор, контраст одежды.\n"
+            "- НЕ описывай позу, жесты или действия.\n"
+            "- НЕ делай выводов о настроении или характере.\n"
+            "- НЕ выдумывай — неуверен значит пропусти.\n"
+            "Ответь 2-3 короткими фактическими предложениями на русском."
             f"{emotion_hint}"
         )
         payload = {
@@ -667,7 +900,7 @@ class AppearanceResponseComposer:
             "prompt": prompt,
             "images": [frame_base64],
             "stream": False,
-            "options": {"temperature": 0.2, "num_predict": 160},
+            "options": {"temperature": 0.35, "num_predict": 160},
         }
         body = json.dumps(payload).encode("utf-8")
         req = request.Request(
@@ -712,7 +945,7 @@ class AppearanceResponseComposer:
         )
         return self._generate_text_with_fallback_sync(
             prompt,
-            options={"temperature": 0.1, "num_predict": 180},
+            options={"temperature": 0.25, "num_predict": 180},
             timeout_seconds=max(self.timeout_seconds, 20.0),
             purpose="Description translation",
         )
@@ -725,21 +958,21 @@ class AppearanceResponseComposer:
         }
         prompt = self._rules_block() + (
             "Пользователь попросил посмотреть, как он выглядит. Перепиши черновик в цельное описание всего кадра.\n\n"
-            "Структура ответа: общее впечатление → что видно в кадре → лицо и взгляд → волосы → одежда → аксессуары → фон и предметы → итоговое впечатление.\n\n"
+            "Структура ответа: общее впечатление → лицо и взгляд → волосы → цвета одежды → аксессуары → фон.\n\n"
             "Правила:\n"
             "- Обращайся на «ты».\n"
             "- Тон: тёплый, доброжелательный, конкретный.\n"
             "- Если детали НЕТ в черновике — НЕ выдумывай, просто пропусти этот пункт.\n"
-            "- Если деталь ЕСТЬ — обязательно упомяни, включая предметы и фон, не сокращай.\n"
+            "- НЕ называй тип одежды (куртка, рубашка, худи и т.д.) — говори только о цветах и общем впечатлении.\n"
             "- Не делай выводов о возрасте, этничности, здоровье, профессии или других чувствительных признаках.\n"
             "- Ответ: 2-4 коротких предложения на русском.\n"
-            "- Выбери главное: человек, лицо/взгляд, одежда/аксессуары, фон. Не перечисляй всё подряд.\n\n"
+            "- Выбери главное: лицо/взгляд, цвета в образе, фон. Не перечисляй всё подряд.\n\n"
             f"Черновик:\n{template}\n\n"
             f"Контекст анализа: {json.dumps(safe_analysis, ensure_ascii=False)}"
         )
         return self._generate_text_with_fallback_sync(
             prompt,
-            options={"temperature": 0.3, "num_predict": 180},
+            options={"temperature": 0.5, "num_predict": 180},
             timeout_seconds=max(self.timeout_seconds, 20.0),
             purpose="Appearance rewrite",
         )

@@ -19,6 +19,9 @@ class MicrophonePlugin(ProcessorPlugin):
             sample_rate=settings.voice_sample_rate,
             channels=settings.voice_channels,
             max_seconds=settings.voice_max_record_seconds,
+            silence_threshold=settings.voice_silence_threshold,
+            silence_duration=settings.voice_silence_duration,
+            min_speech_duration=settings.voice_min_speech_duration,
         )
 
     def subscribed_topics(self) -> tuple[str, ...]:
