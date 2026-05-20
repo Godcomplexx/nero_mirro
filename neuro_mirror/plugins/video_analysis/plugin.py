@@ -148,6 +148,23 @@ class VisionWorkerPlugin(ProcessorPlugin):
 
     async def _handle_capture(self, payload: dict[str, Any]) -> None:
         mode = str(payload.get("mode") or "")
+        analysis_result = payload.get("analysis_result")
+        if isinstance(analysis_result, dict) and analysis_result:
+            result = {
+                "analysis_type": "screening",
+                "source_backend": "vision_worker + rppg",
+                **analysis_result,
+            }
+            await self._publish_status_snapshot(result)
+            await self.bus.publish(
+                Event(
+                    topic=Topics.ANALYSIS_RESULT,
+                    source=self.name,
+                    payload=result,
+                )
+            )
+            return
+
         frame_base64 = str(payload.get("image_base64") or "").strip()
         if not frame_base64:
             await self._publish_video_failure(mode, str(payload.get("error") or "Кадр камеры не получен."))

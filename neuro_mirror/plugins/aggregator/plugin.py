@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import logging
 from enum import Enum
 from typing import Any
 
 from neuro_mirror.interfaces.processor import ProcessorPlugin
 from neuro_mirror.models.events import Event, Topics
 from neuro_mirror.plugins.ai_assistant.appearance_response import AppearanceResponseComposer
+
+
+logger = logging.getLogger(__name__)
 
 
 class SessionState(str, Enum):
@@ -22,6 +26,9 @@ IGNORED_UI_ACTIONS = {
     "release_camera",
     "start_voice_capture",
     "stop_voice_capture",
+    "moca_tts_finished",
+    "analyze_appearance",  # handled entirely by the browser via /api/appearance/analyze
+    "camera_vision_query",  # handled entirely by the browser via /api/assistant/camera-vision
 }
 
 
@@ -44,6 +51,7 @@ class AggregatorPlugin(ProcessorPlugin):
             Topics.DEVICE_SELECTION_RESOLVED,
             Topics.DEVICE_VALIDATION_FAILED,
             Topics.ANALYSIS_RESULT,
+            Topics.RPPG_RESULT,
             Topics.VOICE_TEST_RESULT,
             Topics.MOCA_TEST_RESULT,
             Topics.STORAGE_READ_RESULT,
@@ -70,13 +78,15 @@ class AggregatorPlugin(ProcessorPlugin):
             await self._handle_device_validation_failed(event.payload)
             return
 
+        if event.topic == Topics.RPPG_RESULT:
+            if self.state == SessionState.SCREENING:
+                self._latest_results["video"] = event.payload
+                await self._maybe_finish_screening()
+            return
+
         if event.topic == Topics.ANALYSIS_RESULT:
             if self.state == SessionState.APPEARANCE:
                 await self._finish_appearance_analysis(event.payload)
-                return
-
-            self._latest_results["video"] = event.payload
-            await self._maybe_finish_screening()
             return
 
         if event.topic == Topics.VOICE_TEST_RESULT:
@@ -119,10 +129,6 @@ class AggregatorPlugin(ProcessorPlugin):
             await self._start_screening()
             return
 
-        if action == "analyze_appearance":
-            await self._start_appearance_analysis()
-            return
-
         if action == "stop_moca":
             await self.bus.publish(Event(topic=Topics.MOCA_STOP, source=self.name, payload={}))
             self.state = SessionState.IDLE
@@ -131,6 +137,22 @@ class AggregatorPlugin(ProcessorPlugin):
                 source=self.name,
                 payload={"screen": "idle", "message": "Тест MoCA прерван."},
             ))
+            return
+
+        if action == "measure_pulse":
+            await self.bus.publish(
+                Event(
+                    topic=Topics.UI_UPDATE,
+                    source=self.name,
+                    payload={
+                        "screen": "idle",
+                        "message": "Запускаю мониторинг пульса (~5 мин). Держите лицо перед камерой.",
+                        "assistant_source": "пульс",
+                        "pulse_monitor_start": True,
+                        "pulse_monitor_duration": 300,
+                    },
+                )
+            )
             return
 
         await self.bus.publish(
@@ -147,7 +169,7 @@ class AggregatorPlugin(ProcessorPlugin):
     async def _start_screening(self) -> None:
         self.state = SessionState.SCREENING
         self._latest_results.clear()
-        self._pending_capture_mode = "daily_fast"
+        self._pending_capture_mode = ""
 
         await self.bus.publish(
             Event(
@@ -155,19 +177,14 @@ class AggregatorPlugin(ProcessorPlugin):
                 source=self.name,
                 payload={
                     "screen": "screening",
-                    "message": "Скрининг запущен.",
+                    "message": "Скрининг запущен. Держите лицо перед камерой (~20 сек).",
                     "history_count": self.history_count,
                     "assistant_source": "скрининг",
                 },
             )
         )
-        await self.bus.publish(
-            Event(
-                topic=Topics.PREPARE_SESSION,
-                source=self.name,
-                payload={"mode": "daily_fast", "require_microphone": False},
-            )
-        )
+        # Screening now uses browser-side frame capture via /ws/rppg WebSocket.
+        # No camera worker capture is triggered here.
 
     async def _start_appearance_analysis(self) -> None:
         self.state = SessionState.APPEARANCE
@@ -215,23 +232,14 @@ class AggregatorPlugin(ProcessorPlugin):
         self._pending_capture_mode = ""
 
     async def _handle_device_validation_failed(self, payload: dict[str, Any]) -> None:
-        self.state = SessionState.IDLE
-        self._pending_capture_mode = ""
         errors = payload.get("errors") or []
-        message = "Не удалось подготовить устройства."
-        if errors:
-            message = f"{message} {'; '.join(map(str, errors))}"
-        await self.bus.publish(
-            Event(
-                topic=Topics.UI_UPDATE,
-                source=self.name,
-                payload={
-                    "screen": "idle",
-                    "message": message,
-                    "assistant_source": "устройства",
-                },
-            )
+        logger.warning(
+            "Device validation failed during %s: %s",
+            self._pending_capture_mode or self.state,
+            "; ".join(map(str, errors)) or "unknown error",
         )
+        if not self._pending_capture_mode:
+            self.state = SessionState.IDLE
 
     async def _finish_appearance_analysis(self, payload: dict[str, Any]) -> None:
         self.state = SessionState.REPORTING
@@ -275,14 +283,56 @@ class AggregatorPlugin(ProcessorPlugin):
         self.state = SessionState.IDLE
 
     async def _maybe_finish_screening(self) -> None:
-        """Called when face scan result arrives — launch MoCA test next."""
+        """Called when face scan result arrives — show heart rate, then launch MoCA."""
+        import asyncio
         if self.state != SessionState.SCREENING:
+            logger.info("[aggregator] _maybe_finish_screening skipped: state=%s", self.state)
             return
         if "video" not in self._latest_results:
+            logger.info("[aggregator] _maybe_finish_screening skipped: no video result yet")
             return
 
-        # Face scan done — now start MoCA voice test
+        # Guard against double-entry (e.g. second ANALYSIS_RESULT arriving during sleep)
         self.state = SessionState.MOCA
+
+        video = self._latest_results["video"]
+        hr_bpm = video.get("heart_rate_bpm")
+        hr_status = video.get("heart_rate_status", "unavailable")
+        hr_algo = video.get("heart_rate_algorithm", "")
+        logger.info(
+            "[aggregator] screening done: heart_rate_bpm=%s status=%s algo=%s video_keys=%s",
+            hr_bpm, hr_status, hr_algo, list(video.keys()),
+        )
+
+        if hr_bpm is not None:
+            hr_line = f"Пульс: {hr_bpm} уд/мин ({hr_algo})."
+        elif hr_status == "disabled":
+            hr_line = "Измерение пульса отключено."
+        else:
+            hr_line = "Пульс не удалось измерить."
+
+        # Show heart rate result on screening screen before switching to MoCA
+        await self.bus.publish(
+            Event(
+                topic=Topics.UI_UPDATE,
+                source=self.name,
+                payload={
+                    "screen": "screening",
+                    "message": (
+                        f"Видео-скрининг завершён. {hr_line} "
+                        "Через несколько секунд начнётся голосовой тест MoCA."
+                    ),
+                    "heart_rate_bpm": hr_bpm,
+                    "heart_rate_status": hr_status,
+                    "heart_rate_algorithm": hr_algo,
+                    "assistant_source": "скрининг",
+                },
+            )
+        )
+
+        # Give the patient 4 seconds to see the heart rate result
+        await asyncio.sleep(4.0)
+
         await self.bus.publish(
             Event(
                 topic=Topics.UI_UPDATE,
@@ -298,7 +348,6 @@ class AggregatorPlugin(ProcessorPlugin):
                 },
             )
         )
-        # Brief pause so patient sees the transition message
         await self.bus.publish(
             Event(
                 topic=Topics.MOCA_START,
@@ -323,8 +372,18 @@ class AggregatorPlugin(ProcessorPlugin):
             "domains": {
                 "attention": video.get("attention_score"),
                 "gaze": video.get("gaze_stability"),
+                "heart_rate_bpm": video.get("heart_rate_bpm"),
+                "heart_rate_status": video.get("heart_rate_status"),
+                "heart_rate_algorithm": video.get("heart_rate_algorithm"),
+                "moca_score": moca.get("score"),
+                "moca_max_score": moca.get("max_score"),
+                "moca_percent": moca.get("percent"),
                 "moca_tasks": moca.get("tasks", []),
                 "moca_task_count": moca.get("task_count", 0),
+            },
+            "summary": {
+                "moca_interpretation": moca.get("interpretation", ""),
+                "moca_notes": moca.get("notes", ""),
             },
             "sources": {
                 "video": video,

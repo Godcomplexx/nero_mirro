@@ -2,14 +2,18 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import subprocess
 import sys
 import threading
+import time
 import uuid
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+_log = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -28,16 +32,20 @@ class WorkerClient:
         python_executable: str,
         script_path: str,
         request_timeout_seconds: float,
+        max_restart_attempts: int = 3,
     ) -> None:
         self.name = name
         self.python_executable = python_executable or sys.executable
         self.script_path = str(Path(script_path).resolve())
         self.request_timeout_seconds = request_timeout_seconds
+        self.max_restart_attempts = max_restart_attempts
         self._process: subprocess.Popen[bytes] | None = None
         self._async_lock = asyncio.Lock()
         self._sync_lock = threading.Lock()
         self._stderr_lines: deque[str] = deque(maxlen=20)
         self._stderr_thread: threading.Thread | None = None
+        self._restart_count: int = 0
+        self._last_restart_at: float = 0.0
 
     @property
     def last_stderr(self) -> str:
@@ -105,9 +113,25 @@ class WorkerClient:
         self._process = None
         self._stderr_thread = None
 
+    def _ensure_running_sync(self) -> None:
+        """Restart worker if it has crashed, with exponential backoff."""
+        if self._process is not None and self._process.poll() is None:
+            return
+        now = time.monotonic()
+        backoff = min(2.0 ** self._restart_count, 30.0)
+        if now - self._last_restart_at < backoff and self._restart_count > 0:
+            raise RuntimeError(
+                f"worker {self.name} crashed; next restart in "
+                f"{backoff - (now - self._last_restart_at):.1f}s"
+            )
+        _log.warning("worker %s is not running — restarting (attempt %d)", self.name, self._restart_count + 1)
+        self._stop_sync()
+        self._start_sync()
+        self._restart_count += 1
+        self._last_restart_at = time.monotonic()
+
     def _request_sync(self, action: str, payload: dict[str, Any]) -> WorkerResponse:
-        if self._process is None or self._process.poll() is not None:
-            raise RuntimeError(f"worker {self.name} is not running")
+        self._ensure_running_sync()
 
         message = {
             "id": uuid.uuid4().hex,
@@ -133,6 +157,7 @@ class WorkerClient:
             raise RuntimeError(f"worker {self.name} returned mismatched response id")
 
         if parsed.get("ok"):
+            self._restart_count = 0  # successful response — reset backoff
             return WorkerResponse(ok=True, result=parsed.get("result") or {})
 
         error_payload = parsed.get("error") or {}
@@ -147,5 +172,10 @@ class WorkerClient:
         if self._process is None or self._process.stderr is None:
             return
 
+        import logging
+        log = logging.getLogger(f"worker.{self.name}.stderr")
         for raw_line in self._process.stderr:
-            self._stderr_lines.append(raw_line.decode("utf-8", errors="replace").strip())
+            line = raw_line.decode("utf-8", errors="replace").strip()
+            if line:
+                self._stderr_lines.append(line)
+                log.warning("%s", line)

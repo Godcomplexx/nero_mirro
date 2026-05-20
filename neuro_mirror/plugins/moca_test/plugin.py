@@ -30,11 +30,10 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-import aiohttp
-
 from neuro_mirror.core.settings import Settings
 from neuro_mirror.interfaces.processor import ProcessorPlugin
 from neuro_mirror.models.events import Event, Topics
+from neuro_mirror.screening.moca_scoring import score_moca_tasks
 from neuro_mirror.utils.audio import VoiceRecorder
 
 logger = logging.getLogger(__name__)
@@ -176,10 +175,10 @@ MOCA_TASKS: list[MocaTask] = [
 
 # Serial subtraction steps: after the first prompt above we continue step-by-step
 SERIAL_SUBTRACTION_STEPS = [
-    ("Минус семь. Сколько получилось?", 86),
-    ("Минус семь. Сколько?", 79),
-    ("Ещё раз минус семь.", 72),
-    ("И последний раз, минус семь.", 65),
+    ("Теперь от данного числа отнимите семь. Сколько получилось?", 86),
+    ("Теперь от данного числа отнимите семь. Сколько получилось?", 79),
+    ("Ещё раз: от данного числа отнимите семь.", 72),
+    ("И последний раз: от данного числа отнимите семь.", 65),
 ]
 
 
@@ -193,15 +192,25 @@ class MocaTestPlugin(ProcessorPlugin):
         self.settings = settings
         self._running = False
         self._stop_requested = False
+        self._test_task: asyncio.Task[None] | None = None
+        self._tts_sequence = 0
+        self._tts_waiters: dict[str, asyncio.Future[bool]] = {}
 
     def subscribed_topics(self) -> tuple[str, ...]:
-        return (Topics.MOCA_START, Topics.MOCA_STOP)
+        return (Topics.MOCA_START, Topics.MOCA_STOP, Topics.UI_ACTION)
 
     async def handle_event(self, event: Event) -> None:
         if event.topic == Topics.MOCA_STOP:
             if self._running:
                 logger.info("moca_test: получен запрос на остановку")
                 self._stop_requested = True
+                self._resolve_pending_tts(False)
+            return
+
+        if event.topic == Topics.UI_ACTION:
+            action = str(event.payload.get("action") or event.payload.get("command") or "")
+            if action == "moca_tts_finished":
+                self._handle_tts_finished(event.payload)
             return
 
         if self._running:
@@ -209,11 +218,30 @@ class MocaTestPlugin(ProcessorPlugin):
             return
         self._running = True
         self._stop_requested = False
+        self._test_task = asyncio.create_task(self._run_test_guarded(), name="moca-test-run")
+
+    async def on_stop(self) -> None:
+        if self._test_task is not None:
+            self._test_task.cancel()
+            try:
+                await self._test_task
+            except asyncio.CancelledError:
+                pass
+            self._test_task = None
+        self._resolve_pending_tts(False)
+
+    async def _run_test_guarded(self) -> None:
         try:
             await self._run_test()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("moca_test: ошибка выполнения теста")
         finally:
+            self._resolve_pending_tts(False)
             self._running = False
             self._stop_requested = False
+            self._test_task = None
 
     # ── Internal ────────────────────────────────────────────────────────────────
 
@@ -283,13 +311,20 @@ class MocaTestPlugin(ProcessorPlugin):
             },
         ))
 
+        scoring = score_moca_tasks(results)
+
         await self.bus.publish(Event(
             topic=Topics.MOCA_TEST_RESULT,
             source=self.name,
             payload={
-                "tasks": results,
+                "tasks": scoring["tasks"],
                 "task_count": total,
                 "domains": list({r["domain"] for r in results}),
+                "score": scoring["score"],
+                "max_score": scoring["max_score"],
+                "percent": scoring["percent"],
+                "interpretation": scoring["interpretation"],
+                "notes": scoring["notes"],
             },
         ))
 
@@ -341,36 +376,54 @@ class MocaTestPlugin(ProcessorPlugin):
         return " | ".join(all_transcripts), audio_ms
 
     async def _speak(self, text: str) -> bool:
-        """Send TTS text to browser, wait until estimated playback is done."""
-        base_url = f"http://{self.settings.web_host}:{self.settings.web_port}"
-        url = f"{base_url}/api/tts/speak"
-        try:
-            timeout = aiohttp.ClientTimeout(total=30)
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.post(url, json={"text": text}) as resp:
-                    if resp.status != 200:
-                        return False
-                    audio_bytes = await resp.read()
-                    # MP3 ~128kbps → ~16000 bytes/sec
-                    estimated_seconds = max(1.5, len(audio_bytes) / 16000)
+        """Send TTS text to browser and wait until playback is finished."""
+        if not text:
+            return True
 
-            # Tell browser: play this audio now, hide mic indicator
+        self._tts_sequence += 1
+        tts_id = f"moca-{self._tts_sequence}"
+        loop = asyncio.get_running_loop()
+        waiter: asyncio.Future[bool] = loop.create_future()
+        self._tts_waiters[tts_id] = waiter
+
+        try:
             await self.bus.publish(Event(
                 topic=Topics.UI_UPDATE,
                 source=self.name,
                 payload={
                     "screen": "moca",
+                    "moca_tts_id": tts_id,
                     "moca_tts_text": text,
                     "moca_recording": False,
                     "message": "Слушайте вопрос...",
                 },
             ))
-            # Wait for browser to finish playing before we start recording
-            await asyncio.sleep(estimated_seconds + 0.6)
-            return True
-        except Exception as exc:
-            logger.warning("moca_test: TTS error: %s", exc)
+            await asyncio.wait_for(waiter, timeout=self._tts_timeout_seconds(text))
+            return waiter.result()
+        except asyncio.TimeoutError:
+            logger.warning("moca_test: TTS playback confirmation timed out for %s", tts_id)
             return False
+        finally:
+            self._tts_waiters.pop(tts_id, None)
+
+    @staticmethod
+    def _tts_timeout_seconds(text: str) -> float:
+        # ~130 words/min Russian TTS = ~2.17 chars/sec; add 6s buffer for startup
+        words = len(text.split())
+        estimated = words / 2.2 + 6.0
+        return min(60.0, max(5.0, estimated))
+
+    def _handle_tts_finished(self, payload: dict[str, Any]) -> None:
+        tts_id = str(payload.get("moca_tts_id") or "")
+        waiter = self._tts_waiters.pop(tts_id, None)
+        if waiter is not None and not waiter.done():
+            waiter.set_result(True)
+
+    def _resolve_pending_tts(self, result: bool) -> None:
+        for waiter in list(self._tts_waiters.values()):
+            if not waiter.done():
+                waiter.set_result(result)
+        self._tts_waiters.clear()
 
     async def _record_and_transcribe(self, task: MocaTask) -> tuple[str, int]:
         """Record patient audio and return (transcript, duration_ms)."""
@@ -410,6 +463,7 @@ class MocaTestPlugin(ProcessorPlugin):
             deadline = task.max_record_seconds + 0.5
             elapsed = 0.0
             poll = 0.2
+            last_ui_second = -1
             while elapsed < deadline:
                 await asyncio.sleep(poll)
                 elapsed += poll
@@ -417,6 +471,20 @@ class MocaTestPlugin(ProcessorPlugin):
                     break
                 if self._stop_requested:
                     break
+                # Update countdown every second so user sees progress
+                current_second = int(elapsed)
+                if current_second != last_ui_second:
+                    last_ui_second = current_second
+                    remaining = max(0, int(task.max_record_seconds - elapsed))
+                    await self.bus.publish(Event(
+                        topic=Topics.UI_UPDATE,
+                        source=self.name,
+                        payload={
+                            "screen": "moca",
+                            "moca_recording": True,
+                            "message": f"Говорите... ({remaining} с)",
+                        },
+                    ))
             audio_path = recorder.stop() or audio_path
         except Exception as exc:
             logger.exception("moca_test: ошибка записи для %s", task.task_id)
@@ -449,7 +517,7 @@ class MocaTestPlugin(ProcessorPlugin):
                 Event(
                     topic=Topics.REQ_SPEECH_TRANSCRIBE,
                     source=self.name,
-                    payload={"audio_path": audio_path},
+                    payload={"audio_path": audio_path, "suppress_ui": True},
                 ),
                 timeout=120.0,
             )

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -10,6 +11,9 @@ from neuro_mirror.interfaces.device import IDeviceProvider
 from neuro_mirror.interfaces.plugin import Plugin
 from neuro_mirror.models.device import DeviceInfo, DeviceSelection, DeviceValidation, SelectedDevices
 from neuro_mirror.models.events import Event, Topics
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -199,6 +203,7 @@ class DeviceManager(Plugin):
         }
 
         if not validation.ok:
+            logger.warning("Device validation failed: %s", "; ".join(validation.errors))
             await self.bus.publish(
                 Event(
                     topic=Topics.DEVICE_VALIDATION_FAILED,
@@ -217,17 +222,6 @@ class DeviceManager(Plugin):
                     },
                 )
             )
-            await self.bus.publish(
-                Event(
-                    topic=Topics.UI_UPDATE,
-                    source=self.name,
-                    payload={
-                        "screen": "idle",
-                        "message": "Проверьте выбор камеры и микрофона перед стартом.",
-                        "device_errors": validation.errors,
-                    },
-                )
-            )
             return
 
         self._last_selection = DeviceSelection(
@@ -239,19 +233,7 @@ class DeviceManager(Plugin):
             else "",
         )
         self._save_selection(self._last_selection)
-        await self.bus.publish(
-            Event(
-                topic=Topics.UI_UPDATE,
-                source=self.name,
-                payload={
-                    "selected_devices": self._last_selection.to_dict(),
-                    "device_errors": [],
-                    "screen": "idle",
-                    "message": "Устройства подтверждены. Сеанс готов к запуску.",
-                    "assistant_source": "устройства",
-                },
-            )
-        )
+        logger.info("Device selection resolved")
         await self.bus.publish(
             Event(
                 topic=Topics.DEVICE_SELECTION_RESOLVED,

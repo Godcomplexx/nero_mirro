@@ -91,16 +91,18 @@
 
         <aside class="telemetry-right">
           <div class="telemetry-block telemetry-block-right">
-            <span class="telemetry-k mono">Канал</span>
-            <strong class="telemetry-v">Web UI</strong>
-          </div>
-          <div class="telemetry-block telemetry-block-right">
             <span class="telemetry-k mono">Модель</span>
             <strong class="telemetry-v" id="telemetry-backend">Локальная</strong>
           </div>
-          <div class="telemetry-block telemetry-block-right">
-            <span class="telemetry-k mono">Сессия</span>
-            <strong class="telemetry-v mono">NM-01</strong>
+          <div class="telemetry-block telemetry-block-right hr-widget" id="hr-widget" hidden>
+            <span class="telemetry-k mono">Пульс</span>
+            <strong class="telemetry-v hr-bpm" id="hr-bpm-value">—</strong>
+            <span class="telemetry-sub mono" id="hr-algo-value"></span>
+            <div class="hr-progress-wrap" id="hr-progress-wrap" hidden>
+              <div class="hr-progress-bar" id="hr-progress-bar"></div>
+              <span class="hr-progress-label mono" id="hr-progress-label"></span>
+            </div>
+            <button type="button" class="hr-monitor-btn mono" id="hr-monitor-btn" title="Мониторинг пульса">♥ Мониторинг</button>
           </div>
         </aside>
 

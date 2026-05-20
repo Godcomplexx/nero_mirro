@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from typing import Any
 
 from neuro_mirror.core.settings import Settings
@@ -42,6 +43,10 @@ class AIAssistantPlugin(ProcessorPlugin):
             Topics.REQ_ASSISTANT_MESSAGE,
             Topics.REQ_CAMERA_VISION,
         )
+
+    async def on_start(self) -> None:
+        if isinstance(self.backend, OllamaAssistantBackend):
+            asyncio.create_task(self._warmup_llm(), name="ai-assistant-warmup")
 
     async def handle_event(self, event: Event) -> None:
         if event.topic == Topics.REQ_ASSISTANT_MESSAGE:
@@ -191,16 +196,66 @@ class AIAssistantPlugin(ProcessorPlugin):
             )
             return
 
-        # General LLM / rule-based decision
-        decision = await self.backend.decide(text)
-
-        if decision.command == "start_screening":
+        # Pulse monitor shortcut — catch all common Russian forms
+        pulse_markers = (
+            "измерь пульс", "измери пульс", "измерить пульс",
+            "померь пульс", "помери пульс", "померить пульс",
+            "покажи пульс", "проверь пульс", "проверить пульс",
+            "мониторинг пульса", "запусти мониторинг пульса",
+            "измерь сердцебиение", "покажи сердцебиение",
+            "measure pulse", "check pulse", "show pulse", "monitor pulse",
+            "measure heart rate", "check heart rate",
+        )
+        pulse_patterns = (
+            r"\bпомер\w*\s+пульс\w*\b",
+            r"\bизмер\w*\s+пульс\w*\b",
+            r"\bпровер\w*\s+пульс\w*\b",
+            r"\bпокаж\w*\s+пульс\w*\b",
+            r"\bзапуст\w*\s+пульс\w*\b",
+            r"\bпульс\w*\s+измер\w*\b",
+            r"\bизмер\w*\s+сердц\w*\b",
+            r"\bпомер\w*\s+сердц\w*\b",
+        )
+        if any(m in lowered for m in pulse_markers) or any(re.search(p, lowered) for p in pulse_patterns):
+            decision = AssistantDecision(
+                command="measure_pulse",
+                reply="Запускаю мониторинг пульса. Держите лицо перед камерой.",
+                backend_name="пульс",
+            )
             await self.bus.publish(
                 Event(
                     topic=Topics.AI_COMMAND,
                     source=source,
                     payload={
-                        "command": "start_screening",
+                        "command": "measure_pulse",
+                        "raw_intent": text,
+                        "reply": decision.reply,
+                        "backend": decision.backend_name,
+                    },
+                )
+            )
+            await self._reply(
+                Topics.RESP_ASSISTANT_MESSAGE,
+                request_id,
+                {
+                    "accepted": True,
+                    "command": decision.command,
+                    "reply": decision.reply,
+                    "backend": decision.backend_name,
+                },
+            )
+            return
+
+        # General LLM / rule-based decision
+        decision = await self.backend.decide(text)
+
+        if decision.command in ("start_screening", "measure_pulse"):
+            await self.bus.publish(
+                Event(
+                    topic=Topics.AI_COMMAND,
+                    source=source,
+                    payload={
+                        "command": decision.command,
                         "raw_intent": text,
                         "reply": decision.reply,
                         "backend": decision.backend_name,
@@ -307,6 +362,16 @@ class AIAssistantPlugin(ProcessorPlugin):
         )
 
     # ---- helpers ----
+
+    async def _warmup_llm(self) -> None:
+        if not isinstance(self.backend, OllamaAssistantBackend):
+            return
+        try:
+            model = await asyncio.to_thread(self.backend._resolve_model_name_sync)
+            self.backend._resolved_model_cache = model
+            await asyncio.to_thread(self.backend.warmup_sync, model)
+        except Exception:
+            pass
 
     async def _decide_with_ui_feedback(self, utterance: str) -> AssistantDecision | None:
         await self.bus.publish(

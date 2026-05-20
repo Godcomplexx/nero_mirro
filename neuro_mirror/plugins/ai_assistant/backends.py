@@ -9,7 +9,6 @@ from html.parser import HTMLParser
 from typing import Protocol
 from urllib import error, parse, request
 
-from neuro_mirror.core.gpu_scheduler import exclusive_gpu_task_sync
 from neuro_mirror.core.settings import Settings
 from neuro_mirror.plugins.ai_assistant.rules import load_assistant_rules
 
@@ -242,14 +241,16 @@ class OllamaAssistantBackend:
             '- "start_screening" если пользователь хочет начать скрининг, проверку, тест или оценку.\n'
             '- "analyze_appearance" если пользователь просит посмотреть на него через камеру и оценить внешний вид.\n'
             '- "camera_vision_query" если пользователь просит описать что видно на камере, или спрашивает что перед ним/в кадре.\n'
+            '- "measure_pulse" если пользователь просит измерить, померить, показать, проверить пульс или сердцебиение.\n'
             '- "none" если это не команда приложения.\n'
             "Для обычного вопроса всегда выбирай command=none.\n"
             "Ответь только JSON по схеме:\n"
-            '{"command":"start_screening|analyze_appearance|camera_vision_query|none","reply":"короткий нейтральный текст для UI"}\n'
+            '{"command":"start_screening|analyze_appearance|camera_vision_query|measure_pulse|none","reply":"короткий нейтральный текст для UI"}\n'
             "Примеры:\n"
             'Пользователь: "Начать когнитивный скрининг" -> {"command":"start_screening","reply":"Запускаю скрининг."}\n'
             'Пользователь: "Как я сегодня выгляжу?" -> {"command":"analyze_appearance","reply":"Сейчас посмотрю в камеру и дам короткий комментарий."}\n'
             'Пользователь: "Что ты видишь на камере?" -> {"command":"camera_vision_query","reply":"Сейчас посмотрю на камеру и расскажу что вижу."}\n'
+            'Пользователь: "Померь пульс" -> {"command":"measure_pulse","reply":"Запускаю мониторинг пульса."}\n'
             'Пользователь: "Какая сегодня погода?" -> {"command":"none","reply":"Это обычный вопрос, не команда приложения."}\n'
             f'Пользователь: "{utterance}"'
         )
@@ -271,7 +272,8 @@ class OllamaAssistantBackend:
             "Сначала определи, является ли реплика командой приложения.\n"
             "Команды: start_screening (скрининг/тест/проверка), "
             "analyze_appearance (оценить внешний вид), "
-            "camera_vision_query (что видно на камере).\n"
+            "camera_vision_query (что видно на камере), "
+            "measure_pulse (измерить/померить/показать пульс или сердцебиение).\n"
             "Если это команда — верни JSON: "
             '{"command":"<команда>","reply":"<короткий текст>"}\n'
             "Если это НЕ команда — ответь как ассистент кратко (1-3 предложения) на языке пользователя. "
@@ -313,7 +315,7 @@ class OllamaAssistantBackend:
             )
 
         raw_command = parsed.get("command")
-        command = raw_command if raw_command in {"start_screening", "analyze_appearance", "camera_vision_query"} else None
+        command = raw_command if raw_command in {"start_screening", "analyze_appearance", "camera_vision_query", "measure_pulse"} else None
         reply = str(parsed.get("reply") or "").strip()
 
         if not reply or reply == "Подходящая команда не найдена.":
@@ -330,6 +332,9 @@ class OllamaAssistantBackend:
         )
 
     def _post_json_sync(self, path: str, payload: dict) -> dict:
+        # Inject keep_alive=-1 so the model stays loaded in VRAM between calls
+        if path in {"/api/generate", "/api/chat"}:
+            payload = {**payload, "keep_alive": -1}
         body = json.dumps(payload).encode("utf-8")
         req = request.Request(
             f"{self.base_url}{path}",
@@ -339,13 +344,8 @@ class OllamaAssistantBackend:
         )
 
         try:
-            if path == "/api/generate":
-                with exclusive_gpu_task_sync("ollama"):
-                    with request.urlopen(req, timeout=self.timeout_seconds) as response:
-                        raw_body = response.read().decode("utf-8")
-            else:
-                with request.urlopen(req, timeout=self.timeout_seconds) as response:
-                    raw_body = response.read().decode("utf-8")
+            with request.urlopen(req, timeout=self.timeout_seconds) as response:
+                raw_body = response.read().decode("utf-8")
         except error.HTTPError as exc:
             error_body = exc.read().decode("utf-8", errors="replace")
             raise RuntimeError(f"Ошибка HTTP Ollama {exc.code}: {error_body}") from exc
@@ -378,7 +378,7 @@ class OllamaAssistantBackend:
             ) from exc
 
         raw_command = parsed.get("command")
-        command = raw_command if raw_command in {"start_screening", "analyze_appearance", "camera_vision_query"} else None
+        command = raw_command if raw_command in {"start_screening", "analyze_appearance", "camera_vision_query", "measure_pulse"} else None
         reply = str(parsed.get("reply") or parsed.get("reason") or "Команда распознана.")
 
         return AssistantDecision(
@@ -600,6 +600,20 @@ class OllamaAssistantBackend:
             return self.fallback_model
         return installed_models[0]
 
+    def warmup_sync(self, model_name: str) -> None:
+        """Load model into VRAM with a minimal prompt so it's ready for the first real request."""
+        payload = {
+            "model": model_name,
+            "prompt": "Привет",
+            "stream": False,
+            "keep_alive": -1,
+            "options": {"num_predict": 1},
+        }
+        try:
+            self._post_json_sync("/api/generate", payload)
+        except Exception:
+            pass
+
     def _list_models_sync(self) -> list[str]:
         req = request.Request(
             f"{self.base_url}/api/tags",
@@ -735,7 +749,7 @@ class OllamaAssistantBackend:
             "model": resolved_model,
             "prompt": prompt,
             "stream": False,
-            "options": {"temperature": 0.2, "num_predict": 120},
+            "options": {"temperature": 0.2, "num_predict": 400},
         }
         raw = self._post_json_sync("/api/generate", payload)
         reply = str(raw.get("response", "")).strip()
