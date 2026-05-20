@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 import edge_tts
-from fastapi import FastAPI, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -181,10 +181,18 @@ def create_app() -> FastAPI:
         return JSONResponse({"accepted": True})
 
     @app.post("/api/actions/{action}")
-    async def ui_action(action: str) -> JSONResponse:
+    async def ui_action(action: str, request: Request) -> JSONResponse:
         ctx: WebAppContext = app.state.context
+        event_payload: dict[str, Any] = {"action": action}
+        if request.headers.get("content-type", "").lower().startswith("application/json"):
+            try:
+                body = await request.json()
+            except Exception:
+                body = None
+            if isinstance(body, dict):
+                event_payload.update(body)
         await ctx.runtime.bus.publish(
-            Event(topic=Topics.UI_ACTION, source="web.action", payload={"action": action})
+            Event(topic=Topics.UI_ACTION, source="web.action", payload=event_payload)
         )
         if action == "release_camera":
             release_result = await _wait_for_camera_release(ctx.state_store)
@@ -402,5 +410,183 @@ def create_app() -> FastAPI:
                 await websocket.receive_text()
         except WebSocketDisconnect:
             await ctx.state_store.disconnect(websocket)
+
+    @app.websocket("/ws/rppg")
+    async def websocket_rppg(websocket: WebSocket) -> None:
+        """Receive JPEG frames from browser camera, run rPPG, publish RPPG_RESULT.
+
+        Query params:
+          mode=screening  (default) — collect one window, run once, publish to EventBus, close
+          mode=monitor    — sliding window: run rPPG every WINDOW_SEC, stream results back, repeat
+          duration=N      — total monitor seconds (default 60, ignored in screening mode)
+        """
+        ctx: WebAppContext = app.state.context
+        await websocket.accept()
+
+        # Parse query params from the request scope
+        qs: dict[str, str] = {}
+        for pair in (websocket.scope.get("query_string") or b"").decode().split("&"):
+            if "=" in pair:
+                k, v = pair.split("=", 1)
+                qs[k] = v
+        mode = qs.get("mode", "screening")
+        monitor_duration = max(10, min(300, int(qs.get("duration", "60"))))
+
+        _log.info("[rppg_ws] connected mode=%s", mode)
+
+        fps_target = 15.0
+        window_seconds = ctx.settings.rppg_duration_seconds
+        window_frames = int(window_seconds * fps_target)
+        worker_script = str(Path(ctx.settings.vision_worker_script).resolve())
+
+        def _run_rppg_on_frames(raw_frames: list[bytes], source: str) -> dict:
+            import sys
+            import importlib.util
+            import cv2
+            import numpy as np
+
+            frames = []
+            for raw in raw_frames:
+                arr = np.frombuffer(raw, dtype=np.uint8)
+                frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+                if frame is not None:
+                    frames.append(frame)
+
+            if not frames:
+                return {
+                    "heart_rate_bpm": None,
+                    "heart_rate_status": "unavailable",
+                    "heart_rate_algorithm": "",
+                    "heart_rate_error": "Нет декодированных кадров.",
+                    "face_detected": False,
+                    "face_count": 0,
+                    "screening_frame_count": 0,
+                    "source_backend": source,
+                }
+
+            actual_fps = min(fps_target, len(frames) / max(window_seconds, 1.0))
+            mod_name = "vision_worker_rppg"
+            if mod_name not in sys.modules:
+                spec = importlib.util.spec_from_file_location(mod_name, worker_script)
+                mod = importlib.util.module_from_spec(spec)
+                sys.modules[mod_name] = mod
+                spec.loader.exec_module(mod)
+            vw = sys.modules[mod_name]
+
+            face_boxes = vw.detect_face_regions(frames[-1])
+            rppg = vw.estimate_heart_rate_from_frames(frames, fps=actual_fps)
+            return {
+                **rppg,
+                "analysis_type": "screening" if source == "browser_rppg" else "monitor",
+                "face_detected": len(face_boxes) > 0,
+                "face_count": len(face_boxes),
+                "attention_score": 0.78 if face_boxes else 0.42,
+                "gaze_stability": 0.72 if face_boxes else 0.0,
+                "screening_frame_count": len(frames),
+                "screening_fps": round(actual_fps, 2),
+                "source_backend": source,
+            }
+
+        if mode == "monitor":
+            # Sliding-window monitor: collect frames, run rPPG every window, send result, repeat
+            ring: list[bytes] = []
+            max_ring = window_frames * 2  # keep up to 2 windows in memory
+            total_received = 0
+            deadline = asyncio.get_event_loop().time() + monitor_duration
+            next_analysis_at = window_frames  # run first analysis after one full window
+
+            try:
+                while asyncio.get_event_loop().time() < deadline:
+                    try:
+                        data = await asyncio.wait_for(websocket.receive_bytes(), timeout=3.0)
+                    except asyncio.TimeoutError:
+                        break
+                    if data:
+                        ring.append(data)
+                        if len(ring) > max_ring:
+                            ring.pop(0)
+                        total_received += 1
+
+                    # Run analysis when we have enough frames for a full window
+                    if total_received >= next_analysis_at and len(ring) >= window_frames:
+                        window = list(ring[-window_frames:])
+                        next_analysis_at = total_received + window_frames // 2  # overlap 50%
+                        try:
+                            result = await asyncio.to_thread(_run_rppg_on_frames, window, "browser_monitor")
+                        except Exception as exc:
+                            _log.warning("[rppg_ws] monitor rPPG error: %s", exc)
+                            result = {"heart_rate_bpm": None, "heart_rate_status": "unavailable",
+                                      "heart_rate_algorithm": "", "heart_rate_error": str(exc),
+                                      "source_backend": "browser_monitor"}
+
+                        _log.info("[rppg_ws] monitor result: bpm=%s status=%s",
+                                  result.get("heart_rate_bpm"), result.get("heart_rate_status"))
+                        # Monitor mode: only push HR widget update, never trigger screening
+                        await ctx.runtime.bus.publish(
+                            Event(topic=Topics.UI_UPDATE, source="web.rppg_monitor", payload={
+                                "heart_rate_bpm": result.get("heart_rate_bpm"),
+                                "heart_rate_status": result.get("heart_rate_status"),
+                                "heart_rate_algorithm": result.get("heart_rate_algorithm", ""),
+                            })
+                        )
+                        try:
+                            await websocket.send_json({
+                                "heart_rate_bpm": result.get("heart_rate_bpm"),
+                                "heart_rate_status": result.get("heart_rate_status"),
+                                "heart_rate_algorithm": result.get("heart_rate_algorithm", ""),
+                            })
+                        except Exception:
+                            break
+            except WebSocketDisconnect:
+                pass
+
+            _log.info("[rppg_ws] monitor session ended: total_frames=%d", total_received)
+            try:
+                await websocket.send_json({"done": True})
+                await websocket.close()
+            except Exception:
+                pass
+
+        else:
+            # One-shot screening mode: collect one full window, run once, publish, close
+            frame_bytes_list: list[bytes] = []
+            try:
+                while len(frame_bytes_list) < window_frames:
+                    try:
+                        data = await asyncio.wait_for(websocket.receive_bytes(), timeout=3.0)
+                    except asyncio.TimeoutError:
+                        break
+                    if data:
+                        frame_bytes_list.append(data)
+                        await websocket.send_json({"received": len(frame_bytes_list), "total": window_frames})
+            except WebSocketDisconnect:
+                pass
+
+            _log.info("[rppg_ws] collected %d frames, running rPPG", len(frame_bytes_list))
+
+            try:
+                result = await asyncio.to_thread(_run_rppg_on_frames, frame_bytes_list, "browser_rppg")
+            except Exception as exc:
+                _log.exception("[rppg_ws] rPPG failed: %s", exc)
+                result = {"heart_rate_bpm": None, "heart_rate_status": "unavailable",
+                          "heart_rate_algorithm": "", "heart_rate_error": str(exc),
+                          "face_detected": False, "face_count": 0,
+                          "screening_frame_count": len(frame_bytes_list),
+                          "source_backend": "browser_rppg"}
+
+            _log.info("[rppg_ws] result: status=%s bpm=%s frames=%s",
+                      result.get("heart_rate_status"), result.get("heart_rate_bpm"),
+                      result.get("screening_frame_count"))
+
+            await ctx.runtime.bus.publish(
+                Event(topic=Topics.RPPG_RESULT, source="web.rppg", payload=result)
+            )
+
+            try:
+                await websocket.send_json({"done": True, "heart_rate_bpm": result.get("heart_rate_bpm"),
+                                           "heart_rate_status": result.get("heart_rate_status")})
+                await websocket.close()
+            except Exception:
+                pass
 
     return app

@@ -36,6 +36,9 @@ class Settings:
     internet_fallback_enabled: bool = True
     internet_fallback_base_url: str = "https://html.duckduckgo.com"
 
+    # Global device flag: "auto" detects GPU, "cpu" forces CPU, "cuda" forces GPU
+    device: str = "auto"
+
     vision_worker_python: str = sys.executable
     vision_worker_script: str = ""
     speech_worker_python: str = sys.executable
@@ -43,13 +46,14 @@ class Settings:
     worker_request_timeout_seconds: float = 90.0
     preview_interval_seconds: float = 0.10
     camera_index: int = 0
+    rppg_duration_seconds: float = 20.0
     emotion_model_name: str = "enet_b2_7"
     emotion_engine: str = "onnx"
-    emotion_device: str = "cpu"
+    emotion_device: str = "auto"
 
     stt_model_name: str = "medium"
     stt_language: str = "ru"
-    stt_device: str = "cpu"
+    stt_device: str = "auto"
     stt_compute_type: str = "int8"
     stt_beam_size: int = 5
     stt_best_of: int = 5
@@ -130,6 +134,11 @@ class Settings:
             "NEURO_MIRROR_INTERNET_FALLBACK_BASE_URL", "https://html.duckduckgo.com"
         ).strip()
 
+        # Global device: "auto" = detect CUDA at runtime, "cpu" = force CPU, "cuda" = force GPU
+        raw_device = os.getenv("NEURO_MIRROR_DEVICE", "auto").strip().lower()
+        if raw_device not in {"auto", "cpu", "cuda"}:
+            raw_device = "auto"
+
         raw_vision_worker_python = os.getenv("NEURO_MIRROR_VISION_WORKER_PYTHON", sys.executable).strip()
         raw_vision_worker_script = os.getenv(
             "NEURO_MIRROR_VISION_WORKER_SCRIPT", str(default_vision_script)
@@ -141,14 +150,16 @@ class Settings:
         raw_worker_timeout = os.getenv("NEURO_MIRROR_WORKER_TIMEOUT_SECONDS", "45").strip()
         raw_preview_interval = os.getenv("NEURO_MIRROR_PREVIEW_INTERVAL_SECONDS", "0.10").strip()
         raw_camera_index = os.getenv("NEURO_MIRROR_CAMERA_INDEX", "0").strip()
+        raw_rppg_duration = os.getenv("NEURO_MIRROR_RPPG_SECONDS", "20").strip()
         raw_emotion_model_name = os.getenv("NEURO_MIRROR_EMOTION_MODEL", "enet_b2_7").strip()
         raw_emotion_engine = os.getenv("NEURO_MIRROR_EMOTION_ENGINE", "onnx").strip().lower()
-        raw_emotion_device = os.getenv("NEURO_MIRROR_EMOTION_DEVICE", "cpu").strip().lower()
+        # Per-component device overrides; fall back to global device
+        raw_emotion_device = os.getenv("NEURO_MIRROR_EMOTION_DEVICE", raw_device).strip().lower()
 
         raw_stt_model = os.getenv("NEURO_MIRROR_STT_MODEL", "medium").strip()
         raw_stt_language = os.getenv("NEURO_MIRROR_STT_LANGUAGE", "ru").strip()
-        raw_stt_device = os.getenv("NEURO_MIRROR_STT_DEVICE", "cpu").strip().lower()
-        raw_stt_compute_type = os.getenv("NEURO_MIRROR_STT_COMPUTE_TYPE", "int8").strip()
+        raw_stt_device = os.getenv("NEURO_MIRROR_STT_DEVICE", raw_device).strip().lower()
+        raw_stt_compute_type = os.getenv("NEURO_MIRROR_STT_COMPUTE_TYPE", "auto").strip()
         raw_stt_beam_size = os.getenv("NEURO_MIRROR_STT_BEAM_SIZE", "5").strip()
         raw_stt_best_of = os.getenv("NEURO_MIRROR_STT_BEST_OF", "5").strip()
         raw_stt_vad_filter = os.getenv("NEURO_MIRROR_STT_VAD_FILTER", "1").strip().lower()
@@ -207,6 +218,7 @@ class Settings:
             currency_base_url=raw_currency_base_url,
             internet_fallback_enabled=raw_internet_fallback_enabled not in {"0", "false", "no"},
             internet_fallback_base_url=raw_internet_fallback_base_url,
+            device=raw_device,
             vision_worker_python=raw_vision_worker_python,
             vision_worker_script=raw_vision_worker_script,
             speech_worker_python=raw_speech_worker_python,
@@ -214,9 +226,10 @@ class Settings:
             worker_request_timeout_seconds=float(raw_worker_timeout),
             preview_interval_seconds=float(raw_preview_interval),
             camera_index=int(raw_camera_index),
+            rppg_duration_seconds=float(raw_rppg_duration),
             emotion_model_name=raw_emotion_model_name,
             emotion_engine=raw_emotion_engine,
-            emotion_device=raw_emotion_device,
+            emotion_device=raw_emotion_device if raw_emotion_device in {"auto", "cpu", "cuda"} else "auto",
             stt_model_name=raw_stt_model,
             stt_language=raw_stt_language,
             stt_device=raw_stt_device if raw_stt_device in {"auto", "cpu", "cuda"} else "auto",

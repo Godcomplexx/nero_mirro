@@ -12,6 +12,11 @@ from neuro_mirror.models.events import Event, Topics
 from neuro_mirror.plugins.ai_assistant.backends import normalize_user_utterance
 
 
+def _uses_gpu(device: str) -> bool:
+    """Return True when the device setting may use GPU (auto or cuda)."""
+    return device.strip().lower() in {"auto", "cuda"}
+
+
 class SpeechWorkerPlugin(ProcessorPlugin):
     plugin_name = "speech_worker"
 
@@ -59,6 +64,7 @@ class SpeechWorkerPlugin(ProcessorPlugin):
     async def _handle_req_transcribe(self, event: Event) -> None:
         request_id = event.payload.get("_request_id", "")
         audio_path = str(event.payload.get("audio_path") or "")
+        suppress_ui = bool(event.payload.get("suppress_ui"))
         if not audio_path:
             await self._send_reply(request_id, {"accepted": False, "transcript": "", "message": "audio_path is empty"})
             return
@@ -67,7 +73,7 @@ class SpeechWorkerPlugin(ProcessorPlugin):
         stt_payload = self._build_stt_payload(audio_path)
 
         try:
-            if self.settings.stt_device == "cpu":
+            if not _uses_gpu(self.settings.stt_device):
                 response = await asyncio.wait_for(
                     self.worker.request("transcribe_audio_file", stt_payload, timeout=transcribe_timeout),
                     timeout=transcribe_timeout + 5,
@@ -80,18 +86,21 @@ class SpeechWorkerPlugin(ProcessorPlugin):
                     )
         except (TimeoutError, asyncio.TimeoutError):
             message = "Распознавание заняло слишком долго. Модель ещё загружается — попробуйте через 30 секунд."
-            await self._publish_ui_message(message, transcript_text="")
+            if not suppress_ui:
+                await self._publish_ui_message(message, transcript_text="")
             await self._send_reply(request_id, {"accepted": False, "transcript": "", "message": message})
             return
         except Exception as exc:
             message = f"Ошибка распознавания речи: {exc}"
-            await self._publish_ui_message(message, transcript_text="")
+            if not suppress_ui:
+                await self._publish_ui_message(message, transcript_text="")
             await self._send_reply(request_id, {"accepted": False, "transcript": "", "message": message})
             return
 
         if not response.ok:
             message = f"Ошибка распознавания речи: {response.error_message}"
-            await self._publish_ui_message(message, transcript_text="")
+            if not suppress_ui:
+                await self._publish_ui_message(message, transcript_text="")
             await self._send_reply(request_id, {"accepted": False, "transcript": "", "message": message})
             return
 
@@ -100,7 +109,8 @@ class SpeechWorkerPlugin(ProcessorPlugin):
 
         if not raw_transcript:
             message = str(result.get("notes") or "Речь не распознана.")
-            await self._publish_ui_message(message, transcript_text="")
+            if not suppress_ui:
+                await self._publish_ui_message(message, transcript_text="")
             await self._send_reply(request_id, {"accepted": False, "transcript": "", "message": message})
             return
 
@@ -113,7 +123,8 @@ class SpeechWorkerPlugin(ProcessorPlugin):
             max_no_speech_prob=result.get("max_no_speech_prob"),
         ):
             message = "Ещё раз сформулируйте вопрос: речь распознана неуверенно."
-            await self._publish_ui_message(message, transcript_text=transcript)
+            if not suppress_ui:
+                await self._publish_ui_message(message, transcript_text=transcript)
             await self._send_reply(request_id, {
                 "accepted": False,
                 "transcript": transcript,
@@ -122,10 +133,11 @@ class SpeechWorkerPlugin(ProcessorPlugin):
             })
             return
 
-        await self._publish_ui_message(
-            f"Распознан текст: {transcript}",
-            transcript_text=transcript,
-        )
+        if not suppress_ui:
+            await self._publish_ui_message(
+                f"Распознан текст: {transcript}",
+                transcript_text=transcript,
+            )
         await self._send_reply(request_id, {
             "accepted": True,
             "transcript": transcript,

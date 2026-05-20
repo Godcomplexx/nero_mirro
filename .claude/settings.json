@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m pytest tests/ -x -q)",
+      "Bash(python -m pytest tests/ -q --ignore=tests/test_appearance_memory.py)",
+      "Read(//mnt/**)",
+      "Bash(pip install *)"
+    ]
+  }
+}

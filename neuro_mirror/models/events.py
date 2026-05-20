@@ -42,6 +42,7 @@ class Topics:
     RESP_CAMERA_VISION = "resp.camera.vision"
     REQ_TTS_SPEAK = "req.tts.speak"
     RESP_TTS_SPEAK = "resp.tts.speak"
+    RPPG_RESULT = "rppg.result"
 
 
 @dataclass(slots=True)

@@ -5,6 +5,7 @@ import json
 import os
 import sys
 import time
+from pathlib import Path
 from typing import Any
 
 import cv2
@@ -21,7 +22,8 @@ _emotion_recognizer = None
 
 EMOTION_MODEL_NAME = os.getenv("NEURO_MIRROR_EMOTION_MODEL", "enet_b2_7").strip() or "enet_b2_7"
 EMOTION_ENGINE = os.getenv("NEURO_MIRROR_EMOTION_ENGINE", "onnx").strip().lower() or "onnx"
-EMOTION_DEVICE = os.getenv("NEURO_MIRROR_EMOTION_DEVICE", "cpu").strip().lower() or "cpu"
+_GLOBAL_DEVICE = os.getenv("NEURO_MIRROR_DEVICE", "auto").strip().lower() or "auto"
+EMOTION_DEVICE = os.getenv("NEURO_MIRROR_EMOTION_DEVICE", _GLOBAL_DEVICE).strip().lower() or _GLOBAL_DEVICE
 
 try:
     from emotiefflib.facial_analysis import EmotiEffLibRecognizer, get_model_list  # type: ignore
@@ -53,6 +55,24 @@ ACTIVE_CAPTURE = None
 ACTIVE_CAMERA_INDEX: int | None = None
 ACTIVE_BACKEND_NAME = ""
 ACTIVE_ATTEMPTS: list[str] = []
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+RPPG_REPO_PATH = Path(os.getenv(
+    "NEURO_MIRROR_RPPG_REPO_PATH",
+    str(PROJECT_ROOT / "external" / "rppg-heart-rate-measurement"),
+)).resolve()
+RPPG_MODEL_PATH = Path(os.getenv(
+    "NEURO_MIRROR_RPPG_MODEL_PATH",
+    str(RPPG_REPO_PATH / "results" / "best_results_2" / "cnn.pth"),
+)).resolve()
+RPPG_DURATION_SECONDS = float(os.getenv("NEURO_MIRROR_RPPG_SECONDS", "20").strip() or "20")
+RPPG_TARGET_FPS = float(os.getenv("NEURO_MIRROR_RPPG_FPS", "15").strip() or "15")
+RPPG_ENABLED = os.getenv("NEURO_MIRROR_RPPG_ENABLED", "1").strip().lower() not in {"0", "false", "no"}
+RPPG_USE_FRAME_DIFF = os.getenv("NEURO_MIRROR_RPPG_USE_FRAME_DIFF", "1").strip().lower() not in {"0", "false", "no"}
+RPPG_IMPORT_ERROR = ""
+RPPG_MODEL = None
+RPPG_MODEL_DEVICE = None
+RPPG_FACE_DETECTOR = None
 
 
 def main() -> int:
@@ -128,6 +148,11 @@ def build_health() -> dict[str, Any]:
         "camera_index": ACTIVE_CAMERA_INDEX,
         "camera_backend": ACTIVE_BACKEND_NAME,
         "camera_attempts": ACTIVE_ATTEMPTS,
+        "rppg_enabled": RPPG_ENABLED,
+        "rppg_repo_path": str(RPPG_REPO_PATH),
+        "rppg_model_path": str(RPPG_MODEL_PATH),
+        "rppg_available": RPPG_ENABLED and RPPG_REPO_PATH.exists() and RPPG_MODEL_PATH.exists() and not RPPG_IMPORT_ERROR,
+        "rppg_error": RPPG_IMPORT_ERROR,
     }
 
 
@@ -191,33 +216,72 @@ def release_camera_action() -> dict[str, Any]:
 
 
 def analyze_screening() -> dict[str, Any]:
+    started_at = time.perf_counter()
     try:
-        frame_info = capture_frame_with_info()
-        frame = frame_info["frame"]
+        frames_info = capture_screening_frames(
+            duration_seconds=RPPG_DURATION_SECONDS,
+            target_fps=RPPG_TARGET_FPS,
+        )
+        frames = frames_info["frames"]
+        frame = frames[-1] if frames else None
+        sys.stderr.write(
+            f"[worker] capture done: frames={len(frames)} duration={frames_info['duration_seconds']:.1f}s "
+            f"fps={frames_info['fps']:.1f} camera={frames_info['camera_index']}\n"
+        )
+        sys.stderr.flush()
         if frame is None:
             return {
                 "analysis_type": "screening",
                 "attention_score": 0.25,
+                "gaze_stability": 0.0,
                 "face_detected": False,
                 "face_count": 0,
-                "camera_index": frame_info["camera_index"],
-                "camera_backend": frame_info["backend_name"],
-                "camera_attempts": frame_info["attempts"],
-                "notes": "Камера недоступна. OpenCV не смог получить кадр с проверенных backends.",
+                "heart_rate_bpm": None,
+                "heart_rate_status": "unavailable",
+                "camera_index": frames_info["camera_index"],
+                "camera_backend": frames_info["backend_name"],
+                "camera_attempts": frames_info["attempts"],
+                "screening_video_seconds": frames_info["duration_seconds"],
+                "screening_frame_count": 0,
+                "screening_fps": 0.0,
+                "screening_ms": round((time.perf_counter() - started_at) * 1000, 1),
+                "notes": "Камера недоступна. OpenCV не смог получить кадры для видео-скрининга.",
             }
 
         face_boxes = detect_face_regions(frame)
         face_detected = bool(face_boxes)
-        attention_score = 0.78 if face_detected else 0.42
+        sys.stderr.write(
+            f"[worker] analyze_screening: frames={len(frames)} fps={frames_info['fps']:.1f} "
+            f"face_detected={face_detected}\n"
+        )
+        sys.stderr.flush()
+        rppg_result = estimate_heart_rate_from_frames(frames, fps=float(frames_info["fps"]))
+        sys.stderr.write(
+            f"[worker] rppg_result: status={rppg_result.get('heart_rate_status')} "
+            f"bpm={rppg_result.get('heart_rate_bpm')} "
+            f"error={rppg_result.get('heart_rate_error','')[:200]}\n"
+        )
+        sys.stderr.flush()
+        notes = ["Видео-скрининг использует короткое окно кадров с камеры."]
+        if rppg_result.get("heart_rate_status") != "ok":
+            notes.append(str(rppg_result.get("heart_rate_error") or "Пульс не рассчитан."))
+
         return {
             "analysis_type": "screening",
-            "attention_score": attention_score,
+            "attention_score": 0.78 if face_detected else 0.42,
+            "gaze_stability": 0.72 if face_detected else 0.0,
             "face_detected": face_detected,
             "face_count": len(face_boxes),
-            "camera_index": frame_info["camera_index"],
-            "camera_backend": frame_info["backend_name"],
-            "camera_attempts": frame_info["attempts"],
-            "notes": "Видео-скрининг использует живой кадр с камеры. Оценка пока прототипная.",
+            "camera_index": frames_info["camera_index"],
+            "camera_backend": frames_info["backend_name"],
+            "camera_attempts": frames_info["attempts"],
+            "screening_video_seconds": frames_info["duration_seconds"],
+            "screening_frame_count": len(frames),
+            "screening_fps": round(float(frames_info["fps"]), 2),
+            "screening_ms": round((time.perf_counter() - started_at) * 1000, 1),
+            "notes": " ".join(notes),
+            "source_backend": "vision_worker + rppg",
+            **rppg_result,
         }
     finally:
         release_active_capture()
@@ -388,6 +452,194 @@ def capture_frame_with_info() -> dict[str, Any]:
         "camera_index": None,
         "backend_name": "",
         "attempts": attempts,
+    }
+
+
+def capture_screening_frames(*, duration_seconds: float, target_fps: float) -> dict[str, Any]:
+    first = capture_frame_with_info()
+    frame = first["frame"]
+    if frame is None:
+        return {
+            "frames": [],
+            "camera_index": first["camera_index"],
+            "backend_name": first["backend_name"],
+            "attempts": first["attempts"],
+            "duration_seconds": 0.0,
+            "fps": 0.0,
+        }
+
+    frames = [frame]
+    started_at = time.perf_counter()
+    interval = 1.0 / max(target_fps, 1.0)
+    max_frames = max(int(duration_seconds * target_fps), 1)
+    next_frame_at = started_at + interval
+
+    while len(frames) < max_frames:
+        now = time.perf_counter()
+        if now - started_at >= duration_seconds:
+            break
+        if now < next_frame_at:
+            time.sleep(min(next_frame_at - now, interval))
+
+        candidate = read_active_frame()
+        if candidate is not None:
+            frames.append(candidate)
+        next_frame_at += interval
+
+    elapsed = max(time.perf_counter() - started_at, 1e-6)
+    return {
+        "frames": frames,
+        "camera_index": first["camera_index"],
+        "backend_name": first["backend_name"],
+        "attempts": first["attempts"],
+        "duration_seconds": round(elapsed, 2),
+        "fps": len(frames) / elapsed,
+    }
+
+
+def estimate_heart_rate_from_frames(frames: list[np.ndarray], *, fps: float) -> dict[str, Any]:
+    if not RPPG_ENABLED:
+        return {
+            "heart_rate_bpm": None,
+            "heart_rate_status": "disabled",
+            "heart_rate_algorithm": "",
+            "heart_rate_error": "rPPG отключён через NEURO_MIRROR_RPPG_ENABLED.",
+        }
+    if len(frames) < max(int(fps * 6), 30):
+        return {
+            "heart_rate_bpm": None,
+            "heart_rate_status": "unavailable",
+            "heart_rate_algorithm": "",
+            "heart_rate_error": f"Недостаточно кадров для rPPG: {len(frames)}.",
+        }
+
+    import traceback
+    errors: list[str] = []
+    try:
+        result = estimate_heart_rate_physnet(frames, fps=fps)
+        if result.get("heart_rate_bpm") is not None:
+            return result
+    except Exception as exc:
+        errors.append(f"PhysNet: {exc} | {traceback.format_exc()}")
+
+    try:
+        result = estimate_heart_rate_pos(frames, fps=fps)
+        if result.get("heart_rate_bpm") is not None:
+            if errors:
+                result["heart_rate_error"] = "Fallback после ошибки " + "; ".join(errors)
+            return result
+    except Exception as exc:
+        errors.append(f"POS: {exc} | {traceback.format_exc()}")
+
+    return {
+        "heart_rate_bpm": None,
+        "heart_rate_status": "unavailable",
+        "heart_rate_algorithm": "",
+        "heart_rate_error": "; ".join(errors) or "rPPG не смог рассчитать пульс.",
+    }
+
+
+def estimate_heart_rate_physnet(frames: list[np.ndarray], *, fps: float) -> dict[str, Any]:
+    global RPPG_IMPORT_ERROR, RPPG_MODEL, RPPG_MODEL_DEVICE, RPPG_FACE_DETECTOR
+
+    if not RPPG_REPO_PATH.exists():
+        raise RuntimeError(f"rPPG repo not found: {RPPG_REPO_PATH}")
+    if not RPPG_MODEL_PATH.exists():
+        raise RuntimeError(f"rPPG model not found: {RPPG_MODEL_PATH}")
+    if str(RPPG_REPO_PATH) not in sys.path:
+        sys.path.insert(0, str(RPPG_REPO_PATH))
+
+    try:
+        import torch  # type: ignore
+        from src import config as rppg_config  # type: ignore
+        from src.face_detector import FaceDetector  # type: ignore
+        from src.test import load_model, predict_bvp  # type: ignore
+        from src.utils import estimate_hr  # type: ignore
+        from src.utils import extract_multi_rois_patches  # type: ignore
+    except Exception as exc:
+        RPPG_IMPORT_ERROR = str(exc)
+        raise
+
+    rppg_config.FACE_MODEL_PATH = str((PROJECT_ROOT / "runtime" / "vision_worker" / "assets" / "face_landmarker.task").resolve())
+    rppg_config.FPS_TARGET = int(round(fps)) or 15
+
+    _rppg_device_pref = os.getenv("NEURO_MIRROR_RPPG_DEVICE", _GLOBAL_DEVICE).strip().lower()
+    _cuda_available = torch.cuda.is_available()
+    if _rppg_device_pref == "cuda":
+        device_name = "cuda" if _cuda_available else "cpu"
+    elif _rppg_device_pref == "cpu":
+        device_name = "cpu"
+    else:  # "auto"
+        device_name = "cuda" if _cuda_available else "cpu"
+    device = torch.device(device_name)
+    if RPPG_MODEL is None or RPPG_MODEL_DEVICE != str(device):
+        RPPG_MODEL = load_model(str(RPPG_MODEL_PATH), device)
+        RPPG_MODEL_DEVICE = str(device)
+    if RPPG_FACE_DETECTOR is None:
+        RPPG_FACE_DETECTOR = FaceDetector()
+
+    patch_buffer = []
+    max_frames = int(getattr(rppg_config, "CNN_WINDOW", 300) or 300)
+    for frame in frames[-max_frames:]:
+        landmarks = RPPG_FACE_DETECTOR.get_landmarks(frame)
+        if landmarks is None:
+            continue
+        patch_buffer.append(extract_multi_rois_patches(RPPG_FACE_DETECTOR, frame, landmarks))
+
+    if len(patch_buffer) < max(int(fps * 8), 60):
+        raise RuntimeError(f"недостаточно кадров с лицом для PhysNet: {len(patch_buffer)}")
+
+    bvp = predict_bvp(RPPG_MODEL, patch_buffer, device, RPPG_USE_FRAME_DIFF)
+    bpm = estimate_hr(bvp, fps)
+    if bpm is None:
+        raise RuntimeError("PhysNet не вернул частоту пульса")
+
+    return {
+        "heart_rate_bpm": round(float(bpm), 1),
+        "heart_rate_status": "ok",
+        "heart_rate_algorithm": "PhysNet",
+        "heart_rate_error": "",
+    }
+
+
+def estimate_heart_rate_pos(frames: list[np.ndarray], *, fps: float) -> dict[str, Any]:
+    if not RPPG_REPO_PATH.exists():
+        raise RuntimeError(f"rPPG repo not found: {RPPG_REPO_PATH}")
+    if str(RPPG_REPO_PATH) not in sys.path:
+        sys.path.insert(0, str(RPPG_REPO_PATH))
+
+    from models.pos import POS  # type: ignore
+    from src.utils import estimate_hr  # type: ignore
+
+    rgb_values: list[np.ndarray] = []
+    for frame in frames:
+        faces = detect_face_regions(frame)
+        if not faces:
+            continue
+        x, y, w, h = max(faces, key=lambda box: box[2] * box[3])
+        y1 = max(y + int(h * 0.12), 0)
+        y2 = min(y + int(h * 0.72), frame.shape[0])
+        x1 = max(x + int(w * 0.18), 0)
+        x2 = min(x + int(w * 0.82), frame.shape[1])
+        roi = frame[y1:y2, x1:x2]
+        if roi.size == 0:
+            continue
+        mean_bgr = roi.reshape(-1, 3).mean(axis=0)
+        rgb_values.append(np.array([mean_bgr[2], mean_bgr[1], mean_bgr[0]], dtype=np.float32))
+
+    if len(rgb_values) < max(int(fps * 6), 30):
+        raise RuntimeError(f"недостаточно кадров с лицом для POS: {len(rgb_values)}")
+
+    bvp = POS(float(fps)).run(np.asarray(rgb_values, dtype=np.float32))
+    bpm = estimate_hr(bvp, fps)
+    if bpm is None:
+        raise RuntimeError("POS не вернул частоту пульса")
+
+    return {
+        "heart_rate_bpm": round(float(bpm), 1),
+        "heart_rate_status": "ok",
+        "heart_rate_algorithm": "POS",
+        "heart_rate_error": "",
     }
 
 
@@ -562,10 +814,18 @@ def ensure_emotion_model_ready() -> str:
             EMOTIEFFLIB_RUNTIME_ERROR = f"unsupported engine: {EMOTION_ENGINE}"
             return EMOTIEFFLIB_RUNTIME_ERROR
 
+        if EMOTION_DEVICE == "auto":
+            try:
+                import torch as _torch  # type: ignore
+                _resolved_emotion_device = "cuda" if _torch.cuda.is_available() else "cpu"
+            except Exception:
+                _resolved_emotion_device = "cpu"
+        else:
+            _resolved_emotion_device = EMOTION_DEVICE
         _emotion_recognizer = EmotiEffLibRecognizer(
             engine=EMOTION_ENGINE,
             model_name=EMOTION_MODEL_NAME,
-            device=EMOTION_DEVICE,
+            device=_resolved_emotion_device,
         )
 
         dummy = np.zeros((224, 224, 3), dtype=np.uint8)

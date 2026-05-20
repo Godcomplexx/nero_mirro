@@ -1,7 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "Bash(dir /b d:neuro_mirrotests)"
+      "Bash(dir /b d:neuro_mirrotests)",
+      "Bash(python -c ' *)",
+      "Bash(python -c \"import neuro_mirror.plugins.aggregator.plugin as m; import inspect; src = inspect.getsource\\(m.AggregatorPlugin._maybe_finish_screening\\); print\\(src[:800]\\)\")"
     ]
   }
 }

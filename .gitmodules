@@ -1,0 +1,3 @@
+[submodule "external/rppg-heart-rate-measurement"]
+	path = external/rppg-heart-rate-measurement
+	url = https://github.com/0xJakuzya/rppg-heart-rate-measurement.git

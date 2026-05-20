@@ -103,11 +103,8 @@ class WebUIPlugin(IOutputPlugin):
         if event.topic == Topics.UI_DEVICE_WIZARD_OPEN:
             await self.apply_update(
                 {
-                    "screen": "device_setup",
-                    "message": "Выберите доступные устройства перед стартом.",
                     "device_wizard": event.payload,
                     "device_errors": event.payload.get("errors") or [],
-                    "assistant_source": "устройства",
                 },
                 source=event.source,
             )
@@ -116,10 +113,7 @@ class WebUIPlugin(IOutputPlugin):
         if event.topic == Topics.DEVICE_VALIDATION_FAILED:
             await self.apply_update(
                 {
-                    "screen": "device_setup",
-                    "message": "Выбор устройств требует внимания.",
                     "device_errors": event.payload.get("errors") or [],
-                    "assistant_source": "устройства",
                 },
                 source=event.source,
             )

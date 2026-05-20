@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from typing import Any
 
@@ -8,6 +9,8 @@ from neuro_mirror.core.settings import Settings
 from neuro_mirror.core.worker_client import WorkerClient
 from neuro_mirror.interfaces.processor import ProcessorPlugin
 from neuro_mirror.models.events import Event, Topics
+
+logger = logging.getLogger(__name__)
 
 
 class CameraPlugin(ProcessorPlugin):
@@ -87,7 +90,85 @@ class CameraPlugin(ProcessorPlugin):
 
     async def _capture_for_session(self, payload: dict[str, Any]) -> None:
         mode = str(payload.get("mode") or "")
+
+        if mode != "appearance_check":
+            # Stop preview loop and release camera so worker can open it exclusively.
+            # MSMF on Windows fails with -1072875772 if any handle is still open.
+            self._preview_enabled = False
+            await self._release_worker_camera()
+            await asyncio.sleep(1.2)
+
         await self._ensure_worker_started()
+
+        if mode != "appearance_check":
+            logger.info("[camera] starting analyze_screening (rPPG ~20s)")
+            try:
+                response = await self.worker.request(
+                    "analyze_screening",
+                    timeout=max(self.settings.worker_request_timeout_seconds, 150.0),
+                )
+            except Exception as exc:
+                logger.warning("[camera] analyze_screening FAILED: %s", exc)
+                await self._publish_error_status(str(exc))
+                await self.bus.publish(
+                    Event(
+                        topic=Topics.SENSOR_VIDEO_FRAME,
+                        source=self.name,
+                        payload={**payload, "mode": mode, "analysis_result": {}, "error": str(exc)},
+                    )
+                )
+                return
+
+            if not response.ok:
+                logger.warning("[camera] analyze_screening worker error: %s", response.error_message)
+                await self._publish_error_status(response.error_message)
+                await self.bus.publish(
+                    Event(
+                        topic=Topics.SENSOR_VIDEO_FRAME,
+                        source=self.name,
+                        payload={
+                            **payload,
+                            "mode": mode,
+                            "analysis_result": {},
+                            "error": response.error_message,
+                        },
+                    )
+                )
+                return
+
+            result = dict(response.result)
+            logger.info(
+                "[camera] analyze_screening OK: hr_bpm=%s hr_status=%s frames=%s ms=%s",
+                result.get("heart_rate_bpm"),
+                result.get("heart_rate_status"),
+                result.get("screening_frame_count"),
+                result.get("screening_ms"),
+            )
+            await self._publish_status_snapshot(
+                {
+                    **result,
+                    "camera_available": result.get("camera_index") is not None,
+                    "capture_ms": result.get("screening_ms"),
+                    "total_ms": result.get("screening_ms"),
+                }
+            )
+            await self.bus.publish(
+                Event(
+                    topic=Topics.SENSOR_VIDEO_FRAME,
+                    source=self.name,
+                    payload={
+                        **payload,
+                        "mode": mode,
+                        "analysis_result": result,
+                        "camera_available": result.get("camera_index") is not None,
+                        "camera_index": result.get("camera_index"),
+                        "camera_backend": result.get("camera_backend"),
+                        "camera_attempts": result.get("camera_attempts") or [],
+                    },
+                )
+            )
+            return
+
         try:
             response = await self.worker.request("capture_preview_frame")
         except Exception as exc:
@@ -143,9 +224,20 @@ class CameraPlugin(ProcessorPlugin):
 
     async def _ensure_worker_started(self) -> None:
         try:
+            was_running = (
+                self.worker._process is not None
+                and self.worker._process.poll() is None
+            )
             await self.worker.start()
+            restarted = not was_running and (
+                self.worker._process is not None
+                and self.worker._process.poll() is None
+            )
             response = await self.worker.request("health")
             if response.ok:
+                if restarted:
+                    # Worker was restarted — release any stale camera handle
+                    await self._release_worker_camera()
                 await self._publish_status_snapshot(response.result)
                 return
             await self._publish_error_status(response.error_message)
@@ -158,9 +250,22 @@ class CameraPlugin(ProcessorPlugin):
         except Exception:
             pass
 
+    async def _release_and_restart_worker(self) -> None:
+        """Kill worker process and restart it cleanly — frees OS camera handle."""
+        try:
+            await self.worker.stop()
+        except Exception:
+            pass
+        try:
+            await self.worker.start()
+        except Exception as exc:
+            await self._publish_error_status(str(exc))
+
     async def _preview_loop(self) -> None:
+        consecutive_errors = 0
         while True:
             if not self._preview_enabled:
+                consecutive_errors = 0
                 await asyncio.sleep(self.settings.preview_interval_seconds)
                 continue
 
@@ -169,14 +274,22 @@ class CameraPlugin(ProcessorPlugin):
                 response = await self.worker.request("capture_preview_frame")
                 roundtrip_ms = round((time.perf_counter() - request_started_at) * 1000, 1)
             except Exception as exc:
+                consecutive_errors += 1
                 await self._publish_error_status(str(exc))
+                if consecutive_errors >= 3:
+                    logger.warning("[camera] preview: %d consecutive errors — restarting worker", consecutive_errors)
+                    await self._release_and_restart_worker()
+                    consecutive_errors = 0
                 await asyncio.sleep(self.settings.preview_interval_seconds)
                 continue
 
             if not response.ok:
+                consecutive_errors += 1
                 await self._publish_error_status(response.error_message)
                 await asyncio.sleep(self.settings.preview_interval_seconds)
                 continue
+
+            consecutive_errors = 0
 
             status_result = {
                 "camera_available": response.result.get("camera_available", False),

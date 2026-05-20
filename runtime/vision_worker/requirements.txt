@@ -1,2 +1,6 @@
 opencv-python
 emotiefflib
+numpy
+scipy
+mediapipe
+torch

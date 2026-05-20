@@ -11,6 +11,7 @@ const state = {
   audioContext: null,
   analyser: null,
   audioUnlocked: false,
+  sharedAudioCtx: null,
   currentSpeechAudio: null,
   currentSpeechUrl: null,
   ttsRequestId: 0,
@@ -33,6 +34,12 @@ const state = {
   wakeWordRecognition: null,
   wakeWordListening: false,
   wakeWordCooldown: false,
+  // Heart rate monitoring
+  hrMonitoring: false,
+  hrMonitorAbort: null,
+  lastHrBpm: null,
+  lastHrAlgo: "",
+  lastHrTs: null,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -85,6 +92,13 @@ const el = {
   wakeWordToggle: $("wake-word-toggle"),
   wakeWordIndicator: $("wake-word-indicator"),
   wakeWordHint: $("wake-word-hint"),
+  hrWidget: $("hr-widget"),
+  hrBpmValue: $("hr-bpm-value"),
+  hrAlgoValue: $("hr-algo-value"),
+  hrMonitorBtn: $("hr-monitor-btn"),
+  hrProgressWrap: $("hr-progress-wrap"),
+  hrProgressBar: $("hr-progress-bar"),
+  hrProgressLabel: $("hr-progress-label"),
 };
 
 const SCREEN_LABELS = {
@@ -383,7 +397,11 @@ async function unlockAudioPlayback() {
     return;
   }
 
-  const context = new AudioCtor();
+  if (!state.sharedAudioCtx) {
+    state.sharedAudioCtx = new AudioCtor();
+  }
+  const context = state.sharedAudioCtx;
+
   try {
     if (context.state === "suspended") {
       await context.resume();
@@ -391,10 +409,8 @@ async function unlockAudioPlayback() {
 
     const source = context.createBufferSource();
     source.buffer = context.createBuffer(1, 1, 22050);
-
     const gain = context.createGain();
     gain.gain.value = 0;
-
     source.connect(gain);
     gain.connect(context.destination);
     source.start(0);
@@ -406,12 +422,8 @@ async function unlockAudioPlayback() {
 
     state.audioUnlocked = true;
     setText(el.mascotNote, "AIRI Hiyori voice output is unlocked.");
-  } finally {
-    try {
-      await context.close();
-    } catch (_) {
-      // ignore close failure
-    }
+  } catch (_) {
+    // ignore
   }
 }
 
@@ -553,8 +565,18 @@ function renderReport(report) {
 
     const domains = report.domains || {};
     if (domains.attention != null) rows.push(reportRow("Attention", formatNumber(domains.attention)));
+    if (domains.heart_rate_bpm != null) rows.push(reportRow("Heart rate", `${formatNumber(domains.heart_rate_bpm)} bpm`));
+    if (domains.heart_rate_status && domains.heart_rate_status !== "ok") rows.push(reportRow("Heart rate status", domains.heart_rate_status));
+    if (domains.moca_score != null && domains.moca_max_score != null) {
+      rows.push(reportRow("MoCA voice score", `${domains.moca_score} / ${domains.moca_max_score}`));
+    }
+    if (domains.moca_percent != null) rows.push(reportRow("MoCA voice percent", `${Math.round(Number(domains.moca_percent) * 100)}%`));
     if (domains.speech != null) rows.push(reportRow("Speech", formatNumber(domains.speech)));
     if (domains.reaction != null) rows.push(reportRow("Reaction", `${domains.reaction} ms`));
+
+    const summary = report.summary || {};
+    if (summary.moca_interpretation) rows.push(reportRow("Interpretation", summary.moca_interpretation));
+    if (summary.moca_notes) rows.push(reportRow("Notes", summary.moca_notes));
 
     const sources = report.sources || {};
     const video = sources.video || {};
@@ -564,6 +586,10 @@ function renderReport(report) {
       rows.push('<div class="report-section">Video</div>');
       if (video.attention_score != null) rows.push(reportRow("Attention", formatNumber(video.attention_score)));
       if (video.face_detected !== undefined) rows.push(reportRow("Face", video.face_detected ? "Yes" : "No"));
+      if (video.heart_rate_bpm != null) rows.push(reportRow("Heart rate", `${formatNumber(video.heart_rate_bpm)} bpm`));
+      if (video.heart_rate_algorithm) rows.push(reportRow("Heart rate model", video.heart_rate_algorithm));
+      if (video.heart_rate_status && video.heart_rate_status !== "ok") rows.push(reportRow("Heart rate status", video.heart_rate_status));
+      if (video.heart_rate_error) rows.push(reportRow("Heart rate note", video.heart_rate_error));
       if (video.notes) rows.push(reportRow("Notes", video.notes));
     }
 
@@ -572,6 +598,19 @@ function renderReport(report) {
       if (voice.speech_score != null) rows.push(reportRow("Speech", formatNumber(voice.speech_score)));
       if (voice.reaction_ms != null) rows.push(reportRow("Reaction", `${voice.reaction_ms} ms`));
       if (voice.notes) rows.push(reportRow("Notes", voice.notes));
+    }
+
+    const moca = sources.moca || {};
+    const mocaTasks = Array.isArray(domains.moca_tasks) ? domains.moca_tasks : Array.isArray(moca.tasks) ? moca.tasks : [];
+    if (mocaTasks.length > 0) {
+      rows.push('<div class="report-section">MoCA answers</div>');
+      for (const task of mocaTasks) {
+        const maxScore = Number(task.max_score || 0);
+        const scoreLabel = maxScore > 0 ? `${task.score || 0}/${maxScore}` : "not scored";
+        const transcript = task.transcript || "-";
+        const details = task.details ? ` · ${task.details}` : "";
+        rows.push(reportRow(mocaTaskLabel(task.task_id), `${scoreLabel}: ${transcript}${details}`));
+      }
     }
 
     el.reportValue.innerHTML = rows.join("");
@@ -587,6 +626,23 @@ function formatNumber(value) {
 
 function reportRow(label, value) {
   return `<div class="report-row"><span class="report-label">${escapeHtml(label)}</span><span class="report-val">${escapeHtml(value)}</span></div>`;
+}
+
+function mocaTaskLabel(taskId) {
+  const labels = {
+    memory_1: "Memory 1",
+    memory_2: "Memory 2",
+    attention_digits_forward: "Digits forward",
+    attention_digits_backward: "Digits backward",
+    attention_serial: "Serial 100-7",
+    language_sentence_1: "Sentence 1",
+    language_sentence_2: "Sentence 2",
+    language_fluency: "Fluency",
+    abstraction_1: "Abstraction 1",
+    abstraction_2: "Abstraction 2",
+    delayed_recall: "Delayed recall",
+  };
+  return labels[taskId] || taskId || "MoCA task";
 }
 
 function renderModules(modules) {
@@ -697,6 +753,27 @@ function syncDeviceSelectionStatus() {
   });
 }
 
+function updateHrWidget(bpm, algo, status) {
+  if (bpm == null || status === "disabled") return;
+  state.lastHrBpm = bpm;
+  state.lastHrAlgo = algo || "";
+  state.lastHrTs = Date.now();
+
+  if (!el.hrWidget) return;
+  setHidden(el.hrWidget, false);
+
+  const bpmText = `${Math.round(bpm)} уд/мин`;
+  if (el.hrBpmValue) {
+    el.hrBpmValue.textContent = bpmText;
+    el.hrBpmValue.classList.remove("hr-active");
+    void el.hrBpmValue.offsetWidth; // force reflow to restart animation
+    el.hrBpmValue.classList.add("hr-active");
+  }
+  if (el.hrAlgoValue) {
+    el.hrAlgoValue.textContent = algo ? algo.toUpperCase() : "";
+  }
+}
+
 function renderSnapshot(snapshot) {
   // During MoCA test — only update the MoCA panel, suppress all other UI output
   if (snapshot.screen === "moca") {
@@ -712,6 +789,14 @@ function renderSnapshot(snapshot) {
   setText(el.messageValue, snapshot.message || "-");
   setText(el.transcriptValue, snapshot.transcript_text ? `Transcript: ${snapshot.transcript_text}` : "");
   setMascotSpeech(snapshot.message || "", { visible: shouldShowMascotSpeech(snapshot) });
+
+  if (snapshot.heart_rate_bpm != null) {
+    updateHrWidget(snapshot.heart_rate_bpm, snapshot.heart_rate_algorithm, snapshot.heart_rate_status);
+  }
+
+  if (snapshot.pulse_monitor_start && !state.hrMonitoring) {
+    startPulseMonitor(snapshot.pulse_monitor_duration || 60);
+  }
 
   renderReport(snapshot.report);
   renderModules(snapshot.worker_statuses || {});
@@ -730,7 +815,7 @@ function renderSnapshot(snapshot) {
   setMascotState(mascotState);
 
   setDisabled(el.appearanceButton, !state.cameraActive);
-  if (el.detailsDrawer && (snapshot.screen === "device_setup" || (snapshot.device_errors && snapshot.device_errors.length))) {
+  if (el.detailsDrawer && snapshot.screen === "device_setup") {
     el.detailsDrawer.open = true;
   }
 }
@@ -826,9 +911,12 @@ function renderMoca(snapshot) {
   if (mic) mic.style.display = isRecording ? "flex" : "none";
 
   // Auto-play TTS prompt when server sends moca_tts_text
-  if (snapshot.moca_tts_text && snapshot.moca_tts_text !== window._lastMocaTts) {
-    window._lastMocaTts = snapshot.moca_tts_text;
-    _mocaPlayTts(snapshot.moca_tts_text);
+  if (snapshot.moca_tts_text) {
+    const ttsKey = snapshot.moca_tts_id || snapshot.moca_tts_text;
+    if (ttsKey !== window._lastMocaTts) {
+      window._lastMocaTts = ttsKey;
+      _mocaPlayTts(snapshot.moca_tts_text, snapshot.moca_tts_id || "");
+    }
   }
 }
 
@@ -838,7 +926,25 @@ async function stopMocaTest() {
   } catch (_) {}
 }
 
-async function _mocaPlayTts(text) {
+async function _mocaNotifyTtsFinished(ttsId) {
+  if (!ttsId) return;
+  try {
+    await fetch("/api/actions/moca_tts_finished", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ moca_tts_id: ttsId }),
+    });
+  } catch (_) {}
+}
+
+async function _mocaPlayTts(text, ttsId) {
+  if (window._currentMocaAudio) {
+    window._currentMocaAudio.pause();
+    window._currentMocaAudio.removeAttribute("src");
+    window._currentMocaAudio.load();
+    window._currentMocaAudio = null;
+  }
+
   try {
     const resp = await fetch("/api/tts/speak", {
       method: "POST",
@@ -849,9 +955,20 @@ async function _mocaPlayTts(text) {
     const blob = await resp.blob();
     const url = URL.createObjectURL(blob);
     const audio = new Audio(url);
-    audio.onended = () => URL.revokeObjectURL(url);
+    window._currentMocaAudio = audio;
+    const playbackDone = new Promise((resolve) => {
+      audio.onended = resolve;
+      audio.onerror = resolve;
+      audio.onabort = resolve;
+    });
     await audio.play();
-  } catch (_) {}
+    await playbackDone;
+    URL.revokeObjectURL(url);
+    if (window._currentMocaAudio === audio) window._currentMocaAudio = null;
+  } catch (_) {
+  } finally {
+    await _mocaNotifyTtsFinished(ttsId);
+  }
 }
 
 function cleanupSpeechAudio() {
@@ -1329,19 +1446,244 @@ async function submitAssistantMessage(event) {
 async function startScreening() {
   try {
     await unlockAudioPlayback();
-  } catch (_) {
-    // ignore unlock failure
+  } catch (_) {}
+
+  // Camera must be active to stream frames for rPPG
+  if (!state.cameraActive) {
+    setText(el.messageValue, "Включите камеру перед запуском скрининга.");
+    appendLogLine("[screening] camera not active, skipping");
+    return;
   }
 
   setButtonLoading(el.screeningButton, true);
   try {
+    // Tell server screening is starting (shows screening screen on UI)
     await fetchJson("/api/actions/start_screening", { method: "POST" });
   } catch (error) {
     setText(el.messageValue, `Screening start failed: ${error.message || error}`);
     appendLogLine(`[client] screening error: ${error.message || error}`);
-  } finally {
     setButtonLoading(el.screeningButton, false);
+    return;
   }
+
+  // Stream camera frames to /ws/rppg — camera stays active in browser
+  await _streamRppgFrames();
+  setButtonLoading(el.screeningButton, false);
+}
+
+async function _streamRppgFrames() {
+  const DURATION_MS = 20000;
+  const FPS = 15;
+  const INTERVAL_MS = Math.round(1000 / FPS);
+  const MAX_FRAMES = Math.ceil((DURATION_MS / 1000) * FPS);
+
+  const videoEl = el.cameraPreview;
+  if (!videoEl || !state.cameraActive) {
+    appendLogLine("[screening] no camera stream, skipping rPPG frame capture");
+    return;
+  }
+
+  // Use offscreen canvas to capture JPEG frames from the <video> element
+  const canvas = document.createElement("canvas");
+  canvas.width = 320;
+  canvas.height = 240;
+  const ctx2d = canvas.getContext("2d");
+
+  const wsProto = location.protocol === "https:" ? "wss:" : "ws:";
+  const wsUrl = `${wsProto}//${location.host}/ws/rppg`;
+  let ws;
+  try {
+    ws = new WebSocket(wsUrl);
+  } catch (err) {
+    appendLogLine(`[screening] WebSocket open failed: ${err.message || err}`);
+    return;
+  }
+
+  await new Promise((resolve) => {
+    ws.addEventListener("open", resolve, { once: true });
+    ws.addEventListener("error", resolve, { once: true });
+  });
+
+  if (ws.readyState !== WebSocket.OPEN) {
+    appendLogLine("[screening] WebSocket not open, skipping frame stream");
+    return;
+  }
+
+  appendLogLine(`[screening] streaming ${MAX_FRAMES} frames to server (~${DURATION_MS / 1000}s)`);
+  let sent = 0;
+
+  ws.addEventListener("message", (ev) => {
+    try {
+      const msg = JSON.parse(ev.data);
+      if (msg.done) {
+        appendLogLine(`[screening] rPPG done: bpm=${msg.heart_rate_bpm} status=${msg.heart_rate_status}`);
+      } else if (msg.received != null) {
+        // progress ack — silent
+      }
+    } catch (_) {}
+  });
+
+  const startedAt = Date.now();
+  while (sent < MAX_FRAMES && ws.readyState === WebSocket.OPEN) {
+    try {
+      ctx2d.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+      const blob = await new Promise((res) => canvas.toBlob(res, "image/jpeg", 0.75));
+      if (blob && ws.readyState === WebSocket.OPEN) {
+        const buf = await blob.arrayBuffer();
+        ws.send(buf);
+        sent++;
+      }
+    } catch (err) {
+      appendLogLine(`[screening] frame capture error: ${err.message || err}`);
+      break;
+    }
+
+    const elapsed = Date.now() - startedAt;
+    const expected = sent * INTERVAL_MS;
+    const delay = Math.max(0, expected - elapsed);
+    if (delay > 0) await new Promise((r) => setTimeout(r, delay));
+  }
+
+  appendLogLine(`[screening] sent ${sent} frames, waiting for rPPG result…`);
+  // Give server time to finish processing and close; wait up to 60s
+  if (ws.readyState === WebSocket.OPEN) {
+    await new Promise((resolve) => {
+      const timer = setTimeout(() => { ws.close(); resolve(); }, 60000);
+      ws.addEventListener("close", () => { clearTimeout(timer); resolve(); }, { once: true });
+    });
+  }
+}
+
+function stopPulseMonitor() {
+  if (state.hrMonitorAbort) {
+    state.hrMonitorAbort();
+    state.hrMonitorAbort = null;
+  }
+  state.hrMonitoring = false;
+  if (el.hrMonitorBtn) {
+    el.hrMonitorBtn.textContent = "♥ Мониторинг";
+    el.hrMonitorBtn.classList.remove("monitoring");
+  }
+  _hrProgressHide();
+  appendLogLine("[hr] pulse monitor stopped");
+}
+
+function _hrProgressShow(totalSeconds) {
+  if (!el.hrProgressWrap) return;
+  setHidden(el.hrProgressWrap, false);
+  if (el.hrProgressBar) el.hrProgressBar.style.width = "0%";
+  if (el.hrProgressLabel) el.hrProgressLabel.textContent = `${totalSeconds} с`;
+}
+
+function _hrProgressHide() {
+  if (el.hrProgressWrap) setHidden(el.hrProgressWrap, true);
+  if (el.hrProgressBar) el.hrProgressBar.style.width = "0%";
+  if (el.hrProgressLabel) el.hrProgressLabel.textContent = "";
+}
+
+function _hrProgressUpdate(elapsedSeconds, totalSeconds) {
+  const remaining = Math.max(0, Math.ceil(totalSeconds - elapsedSeconds));
+  const pct = Math.min(100, (elapsedSeconds / totalSeconds) * 100);
+  if (el.hrProgressBar) el.hrProgressBar.style.width = `${pct}%`;
+  if (el.hrProgressLabel) {
+    const mm = String(Math.floor(remaining / 60)).padStart(2, "0");
+    const ss = String(remaining % 60).padStart(2, "0");
+    const timeStr = totalSeconds >= 60 ? `${mm}:${ss}` : `${remaining} с`;
+    if (elapsedSeconds < 20) {
+      el.hrProgressLabel.textContent = `калибровка ${timeStr}`;
+    } else {
+      el.hrProgressLabel.textContent = timeStr;
+    }
+  }
+}
+
+async function startPulseMonitor(durationSeconds) {
+  if (state.hrMonitoring) {
+    stopPulseMonitor();
+    return;
+  }
+  if (!state.cameraActive) {
+    setText(el.messageValue, "Включите камеру для мониторинга пульса.");
+    return;
+  }
+
+  state.hrMonitoring = true;
+  if (el.hrMonitorBtn) {
+    el.hrMonitorBtn.textContent = "■ Стоп";
+    el.hrMonitorBtn.classList.add("monitoring");
+  }
+  setHidden(el.hrWidget, false);
+  const total = durationSeconds || 60;
+  _hrProgressShow(total);
+  appendLogLine(`[hr] pulse monitor started (${total}s)`);
+
+  let aborted = false;
+  state.hrMonitorAbort = () => { aborted = true; };
+
+  await _streamRppgMonitor(total, () => aborted);
+
+  if (!aborted) stopPulseMonitor();
+}
+
+async function _streamRppgMonitor(totalSeconds, isAborted) {
+  const FPS = 15;
+  const INTERVAL_MS = Math.round(1000 / FPS);
+
+  const videoEl = el.cameraPreview;
+  const canvas = document.createElement("canvas");
+  canvas.width = 320;
+  canvas.height = 240;
+  const ctx2d = canvas.getContext("2d");
+
+  const wsProto = location.protocol === "https:" ? "wss:" : "ws:";
+  const ws = new WebSocket(`${wsProto}//${location.host}/ws/rppg?mode=monitor&duration=${totalSeconds}`);
+
+  await new Promise((resolve) => {
+    ws.addEventListener("open", resolve, { once: true });
+    ws.addEventListener("error", resolve, { once: true });
+  });
+
+  if (ws.readyState !== WebSocket.OPEN) {
+    appendLogLine("[hr] monitor WebSocket failed to open");
+    return;
+  }
+
+  ws.addEventListener("message", (ev) => {
+    try {
+      const msg = JSON.parse(ev.data);
+      if (msg.heart_rate_bpm != null) {
+        updateHrWidget(msg.heart_rate_bpm, msg.heart_rate_algorithm, msg.heart_rate_status);
+        appendLogLine(`[hr] bpm=${msg.heart_rate_bpm} algo=${msg.heart_rate_algorithm || "?"}`);
+      }
+      if (msg.done) {
+        appendLogLine("[hr] monitor session complete");
+      }
+    } catch (_) {}
+  });
+
+  const deadline = Date.now() + totalSeconds * 1000;
+  let sent = 0;
+  const startedAt = Date.now();
+
+  while (Date.now() < deadline && ws.readyState === WebSocket.OPEN && !isAborted()) {
+    try {
+      ctx2d.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+      const blob = await new Promise((res) => canvas.toBlob(res, "image/jpeg", 0.75));
+      if (blob && ws.readyState === WebSocket.OPEN && !isAborted()) {
+        ws.send(await blob.arrayBuffer());
+        sent++;
+      }
+    } catch (_) { break; }
+
+    const elapsed = (Date.now() - startedAt) / 1000;
+    _hrProgressUpdate(elapsed, totalSeconds);
+
+    const elapsedMs = Date.now() - startedAt;
+    const delay = Math.max(0, sent * INTERVAL_MS - elapsedMs);
+    if (delay > 0) await new Promise((r) => setTimeout(r, delay));
+  }
+
+  try { ws.close(); } catch (_) {}
 }
 
 function stopVoiceRecording() {
@@ -1607,7 +1949,11 @@ function triggerWakeWordActivation() {
 
 function playActivationBeep() {
   try {
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const ctx = state.sharedAudioCtx;
+    if (!ctx || ctx.state === "closed") return;
+    if (ctx.state === "suspended") {
+      ctx.resume().catch(() => {});
+    }
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
     osc.connect(gain);
@@ -1619,7 +1965,6 @@ function playActivationBeep() {
     gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.2);
     osc.start(ctx.currentTime);
     osc.stop(ctx.currentTime + 0.2);
-    setTimeout(() => ctx.close(), 300);
   } catch (_) {
     // Ignore audio context errors
   }
@@ -1846,6 +2191,7 @@ function bindEvents() {
   el.cameraToggle && el.cameraToggle.addEventListener("click", toggleCamera);
   el.appearanceButton && el.appearanceButton.addEventListener("click", analyzeAppearance);
   el.screeningButton && el.screeningButton.addEventListener("click", startScreening);
+  el.hrMonitorBtn && el.hrMonitorBtn.addEventListener("click", () => startPulseMonitor(300));
   el.ttsEnabled && el.ttsEnabled.addEventListener("change", (event) => {
     state.ttsEnabled = event.target.checked;
   });
