@@ -1,147 +1,234 @@
-# Neuro Mirror
+# Neuro Mirror — Установка на новый ПК (пошагово)
 
-Локальный прототип `Neuro Mirror` с основным `Web UI`, локальным ассистентом через `Ollama`, visual worker для камеры и speech worker для локального STT.
+Локальный прототип `Neuro Mirror`: Web UI, локальный ассистент через Ollama, камера, распознавание речи, TTS-озвучка, анализ эмоций.
 
-## Быстрый запуск
+---
+
+## Требования
+
+- Windows 10/11 (64-bit)
+- Python 3.11 или 3.12 — [скачать здесь](https://www.python.org/downloads/)
+- Git — [скачать здесь](https://git-scm.com/download/win)
+- Ollama — [скачать здесь](https://ollama.com/download)
+- Веб-камера (USB или встроенная)
+- Микрофон
+
+---
+
+## Шаг 1 — Скачать проект
+
+Открой PowerShell и выполни:
 
 ```powershell
-python main.py
+git clone --recurse-submodules https://github.com/Godcomplexx/neuro-mirror.git
+cd neuro-mirror
 ```
 
-После старта web UI будет доступен по адресу `http://127.0.0.1:8000`, если вы не переопределили `NEURO_MIRROR_WEB_HOST` и `NEURO_MIRROR_WEB_PORT`.
+> Если репозиторий приватный — скачай ZIP с GitHub и распакуй в любую папку, затем `cd` в неё.
 
-## Что уже работает
+---
 
-- чат с ассистентом
-- TTS-озвучка ответов через `edge-tts`
-- browser preview локальной камеры
-- отправка кадра на visual analysis
-- голосовой ввод через `MediaRecorder -> speech worker`
-- appearance-report по сценарию `Как я сегодня выгляжу?`
-- журнал статусов и worker-модулей через `WebSocket`
+## Шаг 2 — Установить Python-зависимости
 
-## Ollama
+```powershell
+python -m pip install --upgrade pip
+python -m pip install -r runtime\vision_worker\requirements.txt
+python -m pip install -r runtime\speech_worker\requirements.txt
+python -m pip install sounddevice fastapi uvicorn websockets edge-tts httpx
+```
 
-Основная модель:
+> Если у тебя есть GPU NVIDIA — дополнительно установи PyTorch с CUDA:
+> ```powershell
+> python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+> ```
+> Без GPU всё работает на CPU, просто медленнее.
+
+---
+
+## Шаг 3 — Установить и запустить Ollama
+
+1. Установи [Ollama](https://ollama.com/download) — запускается как фоновый сервис автоматически.
+
+2. Скачай языковую модель (нужен интернет, ~5 ГБ):
 
 ```powershell
 ollama pull gemma4:e2b
 ```
 
-Пример запуска с `Ollama`:
+3. Для работы анализа изображений с камеры — скачай vision-модель:
 
 ```powershell
-$env:NEURO_MIRROR_AI_BACKEND="ollama"
-$env:NEURO_MIRROR_OLLAMA_MODEL="gemma4:e2b"
+ollama pull llava
+```
+
+4. Проверь, что Ollama работает:
+
+```powershell
+ollama list
+```
+
+Должны появиться скачанные модели.
+
+---
+
+## Шаг 4 — Первый запуск
+
+Из папки проекта:
+
+```powershell
 python main.py
 ```
 
-## Worker Runtime
+Подожди 20–60 секунд — при первом запуске загружаются веса моделей распознавания эмоций (~200 МБ).
 
-В проекте есть:
+Открой браузер и перейди по адресу:
 
-```text
-runtime/
-  vision_worker/
-    worker.py
-    requirements.txt
-  speech_worker/
-    worker.py
-    requirements.txt
+```
+http://127.0.0.1:8000
 ```
 
-По умолчанию оба worker'а запускаются через текущий `python`. При необходимости можно переопределить интерпретаторы и пути:
+---
+
+## Шаг 5 — Настройка (по желанию)
+
+Все параметры задаются через переменные окружения перед запуском. Примеры:
+
+### Принудительно CPU (если нет GPU):
 
 ```powershell
-$env:NEURO_MIRROR_VISION_WORKER_PYTHON="D:\\path\\to\\python.exe"
-$env:NEURO_MIRROR_SPEECH_WORKER_PYTHON="D:\\path\\to\\python.exe"
-$env:NEURO_MIRROR_VISION_WORKER_SCRIPT="D:\\neuro_mirro\\runtime\\vision_worker\\worker.py"
-$env:NEURO_MIRROR_SPEECH_WORKER_SCRIPT="D:\\neuro_mirro\\runtime\\speech_worker\\worker.py"
+$env:NEURO_MIRROR_DEVICE = "cpu"
 python main.py
 ```
 
-Рекомендуемые зависимости:
+### Принудительно GPU:
 
 ```powershell
-python -m pip install -r runtime\vision_worker\requirements.txt
-python -m pip install -r runtime\speech_worker\requirements.txt
-python -m pip install sounddevice
+python main.py -gpu
 ```
 
-## Переменные Окружения
-
-- `NEURO_MIRROR_AI_BACKEND=ollama`
-- `NEURO_MIRROR_OLLAMA_MODEL=gemma4:e2b`
-- `NEURO_MIRROR_ASSISTANT_RULES_PATH=` — путь к кастомному rules-файлу ассистента; пусто = встроенный `assistant_rules.md`
-- `NEURO_MIRROR_WEATHER_LOCATION=Samara`
-- `NEURO_MIRROR_CAMERA_INDEX=0`
-- `NEURO_MIRROR_PREVIEW_INTERVAL_SECONDS=1.2`
-- `NEURO_MIRROR_WEB_HOST=127.0.0.1`
-- `NEURO_MIRROR_WEB_PORT=8000`
-- `NEURO_MIRROR_WEB_LIVE2D_MODEL_URL=`
-- `NEURO_MIRROR_WEB_LIVE2D_CUBISM_CORE_URL=https://cdn.jsdelivr.net/npm/live2dcubismcore@1.0.2/live2dcubismcore.min.js`
-- `NEURO_MIRROR_EMOTION_MODEL=enet_b2_7`
-- `NEURO_MIRROR_EMOTION_ENGINE=onnx`
-- `NEURO_MIRROR_EMOTION_DEVICE=cpu`
-- `NEURO_MIRROR_TTS_VOICE=ru-RU-SvetlanaNeural`
-- `NEURO_MIRROR_TTS_RATE=+0%`
-- `NEURO_MIRROR_STT_MODEL=small`
-- `NEURO_MIRROR_STT_LANGUAGE=ru`
-- `NEURO_MIRROR_STT_COMPUTE_TYPE=int8`
-
-## Web UI
-
-Web-версия использует:
-
-- `FastAPI + WebSocket`
-- локальную камеру браузера для preview
-- `edge-tts` для русской озвучки
-- маскота `AIRI Hiyori` из `moeru-ai/airi` с состояниями `idle / listening / thinking / speaking`
-- опциональный `Live2D` URL через `NEURO_MIRROR_WEB_LIVE2D_MODEL_URL`
-
-## AIRI Mascot
-
-В `web UI` интегрирован preview-ассет `Hiyori` из проекта `moeru-ai/airi`.
-
-- локальный файл: `neuro_mirror/web/static/assets/airi/hiyori-preview.png`
-- notice по источнику и лицензии: `neuro_mirror/web/static/assets/airi/NOTICE.txt`
-- полный Live2D-модельный набор в этот репозиторий не включён
-- если у вас есть `model3.json`, укажите `NEURO_MIRROR_WEB_LIVE2D_MODEL_URL`; web UI попробует загрузить живую модель через `pixi-live2d-display`
-
-## EmotiEffLib Emotion Model
-
-Vision worker использует `EmotiEffLib` для facial emotion recognition. По умолчанию:
-
-```text
-engine = onnx
-model  = enet_b2_7
-device = cpu
-```
-
-Веса скачиваются автоматически в пользовательский cache при первом запуске.
-
-## Vision-запросы через камеру
-
-Ассистент может смотреть в камеру и отвечать на вопросы о том, что видит.
-
-Спросите:
-- «Что ты видишь на камере?»
-- «Что в кадре?»
-- «Опиши что видишь»
-
-Для этого используется Ollama vision-модель. Если у вас есть мультимодальная модель
-(например `llava`, `llava-llama3`, `gemma4:e2b`), укажите её:
+### Задать город для погоды:
 
 ```powershell
-$env:NEURO_MIRROR_OLLAMA_VISION_MODEL="llava"
-python main_web.py
+$env:NEURO_MIRROR_WEATHER_LOCATION = "Moscow"
+python main.py
 ```
 
-Если `NEURO_MIRROR_OLLAMA_VISION_MODEL` не задана, используется основная модель
-из `NEURO_MIRROR_OLLAMA_MODEL`.
+### Сменить камеру (если несколько камер):
 
-## Прогрев STT-модели
+```powershell
+$env:NEURO_MIRROR_CAMERA_INDEX = "1"
+python main.py
+```
 
-При запуске `main_web.py` speech worker автоматически прогревает модель Whisper,
-чтобы первая транскрибация не занимала слишком много времени.
-Таймаут транскрибации увеличен до 120 секунд (с 45).
+### Сменить голос TTS:
+
+```powershell
+$env:NEURO_MIRROR_TTS_VOICE = "ru-RU-DmitryNeural"
+python main.py
+```
+
+### Использовать другую модель Ollama:
+
+```powershell
+$env:NEURO_MIRROR_OLLAMA_MODEL = "llava"
+python main.py
+```
+
+---
+
+## Все переменные окружения
+
+| Переменная | По умолчанию | Описание |
+|---|---|---|
+| `NEURO_MIRROR_DEVICE` | `auto` | `auto` / `cpu` / `cuda` |
+| `NEURO_MIRROR_AI_BACKEND` | `ollama` | Бэкенд ассистента |
+| `NEURO_MIRROR_OLLAMA_MODEL` | `gemma4:e2b` | Модель для чата |
+| `NEURO_MIRROR_OLLAMA_VISION_MODEL` | `llava` | Модель для анализа камеры |
+| `NEURO_MIRROR_OLLAMA_BASE_URL` | `http://127.0.0.1:11434` | Адрес Ollama |
+| `NEURO_MIRROR_WEATHER_LOCATION` | _(пусто)_ | Город для погоды |
+| `NEURO_MIRROR_CAMERA_INDEX` | `0` | Индекс камеры |
+| `NEURO_MIRROR_TTS_VOICE` | `ru-RU-SvetlanaNeural` | Голос озвучки |
+| `NEURO_MIRROR_TTS_RATE` | `+0%` | Скорость речи |
+| `NEURO_MIRROR_STT_MODEL` | `medium` | Модель Whisper для распознавания речи |
+| `NEURO_MIRROR_STT_LANGUAGE` | `ru` | Язык распознавания |
+| `NEURO_MIRROR_WEB_HOST` | `127.0.0.1` | Адрес Web UI |
+| `NEURO_MIRROR_WEB_PORT` | `8000` | Порт Web UI |
+| `NEURO_MIRROR_EMOTION_MODEL` | `enet_b2_7` | Модель анализа эмоций |
+| `NEURO_MIRROR_EMOTION_ENGINE` | `onnx` | Движок (`onnx` / `torch`) |
+
+---
+
+## Структура проекта
+
+```
+neuro-mirror/
+├── main.py                    # Точка входа
+├── runtime/
+│   ├── vision_worker/
+│   │   ├── worker.py          # Воркер камеры и эмоций
+│   │   └── requirements.txt
+│   └── speech_worker/
+│       ├── worker.py          # Воркер распознавания речи
+│       └── requirements.txt
+├── neuro_mirror/
+│   ├── core/                  # Настройки, менеджер устройств
+│   ├── plugins/               # Ассистент, камера, STT, TTS, UI
+│   └── web/                   # FastAPI + WebSocket + статика
+└── external/
+    └── rppg-heart-rate-measurement/  # Измерение пульса по видео
+```
+
+---
+
+## Возможные проблемы
+
+### Ошибка `No module named 'xxx'`
+
+```powershell
+python -m pip install xxx
+```
+
+### Ollama не отвечает
+
+Убедись, что Ollama запущена. Открой Task Manager и проверь процесс `ollama.exe`, или запусти вручную:
+
+```powershell
+ollama serve
+```
+
+### Камера не работает
+
+Попробуй другой индекс камеры:
+
+```powershell
+$env:NEURO_MIRROR_CAMERA_INDEX = "1"
+python main.py
+```
+
+### Голос не слышен / микрофон не работает
+
+Проверь, что микрофон разрешён в Windows: **Настройки → Конфиденциальность → Микрофон**.
+
+### Медленно работает без GPU
+
+Используй более лёгкую STT-модель:
+
+```powershell
+$env:NEURO_MIRROR_STT_MODEL = "small"
+python main.py
+```
+
+---
+
+## Что умеет система
+
+- Чат с ИИ-ассистентом (голосом и текстом)
+- TTS-озвучка ответов через `edge-tts` (русский голос)
+- Просмотр камеры в браузере в реальном времени
+- Анализ эмоций по лицу
+- Голосовой ввод через Whisper (локально, без интернета)
+- Ответы на вопросы «Как я выгляжу?», «Что на камере?»
+- Погода и курсы валют
+- Измерение пульса по видео (rPPG)
+- Маскот AIRI Hiyori с анимированными состояниями
+- MoCA-тест когнитивных функций

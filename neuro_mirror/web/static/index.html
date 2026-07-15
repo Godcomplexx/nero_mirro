@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="ru">
   <head>
     <meta charset="utf-8" />
@@ -10,7 +10,7 @@
       href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Manrope:wght@300;400;500;600;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="/static/styles.css?v=20260427a" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260715j" />
   </head>
   <body data-ui-state="idle">
     <div class="stage-shell">
@@ -44,18 +44,22 @@
         </div>
 
         <div class="topbar-right">
-          <div class="status-pill">
+          <button type="button" class="status-pill user-chip" id="user-chip" title="Сменить пользователя" hidden>
+            <img class="user-chip-avatar" id="user-chip-avatar" src="" alt="" />
+            <span id="user-chip-name">—</span>
+          </button>
+          <div class="status-pill" title="Состояние подключения">
             <span class="connection-dot" id="connection-dot" title="WebSocket: нет связи"></span>
-            <span class="mono">LINK</span>
+            <span class="mono">СВЯЗЬ</span>
           </div>
-          <label class="status-pill tts-toggle" for="tts-enabled">
+          <label class="status-pill tts-toggle" for="tts-enabled" title="Озвучивать ответы голосом">
             <input type="checkbox" id="tts-enabled" checked />
-            <span class="mono">VOICE</span>
+            <span class="mono">ГОЛОС</span>
           </label>
           <label class="status-pill wake-word-toggle" for="wake-word-toggle" title="Голосовая активация по команде «Зеркало»">
             <span class="wake-word-indicator" id="wake-word-indicator"></span>
             <input type="checkbox" id="wake-word-toggle" />
-            <span class="mono">WAKE</span>
+            <span class="mono">«ЗЕРКАЛО»</span>
           </label>
           <div class="status-pill backend-pill" id="backend-label">Загрузка...</div>
         </div>
@@ -107,19 +111,22 @@
         </aside>
 
         <div class="bottom-center-stack">
-        <section class="assistant-composer-shell">
+        <section class="assistant-composer-shell" id="composer-shell">
+          <button type="button" class="composer-hint" id="composer-hint">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+              <path d="M20 5H4c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm-9 3h2v2h-2V8zm0 3h2v2h-2v-2zM8 8h2v2H8V8zm0 3h2v2H8v-2zm-1 2H5v-2h2v2zm0-3H5V8h2v2zm9 7H8v-2h8v2zm0-4h-2v-2h2v2zm0-3h-2V8h2v2zm3 3h-2v-2h2v2zm0-3h-2V8h2v2z" />
+            </svg>
+            <span>Ввод текста</span>
+          </button>
           <form id="assistant-form" class="assistant-form composer">
             <textarea
               id="assistant-input"
               rows="1"
-              placeholder="Спросите что-нибудь или используйте голос"
+              placeholder="Задайте вопрос..."
             ></textarea>
             <div class="composer-actions">
               <button type="submit" class="icon-btn primary-btn" id="ask-button">
                 <span>Спросить</span>
-              </button>
-              <button type="button" class="icon-btn" id="screening-button">
-                <span>Скрининг</span>
               </button>
             </div>
           </form>
@@ -157,15 +164,23 @@
         </div>
 
         <div class="side-actions">
+          <button type="button" class="icon-btn side-action" id="menu-button" title="Главное меню">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+              <path d="M3 6h18v2H3V6zm0 5h18v2H3v-2zm0 5h18v2H3v-2z" />
+            </svg>
+            <span>Меню</span>
+          </button>
           <button type="button" class="icon-btn side-action" id="camera-toggle" title="Камера">
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
               <path d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z" />
             </svg>
+            <span>Камера</span>
           </button>
           <button type="button" class="icon-btn side-action" id="appearance-button" title="Оценить вид" disabled>
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
               <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z" />
             </svg>
+            <span>Оценка вида</span>
           </button>
         </div>
       </main>
@@ -197,62 +212,183 @@
         <span class="mascot-state-badge" id="mascot-state" hidden>idle</span>
       </div>
 
-      <details class="drawer" id="details-drawer">
-        <summary class="drawer-toggle mono">Подробности</summary>
-        <div class="drawer-body">
-          <div class="drawer-grid">
-            <section class="drawer-card">
-              <h3>Последний отчёт</h3>
-              <div id="report-value" class="report-content">
-                <p class="placeholder-text">Отчёт пока не получен.</p>
-              </div>
-            </section>
-
-            <section class="drawer-card">
-              <h3>Модули</h3>
-              <div id="modules-value" class="modules-list">
-                <p class="placeholder-text">Данные о модулях ещё не получены.</p>
-              </div>
-            </section>
-
-            <section class="drawer-card device-card">
-              <h3>
-                Устройства
-                <button type="button" id="devices-refresh" class="text-btn">Обновить</button>
-              </h3>
-              <form id="devices-form" class="device-form">
-                <div class="device-field">
-                  <label for="camera-select" class="device-label mono">Камера</label>
-                  <select id="camera-select" class="device-select"></select>
-                </div>
-                <div class="device-field">
-                  <label for="microphone-select" class="device-label mono">Микрофон</label>
-                  <select id="microphone-select" class="device-select"></select>
-                </div>
-                <p id="devices-status" class="device-status placeholder-text">Каталог устройств загружается...</p>
-                <div id="devices-errors" class="device-errors" hidden></div>
-                <div class="device-actions">
-                  <button type="submit" id="devices-save" class="icon-btn primary-btn">
-                    <span>Подтвердить</span>
-                  </button>
-                </div>
-              </form>
-            </section>
-
-            <section class="drawer-card">
-              <h3>
-                Журнал
-                <button type="button" id="log-clear" class="text-btn">Очистить</button>
-              </h3>
-              <pre id="log-value" class="log-value">Подключение...</pre>
-            </section>
-          </div>
-        </div>
-      </details>
+      <nav class="action-dock" id="action-dock" aria-label="Основные действия">
+        <button type="button" class="dock-item" data-dock="screening">
+          <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 12h4l2.5-7 5 14 2.5-7h4" />
+          </svg>
+          <span>Проверка</span>
+        </button>
+        <button type="button" class="dock-item" data-dock="moca">
+          <svg viewBox="0 0 24 24" width="26" height="26" fill="currentColor">
+            <path d="M9 21h6v-1H9v1zm3-19C8.14 2 5 5.14 5 9c0 2.38 1.19 4.47 3 5.74V17c0 .55.45 1 1 1h6c.55 0 1-.45 1-1v-2.26c1.81-1.27 3-3.36 3-5.74 0-3.86-3.14-7-7-7z" />
+          </svg>
+          <span>Тест MoCA</span>
+        </button>
+        <button type="button" class="dock-item" data-dock="hads">
+          <svg viewBox="0 0 24 24" width="26" height="26" fill="currentColor">
+            <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" />
+          </svg>
+          <span>Тревожность</span>
+        </button>
+        <button type="button" class="dock-item" data-dock="report">
+          <svg viewBox="0 0 24 24" width="26" height="26" fill="currentColor">
+            <path d="M19 3h-4.18C14.4 1.84 13.3 1 12 1c-1.3 0-2.4.84-2.82 2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 0c.55 0 1 .45 1 1s-.45 1-1 1-1-.45-1-1 .45-1 1-1zm2 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z" />
+          </svg>
+          <span>Мои результаты</span>
+        </button>
+      </nav>
 
       <p id="mascot-note" class="mascot-note" hidden></p>
+
+      <!-- Мои результаты -->
+      <div class="results-panel" id="results-panel" hidden>
+        <div class="results-inner">
+          <div class="results-head">
+            <div>
+              <h2 class="user-gate-title">Мои результаты</h2>
+              <p class="user-gate-sub" id="results-sub">История проверок</p>
+            </div>
+            <button type="button" class="icon-btn" id="results-close"><span>Закрыть</span></button>
+          </div>
+          <div class="results-list" id="results-list">
+            <p class="placeholder-text">Загружаю...</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Главное меню -->
+      <div class="main-menu" id="main-menu" hidden>
+        <div class="main-menu-panel">
+          <h2 class="user-gate-title">Главное меню</h2>
+          <p class="user-gate-sub" id="main-menu-sub">Выберите режим работы</p>
+          <div class="menu-grid">
+            <button type="button" class="menu-item" data-menu="screening">
+              <strong>Базовый скрининг</strong>
+              <span>Видео-анализ + тест на тревожность</span>
+            </button>
+            <button type="button" class="menu-item" data-menu="moca">
+              <strong>Тест MoCA</strong>
+              <span>Голосовой когнитивный тест</span>
+            </button>
+            <button type="button" class="menu-item" data-menu="hads">
+              <strong>Тест на тревожность</strong>
+              <span>Шкала HADS — голосом или кликом</span>
+            </button>
+            <button type="button" class="menu-item" data-menu="training">
+              <strong>Тренировка</strong>
+              <span>Режим в разработке</span>
+            </button>
+            <button type="button" class="menu-item" data-menu="report">
+              <strong>Отчёт</strong>
+              <span>Последние результаты</span>
+            </button>
+            <button type="button" class="menu-item" data-menu="about">
+              <strong>Сведения о ПО</strong>
+              <span>Версия и состояние модулей</span>
+            </button>
+          </div>
+
+          <details class="menu-devices">
+            <summary class="menu-devices-toggle mono">Устройства (сервис)</summary>
+            <form id="devices-form" class="device-form">
+              <div class="device-field">
+                <label for="camera-select" class="device-label mono">Камера</label>
+                <select id="camera-select" class="device-select"></select>
+              </div>
+              <div class="device-field">
+                <label for="microphone-select" class="device-label mono">Микрофон</label>
+                <select id="microphone-select" class="device-select"></select>
+              </div>
+              <p id="devices-status" class="device-status placeholder-text">Каталог устройств загружается...</p>
+              <div id="devices-errors" class="device-errors" hidden></div>
+              <div class="device-actions">
+                <button type="button" id="devices-refresh" class="icon-btn"><span>Обновить</span></button>
+                <button type="submit" id="devices-save" class="icon-btn primary-btn">
+                  <span>Подтвердить</span>
+                </button>
+              </div>
+            </form>
+          </details>
+
+          <button type="button" class="icon-btn main-menu-close" id="main-menu-close"><span>Закрыть</span></button>
+        </div>
+      </div>
+
+      <!-- Тест на тревожность (HADS) -->
+      <div class="hads-panel" id="hads-panel" hidden>
+        <div class="hads-inner">
+          <div class="hads-kicker mono" id="hads-part"></div>
+          <div class="hads-progress">
+            <div class="hads-progress-fill" id="hads-progress-fill"></div>
+          </div>
+          <h2 class="hads-question" id="hads-question"></h2>
+          <div class="hads-options" id="hads-options"></div>
+          <div class="hads-mic" id="hads-mic" hidden>
+            <span class="hads-mic-dot"></span>
+            <span>Говорите или нажмите вариант...</span>
+          </div>
+          <p class="hads-status" id="hads-status"></p>
+          <button type="button" class="icon-btn hads-stop" id="hads-stop"><span>Прервать тест</span></button>
+        </div>
+      </div>
+
+      <div class="user-gate" id="user-gate" hidden>
+        <div class="user-gate-panel">
+          <!-- View 1: user selection -->
+          <section class="user-gate-view" id="user-select-view">
+            <h2 class="user-gate-title">Кто перед зеркалом?</h2>
+            <p class="user-gate-sub">Выберите профиль или создайте новый</p>
+            <div class="user-grid" id="user-grid"></div>
+            <button type="button" class="icon-btn primary-btn user-create-open" id="user-create-open">
+              <span>+ Новый пользователь</span>
+            </button>
+          </section>
+
+          <!-- View 2: user creation -->
+          <section class="user-gate-view" id="user-create-view" hidden>
+            <h2 class="user-gate-title">Новый пользователь</h2>
+            <p class="user-gate-sub">ID будет присвоен автоматически</p>
+
+            <form id="user-create-form" class="user-create-form">
+              <div class="user-field">
+                <label class="device-label mono" for="user-name-input">Имя</label>
+                <input type="text" id="user-name-input" class="user-name-input" maxlength="60" placeholder="Как к вам обращаться?" autocomplete="off" />
+              </div>
+
+              <div class="user-field">
+                <span class="device-label mono">Аватар</span>
+                <div class="avatar-picker" id="avatar-picker"></div>
+                <div class="avatar-photo-row">
+                  <button type="button" class="icon-btn" id="avatar-photo-btn"><span>Сделать фото</span></button>
+                  <span class="avatar-photo-hint mono" id="avatar-photo-hint"></span>
+                </div>
+                <div class="avatar-camera" id="avatar-camera" hidden>
+                  <video id="avatar-camera-video" autoplay playsinline muted></video>
+                  <div class="avatar-camera-actions">
+                    <button type="button" class="icon-btn primary-btn" id="avatar-capture-btn"><span>Снять</span></button>
+                    <button type="button" class="icon-btn" id="avatar-camera-cancel"><span>Отмена</span></button>
+                  </div>
+                </div>
+              </div>
+
+              <label class="consent-row" for="user-consent">
+                <input type="checkbox" id="user-consent" />
+                <span id="consent-text">Я даю согласие на обработку персональных данных, в том числе биометрических данных.</span>
+              </label>
+
+              <p class="user-create-error" id="user-create-error" hidden></p>
+
+              <div class="user-create-actions">
+                <button type="submit" class="icon-btn primary-btn" id="user-create-submit" disabled><span>Создать и войти</span></button>
+                <button type="button" class="icon-btn" id="user-create-back" hidden><span>Назад</span></button>
+              </div>
+            </form>
+          </section>
+        </div>
+      </div>
     </div>
 
-    <script src="/static/app.js?v=20260427a" defer></script>
+    <script src="/static/app.js?v=20260715j" defer></script>
   </body>
 </html>
