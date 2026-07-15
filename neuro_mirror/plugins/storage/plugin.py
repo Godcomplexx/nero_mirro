@@ -15,18 +15,50 @@ class StoragePlugin(StoragePluginBase):
         super().__init__(bus)
         self.storage_path = Path("runtime") / "screenings.jsonl"
         self._items: list[dict] = self._load_items()
+        self._active_user: dict = {}
 
     def subscribed_topics(self) -> tuple[str, ...]:
-        return (Topics.STORAGE_WRITE, Topics.STORAGE_READ)
+        return (
+            Topics.STORAGE_WRITE,
+            Topics.STORAGE_READ,
+            Topics.REQ_STORAGE_QUERY,
+            Topics.USER_SELECTED,
+        )
 
     async def handle_event(self, event: Event) -> None:
+        if event.topic == Topics.USER_SELECTED:
+            self._active_user = {
+                "user_id": event.payload.get("user_id", ""),
+                "user_name": event.payload.get("user_name", ""),
+            }
+            return
+
         if event.topic == Topics.STORAGE_WRITE:
             item = {
+                **self._active_user,
                 **event.payload,
                 "stored_at": datetime.now(UTC).isoformat(),
             }
             self._items.append(item)
             self._append_item(item)
+            return
+
+        if event.topic == Topics.REQ_STORAGE_QUERY:
+            user_id = str(event.payload.get("user_id") or "")
+            items = [
+                item for item in self._items
+                if not user_id or item.get("user_id") == user_id
+            ]
+            await self.bus.publish(
+                Event(
+                    topic=Topics.RESP_STORAGE_QUERY,
+                    source=self.name,
+                    payload={
+                        "_reply_to": event.payload.get("_request_id"),
+                        "items": items,
+                    },
+                )
+            )
             return
 
         if event.topic == Topics.STORAGE_READ:
@@ -44,7 +76,8 @@ class StoragePlugin(StoragePluginBase):
 
         items: list[dict] = []
         try:
-            for line in self.storage_path.read_text(encoding="utf-8").splitlines():
+            # utf-8-sig: tolerate a BOM left by external editors
+            for line in self.storage_path.read_text(encoding="utf-8-sig").splitlines():
                 if not line.strip():
                     continue
                 parsed = json.loads(line)

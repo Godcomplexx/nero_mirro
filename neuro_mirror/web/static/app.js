@@ -40,6 +40,14 @@ const state = {
   lastHrBpm: null,
   lastHrAlgo: "",
   lastHrTs: null,
+  // User profiles (личный кабинет)
+  activeUser: null,
+  userPresets: [],
+  userSelectedPreset: "",
+  userPhotoDataUrl: "",
+  avatarCameraStream: null,
+  userGateBound: false,
+  lastScreen: "",
 };
 
 const $ = (id) => document.getElementById(id);
@@ -69,6 +77,8 @@ const el = {
   microphoneSelect: $("microphone-select"),
   assistantForm: $("assistant-form"),
   assistantInput: $("assistant-input"),
+  composerShell: $("composer-shell"),
+  composerHint: $("composer-hint"),
   askButton: $("ask-button"),
   cameraPreview: $("camera-preview"),
   cameraOverlay: $("camera-overlay"),
@@ -99,6 +109,43 @@ const el = {
   hrProgressWrap: $("hr-progress-wrap"),
   hrProgressBar: $("hr-progress-bar"),
   hrProgressLabel: $("hr-progress-label"),
+  userGate: $("user-gate"),
+  userSelectView: $("user-select-view"),
+  userCreateView: $("user-create-view"),
+  userGrid: $("user-grid"),
+  userCreateOpen: $("user-create-open"),
+  userCreateForm: $("user-create-form"),
+  userNameInput: $("user-name-input"),
+  avatarPicker: $("avatar-picker"),
+  avatarPhotoBtn: $("avatar-photo-btn"),
+  avatarPhotoHint: $("avatar-photo-hint"),
+  avatarCamera: $("avatar-camera"),
+  avatarCameraVideo: $("avatar-camera-video"),
+  avatarCaptureBtn: $("avatar-capture-btn"),
+  avatarCameraCancel: $("avatar-camera-cancel"),
+  userConsent: $("user-consent"),
+  consentText: $("consent-text"),
+  userCreateError: $("user-create-error"),
+  userCreateSubmit: $("user-create-submit"),
+  userCreateBack: $("user-create-back"),
+  userChip: $("user-chip"),
+  userChipAvatar: $("user-chip-avatar"),
+  userChipName: $("user-chip-name"),
+  menuButton: $("menu-button"),
+  mainMenu: $("main-menu"),
+  mainMenuClose: $("main-menu-close"),
+  resultsPanel: $("results-panel"),
+  resultsList: $("results-list"),
+  resultsSub: $("results-sub"),
+  resultsClose: $("results-close"),
+  hadsPanel: $("hads-panel"),
+  hadsPart: $("hads-part"),
+  hadsProgressFill: $("hads-progress-fill"),
+  hadsQuestion: $("hads-question"),
+  hadsOptions: $("hads-options"),
+  hadsMic: $("hads-mic"),
+  hadsStatus: $("hads-status"),
+  hadsStop: $("hads-stop"),
 };
 
 const SCREEN_LABELS = {
@@ -106,6 +153,7 @@ const SCREEN_LABELS = {
   assistant: "Assistant",
   screening: "Screening",
   moca: "Тест MoCA",
+  hads: "Тест HADS",
   summary: "Summary",
   device_setup: "Device Setup",
 };
@@ -161,19 +209,29 @@ function isAbsoluteHttpUrl(value) {
 }
 
 function appendLogLine(line) {
-  if (!el.logValue) return;
-  const current = el.logValue.textContent ? `${el.logValue.textContent}\n` : "";
-  const next = `${current}${line}`.trim();
-  const lines = next.split("\n").slice(-80);
-  el.logValue.textContent = lines.join("\n");
-  el.logValue.scrollTop = el.logValue.scrollHeight;
+  // Client log lives in the browser console; errors are relayed to the
+  // server terminal via reportClientError → /api/client-log
+  console.log(`[neuro-mirror] ${line}`);
+}
+
+function sendClientLog(level, message) {
+  try {
+    fetch("/api/client-log", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ level, message }),
+      keepalive: true,
+    }).catch(() => {});
+  } catch (_) {
+    // relay is best-effort only
+  }
 }
 
 function reportClientError(error, prefix) {
   const message = error instanceof Error ? (error.stack || error.message) : String(error);
   console.error(prefix, error);
   setText(el.messageValue, `${prefix}: ${message}`);
-  appendLogLine(`[client] ${prefix}: ${message}`);
+  sendClientLog("error", `${prefix}: ${message}`);
 }
 
 function describeMediaError(error) {
@@ -272,7 +330,13 @@ function updateClockDisplay() {
       now.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })
     );
   }
-  if (el.currentGreeting) setText(el.currentGreeting, formatGreeting(now.getHours()));
+  if (el.currentGreeting) {
+    const greeting = formatGreeting(now.getHours());
+    setText(
+      el.currentGreeting,
+      state.activeUser ? `${greeting}, ${state.activeUser.name}` : greeting
+    );
+  }
 }
 
 async function loadExternalScript(url, test) {
@@ -577,6 +641,7 @@ function renderReport(report) {
     const summary = report.summary || {};
     if (summary.moca_interpretation) rows.push(reportRow("Interpretation", summary.moca_interpretation));
     if (summary.moca_notes) rows.push(reportRow("Notes", summary.moca_notes));
+    pushHadsRows(rows, domains, summary, report.sources || {});
 
     const sources = report.sources || {};
     const video = sources.video || {};
@@ -617,7 +682,48 @@ function renderReport(report) {
     return;
   }
 
+  if (report.report_type === "hads") {
+    const rows = [];
+    rows.push('<div class="report-section">Тест на тревожность (HADS)</div>');
+    rows.push(reportRow("State", report.state || "-"));
+    pushHadsRows(rows, report.domains || {}, report.summary || {}, report.sources || {});
+    el.reportValue.innerHTML = rows.join("");
+    return;
+  }
+
   el.reportValue.innerHTML = `<pre>${escapeHtml(JSON.stringify(report, null, 2))}</pre>`;
+}
+
+function pushHadsRows(rows, domains, summary, sources) {
+  const hasHads = domains.hads_anxiety_score != null || domains.hads_depression_score != null;
+  if (!hasHads) return;
+
+  rows.push('<div class="report-section">HADS</div>');
+  if (domains.hads_anxiety_score != null) {
+    rows.push(reportRow("Тревога", `${domains.hads_anxiety_score} / ${domains.hads_anxiety_max || 21}`));
+  }
+  if (summary.hads_anxiety_interpretation) {
+    rows.push(reportRow("Оценка тревоги", summary.hads_anxiety_interpretation));
+  }
+  if (domains.hads_depression_score != null) {
+    rows.push(reportRow("Депрессия", `${domains.hads_depression_score} / ${domains.hads_depression_max || 21}`));
+  }
+  if (summary.hads_depression_interpretation) {
+    rows.push(reportRow("Оценка депрессии", summary.hads_depression_interpretation));
+  }
+  if (domains.hads_answered_count != null && domains.hads_question_count != null) {
+    rows.push(reportRow("Отвечено", `${domains.hads_answered_count} из ${domains.hads_question_count}`));
+  }
+  if (summary.hads_notes) rows.push(reportRow("Notes", summary.hads_notes));
+
+  const hads = sources.hads || {};
+  const answers = Array.isArray(hads.answers) ? hads.answers : [];
+  if (answers.length > 0) {
+    rows.push('<div class="report-section">Ответы HADS</div>');
+    for (const answer of answers) {
+      rows.push(reportRow(answer.question || answer.question_id, `${answer.option_text} (${answer.score})`));
+    }
+  }
 }
 
 function formatNumber(value) {
@@ -777,12 +883,24 @@ function updateHrWidget(bpm, algo, status) {
 function renderSnapshot(snapshot) {
   // During MoCA test — only update the MoCA panel, suppress all other UI output
   if (snapshot.screen === "moca") {
+    // Tests speak through their own TTS channel — cut any assistant speech
+    if (state.currentSpeechAudio) cleanupSpeechAudio();
+    renderHads(snapshot);
     renderMoca(snapshot);
     return;
   }
 
-  // Hide MoCA panel when screen is no longer "moca"
+  // During HADS test — only update the HADS panel
+  if (snapshot.screen === "hads") {
+    if (state.currentSpeechAudio) cleanupSpeechAudio();
+    renderMoca(snapshot);
+    renderHads(snapshot);
+    return;
+  }
+
+  // Hide test panels when their screens are no longer active
   renderMoca(snapshot);
+  renderHads(snapshot);
 
   setText(el.screenValue, SCREEN_LABELS[snapshot.screen] || snapshot.screen || "-");
   setText(el.sourceValue, snapshot.assistant_source || "-");
@@ -815,9 +933,11 @@ function renderSnapshot(snapshot) {
   setMascotState(mascotState);
 
   setDisabled(el.appearanceButton, !state.cameraActive);
-  if (el.detailsDrawer && snapshot.screen === "device_setup") {
-    el.detailsDrawer.open = true;
+  if (snapshot.screen === "device_setup" && state.lastScreen !== "device_setup") {
+    // The device wizard now lives inside the main menu overlay
+    openMainMenu();
   }
+  state.lastScreen = snapshot.screen;
 }
 
 // ---- MoCA test UI ----
@@ -869,6 +989,7 @@ function renderMoca(snapshot) {
   if (snapshot.screen !== "moca") {
     const panel = document.getElementById("moca-panel");
     if (panel) panel.style.display = "none";
+    stopMocaAudio();
     return;
   }
 
@@ -937,13 +1058,20 @@ async function _mocaNotifyTtsFinished(ttsId) {
   } catch (_) {}
 }
 
+function stopMocaAudio() {
+  // Invalidate any in-flight TTS fetch (see stopHadsAudio)
+  window._mocaTtsSeq = (window._mocaTtsSeq || 0) + 1;
+  if (!window._currentMocaAudio) return;
+  window._currentMocaAudio.pause();
+  window._currentMocaAudio.removeAttribute("src");
+  window._currentMocaAudio.load();
+  window._currentMocaAudio = null;
+}
+
 async function _mocaPlayTts(text, ttsId) {
-  if (window._currentMocaAudio) {
-    window._currentMocaAudio.pause();
-    window._currentMocaAudio.removeAttribute("src");
-    window._currentMocaAudio.load();
-    window._currentMocaAudio = null;
-  }
+  // Sequence guard against overlapping speech (see _hadsPlayTts)
+  stopMocaAudio();
+  const seq = window._mocaTtsSeq;
 
   try {
     const resp = await fetch("/api/tts/speak", {
@@ -953,6 +1081,7 @@ async function _mocaPlayTts(text, ttsId) {
     });
     if (!resp.ok) return;
     const blob = await resp.blob();
+    if (seq !== window._mocaTtsSeq) return; // superseded or stopped
     const url = URL.createObjectURL(blob);
     const audio = new Audio(url);
     window._currentMocaAudio = audio;
@@ -969,6 +1098,401 @@ async function _mocaPlayTts(text, ttsId) {
   } finally {
     await _mocaNotifyTtsFinished(ttsId);
   }
+}
+
+// ---- HADS anxiety test UI ----
+
+function stopHadsAudio() {
+  // Invalidate any in-flight TTS fetch: audio that is still being
+  // synthesized must not start playing after the test was stopped
+  window._hadsTtsSeq = (window._hadsTtsSeq || 0) + 1;
+  if (!window._currentHadsAudio) return;
+  // pause + clearing src fires "abort" which resolves the playback promise
+  // inside _hadsPlayTts, so the server still gets its tts_finished notice
+  window._currentHadsAudio.pause();
+  window._currentHadsAudio.removeAttribute("src");
+  window._currentHadsAudio.load();
+  window._currentHadsAudio = null;
+}
+
+function renderHads(snapshot) {
+  if (!el.hadsPanel) return;
+  if (snapshot.screen !== "hads") {
+    setHidden(el.hadsPanel, true);
+    stopHadsAudio();
+    return;
+  }
+  setHidden(el.hadsPanel, false);
+
+  // Answer accepted while the question is still being spoken — cut the speech
+  if (snapshot.hads_selected_option != null) {
+    stopHadsAudio();
+  }
+
+  const idx = typeof snapshot.hads_question_index === "number" ? snapshot.hads_question_index : 0;
+  const total = typeof snapshot.hads_question_total === "number" ? snapshot.hads_question_total : 14;
+  const pct = total > 0 ? Math.round((idx / total) * 100) : 0;
+  if (el.hadsProgressFill) el.hadsProgressFill.style.width = `${pct}%`;
+
+  const hasQuestion = Boolean(snapshot.hads_question_text);
+  if (el.hadsPart) {
+    el.hadsPart.textContent = hasQuestion
+      ? `${snapshot.hads_part || ""} — вопрос ${idx + 1} из ${total}`.replace(/^ — /, "")
+      : "Тест на тревожность и депрессию (HADS)";
+  }
+  setText(el.hadsQuestion, snapshot.hads_question_text || "");
+
+  renderHadsOptions(snapshot, idx);
+
+  const isRecording = Boolean(snapshot.hads_recording);
+  setHidden(el.hadsMic, !isRecording);
+  if (el.hadsStatus) {
+    const msg = snapshot.message || "";
+    el.hadsStatus.textContent = isRecording ? "" : msg;
+  }
+
+  // Auto-play TTS prompt when server sends hads_tts_text
+  if (snapshot.hads_tts_text) {
+    const ttsKey = snapshot.hads_tts_id || snapshot.hads_tts_text;
+    if (ttsKey !== window._lastHadsTts) {
+      window._lastHadsTts = ttsKey;
+      _hadsPlayTts(snapshot.hads_tts_text, snapshot.hads_tts_id || "");
+    }
+  }
+}
+
+function renderHadsOptions(snapshot, questionIndex) {
+  if (!el.hadsOptions) return;
+
+  const options = Array.isArray(snapshot.hads_options) ? snapshot.hads_options : [];
+  const selected = snapshot.hads_selected_option;
+  const questionKey = `${snapshot.hads_question_id || ""}:${questionIndex}`;
+
+  // Rebuild buttons only when the question changes; otherwise just update state
+  if (el.hadsOptions.dataset.questionKey !== questionKey) {
+    el.hadsOptions.dataset.questionKey = questionKey;
+    el.hadsOptions.innerHTML = "";
+    options.forEach((text, optionIndex) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "hads-option";
+      const num = document.createElement("span");
+      num.className = "hads-option-num";
+      num.textContent = String(optionIndex + 1);
+      const label = document.createElement("span");
+      label.textContent = text;
+      button.append(num, label);
+      button.addEventListener("click", () => {
+        submitHadsAnswer(questionIndex, optionIndex);
+      });
+      el.hadsOptions.appendChild(button);
+    });
+  }
+
+  const buttons = el.hadsOptions.querySelectorAll(".hads-option");
+  buttons.forEach((button, optionIndex) => {
+    button.classList.toggle("selected", selected === optionIndex);
+    button.disabled = selected != null;
+  });
+}
+
+async function submitHadsAnswer(questionIndex, optionIndex) {
+  try {
+    await fetch("/api/actions/hads_answer", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question_index: questionIndex, option_index: optionIndex }),
+    });
+  } catch (error) {
+    appendLogLine(`[hads] answer error: ${error.message || error}`);
+  }
+}
+
+async function stopHadsTest() {
+  try {
+    await fetch("/api/actions/stop_hads", { method: "POST" });
+  } catch (_) {}
+}
+
+async function _hadsNotifyTtsFinished(ttsId) {
+  if (!ttsId) return;
+  try {
+    await fetch("/api/actions/hads_tts_finished", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ hads_tts_id: ttsId }),
+    });
+  } catch (_) {}
+}
+
+async function _hadsPlayTts(text, ttsId) {
+  // Sequence guard: stopHadsAudio() bumps the sequence, invalidating any
+  // older in-flight synthesis; we adopt the fresh number for this prompt.
+  // If the number moves on (newer prompt or test stopped), discard our audio.
+  stopHadsAudio();
+  const seq = window._hadsTtsSeq;
+
+  try {
+    const resp = await fetch("/api/tts/speak", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    });
+    if (!resp.ok) return;
+    const blob = await resp.blob();
+    if (seq !== window._hadsTtsSeq) return; // superseded or stopped
+    const url = URL.createObjectURL(blob);
+    const audio = new Audio(url);
+    window._currentHadsAudio = audio;
+    const playbackDone = new Promise((resolve) => {
+      audio.onended = resolve;
+      audio.onerror = resolve;
+      audio.onabort = resolve;
+    });
+    await audio.play();
+    await playbackDone;
+    URL.revokeObjectURL(url);
+    if (window._currentHadsAudio === audio) window._currentHadsAudio = null;
+  } catch (_) {
+  } finally {
+    await _hadsNotifyTtsFinished(ttsId);
+  }
+}
+
+// ---- «Мои результаты» ----
+
+const REPORT_TYPE_LABELS = {
+  screening: "Базовая проверка",
+  hads: "Тест на тревожность",
+  moca: "Тест MoCA",
+  appearance: "Оценка внешности",
+};
+
+// betterWhen: "lower" — чем меньше, тем лучше; "higher" — наоборот; null — нейтрально
+function extractResultMetrics(item) {
+  const domains = (item && item.domains) || {};
+  const metrics = [];
+  if (domains.hads_anxiety_score != null) {
+    metrics.push({
+      key: "anxiety",
+      label: "Тревога",
+      value: Number(domains.hads_anxiety_score),
+      max: Number(domains.hads_anxiety_max || 21),
+      betterWhen: "lower",
+    });
+  }
+  if (domains.hads_depression_score != null) {
+    metrics.push({
+      key: "depression",
+      label: "Депрессия",
+      value: Number(domains.hads_depression_score),
+      max: Number(domains.hads_depression_max || 21),
+      betterWhen: "lower",
+    });
+  }
+  if (domains.moca_score != null) {
+    metrics.push({
+      key: "moca",
+      label: "MoCA",
+      value: Number(domains.moca_score),
+      max: Number(domains.moca_max_score || 0) || null,
+      betterWhen: "higher",
+    });
+  }
+  if (domains.heart_rate_bpm != null) {
+    metrics.push({
+      key: "pulse",
+      label: "Пульс",
+      value: Math.round(Number(domains.heart_rate_bpm)),
+      unit: "уд/мин",
+      betterWhen: null,
+    });
+  }
+  return metrics;
+}
+
+function findPreviousMetric(items, startIndex, reportType, metricKey) {
+  for (let i = startIndex + 1; i < items.length; i += 1) {
+    if (items[i].report_type !== reportType) continue;
+    const previous = extractResultMetrics(items[i]).find((m) => m.key === metricKey);
+    if (previous) return previous;
+  }
+  return null;
+}
+
+function trendBadge(metric, previous) {
+  if (!previous || metric.betterWhen == null) return "";
+  const delta = metric.value - previous.value;
+  if (delta === 0) {
+    return '<span class="result-trend same">— так же</span>';
+  }
+  const improved = metric.betterWhen === "lower" ? delta < 0 : delta > 0;
+  const arrow = delta < 0 ? "▼" : "▲";
+  const word = improved ? "лучше" : "хуже";
+  const cls = improved ? "better" : "worse";
+  return `<span class="result-trend ${cls}">${arrow} ${word}</span>`;
+}
+
+function formatResultDate(isoText) {
+  const date = new Date(isoText);
+  if (Number.isNaN(date.getTime())) return "";
+  return `${date.toLocaleDateString("ru-RU", { day: "numeric", month: "long", year: "numeric" })}, ${date.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}`;
+}
+
+function resultInterpretations(item) {
+  const summary = (item && item.summary) || {};
+  return [
+    summary.hads_anxiety_interpretation,
+    summary.hads_depression_interpretation,
+    summary.moca_interpretation,
+    summary.hads_notes,
+  ].filter(Boolean).join(" · ");
+}
+
+function renderResults(items) {
+  if (!el.resultsList) return;
+
+  // Only medically meaningful records (tests with numbers)
+  const testItems = items.filter((item) => extractResultMetrics(item).length > 0);
+
+  if (testItems.length === 0) {
+    el.resultsList.innerHTML =
+      '<p class="placeholder-text">Результатов пока нет. Пройдите проверку — они появятся здесь.</p>';
+    return;
+  }
+
+  const cards = testItems.map((item, index) => {
+    const typeLabel = REPORT_TYPE_LABELS[item.report_type] || item.report_type || "Проверка";
+    const dateLabel = formatResultDate(item.stored_at);
+    const metricTiles = extractResultMetrics(item).map((metric) => {
+      const previous = findPreviousMetric(testItems, index, item.report_type, metric.key);
+      const maxPart = metric.max ? ` <small>/ ${metric.max}</small>` : "";
+      const unitPart = metric.unit ? ` <small>${escapeHtml(metric.unit)}</small>` : "";
+      return `
+        <div class="result-metric">
+          <span class="result-metric-label">${escapeHtml(metric.label)}</span>
+          <strong class="result-metric-value">${metric.value}${maxPart}${unitPart}</strong>
+          ${trendBadge(metric, previous)}
+        </div>`;
+    }).join("");
+    const note = resultInterpretations(item);
+    return `
+      <article class="result-card">
+        <div class="result-card-head">
+          <strong>${escapeHtml(typeLabel)}</strong>
+          <span class="result-date mono">${escapeHtml(dateLabel)}</span>
+        </div>
+        <div class="result-metrics">${metricTiles}</div>
+        ${note ? `<p class="result-note">${escapeHtml(note)}</p>` : ""}
+      </article>`;
+  });
+
+  el.resultsList.innerHTML = cards.join("");
+}
+
+async function openResults() {
+  if (!el.resultsPanel) return;
+  if (!state.activeUser) {
+    setText(el.messageValue, "Сначала выберите пользователя.");
+    return;
+  }
+  setHidden(el.resultsPanel, false);
+  if (el.resultsSub) {
+    setText(el.resultsSub, `${state.activeUser.name} — история проверок`);
+  }
+  if (el.resultsList) {
+    el.resultsList.innerHTML = '<p class="placeholder-text">Загружаю...</p>';
+  }
+  try {
+    const data = await fetchJson("/api/results");
+    renderResults(data.items || []);
+  } catch (error) {
+    if (el.resultsList) {
+      el.resultsList.innerHTML =
+        `<p class="placeholder-text">Не удалось загрузить результаты: ${escapeHtml(error.message || String(error))}</p>`;
+    }
+  }
+}
+
+function closeResults() {
+  setHidden(el.resultsPanel, true);
+}
+
+// ---- Main menu ----
+
+function openMainMenu() {
+  if (!el.mainMenu) return;
+  setHidden(el.mainMenu, false);
+}
+
+function closeMainMenu() {
+  if (!el.mainMenu) return;
+  setHidden(el.mainMenu, true);
+}
+
+async function handleMenuAction(item) {
+  closeMainMenu();
+  try {
+    switch (item) {
+      case "screening":
+        // One-tap flow for elderly users: turn the camera on automatically
+        if (!state.cameraActive) {
+          await toggleCamera();
+        }
+        if (state.cameraActive) {
+          await startScreening();
+        }
+        break;
+      case "moca":
+        await unlockAudioPlayback().catch(() => {});
+        await fetchJson("/api/actions/start_moca", { method: "POST" });
+        break;
+      case "hads":
+        await unlockAudioPlayback().catch(() => {});
+        await fetchJson("/api/actions/start_hads", { method: "POST" });
+        break;
+      case "training":
+        setText(el.messageValue, "Режим «Тренировка» пока в разработке.");
+        break;
+      case "report":
+        await openResults();
+        break;
+      case "about": {
+        const config = state.config || {};
+        const parts = [
+          "Neuro Mirror — программный комплекс когнитивного скрининга.",
+          config.assistant_backend_label ? `Ассистент: ${config.assistant_backend_label}.` : "",
+          config.weather_source_label ? `Погода: ${config.weather_source_label}.` : "",
+        ].filter(Boolean);
+        setText(el.messageValue, parts.join(" "));
+        break;
+      }
+      default:
+        break;
+    }
+  } catch (error) {
+    setText(el.messageValue, `Не удалось выполнить действие: ${error.message || error}`);
+    appendLogLine(`[menu] ${item} error: ${error.message || error}`);
+  }
+}
+
+function bindMainMenuEvents() {
+  el.menuButton && el.menuButton.addEventListener("click", openMainMenu);
+  el.mainMenuClose && el.mainMenuClose.addEventListener("click", closeMainMenu);
+  el.mainMenu && el.mainMenu.addEventListener("click", (event) => {
+    if (event.target === el.mainMenu) closeMainMenu();
+  });
+  for (const item of document.querySelectorAll(".menu-item[data-menu]")) {
+    item.addEventListener("click", () => handleMenuAction(item.dataset.menu));
+  }
+  for (const item of document.querySelectorAll(".dock-item[data-dock]")) {
+    item.addEventListener("click", () => handleMenuAction(item.dataset.dock));
+  }
+  el.hadsStop && el.hadsStop.addEventListener("click", stopHadsTest);
+  el.resultsClose && el.resultsClose.addEventListener("click", closeResults);
+  el.resultsPanel && el.resultsPanel.addEventListener("click", (event) => {
+    if (event.target === el.resultsPanel) closeResults();
+  });
 }
 
 function cleanupSpeechAudio() {
@@ -1016,9 +1540,10 @@ async function maybeSpeak(snapshot) {
   if (!snapshot.message || !snapshot.assistant_source) return;
   if (snapshot.message === state.lastSpokenText) return;
 
-  // Only speak messages on assistant/summary screens — skip status/system messages
+  // Speak assistant replies, summaries and screening instructions —
+  // skip other status/system messages (tests speak through their own channel)
   const screen = snapshot.screen || "";
-  if (screen !== "assistant" && screen !== "summary") return;
+  if (screen !== "assistant" && screen !== "summary" && screen !== "screening") return;
 
   // Skip intermediate/status messages — only speak final assistant replies
   const source = String(snapshot.assistant_source || "").toLowerCase();
@@ -1216,15 +1741,17 @@ async function toggleCamera() {
     // ignore unlock failure
   }
 
+  // Ask the backend to release its camera worker first. Even if this fails
+  // (e.g. the worker takes longer than the server-side wait), the browser
+  // camera is independent — proceed and let getUserMedia report real problems.
   try {
     const releaseResult = await fetchJson("/api/actions/release_camera", { method: "POST" });
     appendLogLine(`[client] backend camera release: ${JSON.stringify(releaseResult.worker_statuses || {})}`);
     await new Promise((resolve) => setTimeout(resolve, 120));
   } catch (error) {
-    const details = describeMediaError(error);
-    appendLogLine(`[client] backend camera release failed: ${details}`);
-    setCameraOverlay(`Camera error: ${details}`);
-    return;
+    appendLogLine(`[client] backend camera release failed (continuing): ${error.message || error}`);
+    // Give the worker a moment to finish releasing in the background
+    await new Promise((resolve) => setTimeout(resolve, 500));
   }
 
   setButtonLoading(el.cameraToggle, true);
@@ -1404,6 +1931,16 @@ async function cameraVisionQuery(userText) {
   } finally {
     state.busy = false;
   }
+}
+
+function autoGrowAssistantInput() {
+  const input = el.assistantInput;
+  if (!input) return;
+  input.style.height = "auto";
+  const grownHeight = Math.min(input.scrollHeight, 120);
+  input.style.height = `${grownHeight}px`;
+  // Show the scrollbar only when the text no longer fits the max height
+  input.style.overflowY = input.scrollHeight > 120 ? "auto" : "hidden";
 }
 
 async function submitAssistantMessage(event) {
@@ -2175,6 +2712,269 @@ function setupVoiceRecorder() {
   });
 }
 
+// ---- User profiles (личный кабинет) ----
+
+function updateUserChip() {
+  if (!el.userChip) return;
+  if (state.activeUser) {
+    if (el.userChipAvatar) el.userChipAvatar.src = state.activeUser.avatar_url;
+    setText(el.userChipName, state.activeUser.name);
+    setHidden(el.userChip, false);
+  } else {
+    setHidden(el.userChip, true);
+  }
+}
+
+function showUserCreateError(message) {
+  if (!el.userCreateError) return;
+  if (message) {
+    setText(el.userCreateError, message);
+    setHidden(el.userCreateError, false);
+  } else {
+    setHidden(el.userCreateError, true);
+  }
+}
+
+function syncUserCreateSubmit() {
+  const nameOk = Boolean(el.userNameInput && el.userNameInput.value.trim());
+  const consentOk = Boolean(el.userConsent && el.userConsent.checked);
+  setDisabled(el.userCreateSubmit, !(nameOk && consentOk));
+}
+
+function renderUserGrid(users) {
+  if (!el.userGrid) return;
+  el.userGrid.innerHTML = "";
+  for (const user of users) {
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className = "user-card";
+    const avatar = document.createElement("img");
+    avatar.className = "user-card-avatar";
+    avatar.src = user.avatar_url;
+    avatar.alt = "";
+    const name = document.createElement("span");
+    name.className = "user-card-name";
+    name.textContent = user.name;
+    const idBadge = document.createElement("span");
+    idBadge.className = "user-card-id mono";
+    idBadge.textContent = `ID ${user.id}`;
+    card.append(avatar, name, idBadge);
+    card.addEventListener("click", () => {
+      selectUser(user.id).catch((error) => {
+        reportClientError(error, "Не удалось выбрать пользователя");
+      });
+    });
+    el.userGrid.appendChild(card);
+  }
+}
+
+function renderAvatarPicker() {
+  if (!el.avatarPicker) return;
+  el.avatarPicker.innerHTML = "";
+  for (const preset of state.userPresets) {
+    const option = document.createElement("button");
+    option.type = "button";
+    option.className = "avatar-option";
+    option.dataset.presetId = preset.id;
+    const img = document.createElement("img");
+    img.src = preset.url;
+    img.alt = "";
+    option.appendChild(img);
+    option.addEventListener("click", () => {
+      state.userSelectedPreset = preset.id;
+      state.userPhotoDataUrl = "";
+      setText(el.avatarPhotoHint, "");
+      highlightSelectedAvatar();
+    });
+    el.avatarPicker.appendChild(option);
+  }
+  highlightSelectedAvatar();
+}
+
+function highlightSelectedAvatar() {
+  if (!el.avatarPicker) return;
+  for (const option of el.avatarPicker.querySelectorAll(".avatar-option")) {
+    option.classList.toggle(
+      "selected",
+      !state.userPhotoDataUrl && option.dataset.presetId === state.userSelectedPreset
+    );
+  }
+}
+
+function resetUserCreateForm() {
+  if (el.userNameInput) el.userNameInput.value = "";
+  if (el.userConsent) el.userConsent.checked = false;
+  state.userPhotoDataUrl = "";
+  state.userSelectedPreset = state.userPresets.length ? state.userPresets[0].id : "";
+  setText(el.avatarPhotoHint, "");
+  showUserCreateError("");
+  stopAvatarCamera();
+  highlightSelectedAvatar();
+  syncUserCreateSubmit();
+}
+
+function showUserGateView(view, { allowBack = true } = {}) {
+  setHidden(el.userSelectView, view !== "select");
+  setHidden(el.userCreateView, view !== "create");
+  setHidden(el.userCreateBack, view !== "create" || !allowBack);
+  if (view !== "create") stopAvatarCamera();
+}
+
+async function openUserGate() {
+  const data = await fetchJson("/api/users");
+  state.userPresets = data.avatar_presets || [];
+  if (el.consentText && data.consent_text) setText(el.consentText, data.consent_text);
+  renderUserGrid(data.users || []);
+  renderAvatarPicker();
+  resetUserCreateForm();
+  const hasUsers = Boolean(data.users && data.users.length);
+  showUserGateView(hasUsers ? "select" : "create", { allowBack: hasUsers });
+  setHidden(el.userGate, false);
+}
+
+function closeUserGate() {
+  stopAvatarCamera();
+  setHidden(el.userGate, true);
+}
+
+async function selectUser(userId) {
+  const result = await fetchJson(`/api/users/${encodeURIComponent(userId)}/select`, {
+    method: "POST",
+  });
+  state.activeUser = result.user;
+  updateUserChip();
+  updateClockDisplay();
+  closeUserGate();
+  appendLogLine(`[client] active user: ${result.user.name} (${result.user.id})`);
+}
+
+async function startAvatarCamera() {
+  stopAvatarCamera();
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "user" },
+      audio: false,
+    });
+    state.avatarCameraStream = stream;
+    if (el.avatarCameraVideo) el.avatarCameraVideo.srcObject = stream;
+    setHidden(el.avatarCamera, false);
+  } catch (error) {
+    showUserCreateError(`Не удалось открыть камеру: ${error.message || error}`);
+  }
+}
+
+function stopAvatarCamera() {
+  if (state.avatarCameraStream) {
+    for (const track of state.avatarCameraStream.getTracks()) {
+      track.stop();
+    }
+    state.avatarCameraStream = null;
+  }
+  if (el.avatarCameraVideo) el.avatarCameraVideo.srcObject = null;
+  setHidden(el.avatarCamera, true);
+}
+
+function captureAvatarPhoto() {
+  const video = el.avatarCameraVideo;
+  if (!video || !video.videoWidth) {
+    showUserCreateError("Камера ещё не готова, подождите секунду.");
+    return;
+  }
+  const size = 320;
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  const side = Math.min(video.videoWidth, video.videoHeight);
+  const sx = (video.videoWidth - side) / 2;
+  const sy = (video.videoHeight - side) / 2;
+  // Mirror the frame so the saved photo matches what the user saw in preview
+  ctx.translate(size, 0);
+  ctx.scale(-1, 1);
+  ctx.drawImage(video, sx, sy, side, side, 0, 0, size, size);
+  state.userPhotoDataUrl = canvas.toDataURL("image/png");
+  setText(el.avatarPhotoHint, "Фото сделано ✓");
+  showUserCreateError("");
+  stopAvatarCamera();
+  highlightSelectedAvatar();
+}
+
+async function submitUserCreate(event) {
+  event.preventDefault();
+  const name = el.userNameInput ? el.userNameInput.value.trim() : "";
+  showUserCreateError("");
+  setButtonLoading(el.userCreateSubmit, true);
+  try {
+    const result = await fetchJson("/api/users", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name,
+        consent: Boolean(el.userConsent && el.userConsent.checked),
+        avatar_preset: state.userPhotoDataUrl ? "" : state.userSelectedPreset,
+        photo_base64: state.userPhotoDataUrl,
+      }),
+    });
+    await selectUser(result.user.id);
+  } catch (error) {
+    let message = error.message || String(error);
+    try {
+      const parsed = JSON.parse(message);
+      if (parsed && parsed.detail) message = parsed.detail;
+    } catch (_) {
+      // not JSON, keep as-is
+    }
+    showUserCreateError(message);
+  } finally {
+    setButtonLoading(el.userCreateSubmit, false);
+    syncUserCreateSubmit();
+  }
+}
+
+function bindUserGateEvents() {
+  if (state.userGateBound) return;
+  state.userGateBound = true;
+
+  el.userCreateOpen && el.userCreateOpen.addEventListener("click", () => {
+    resetUserCreateForm();
+    showUserGateView("create");
+  });
+  el.userCreateBack && el.userCreateBack.addEventListener("click", () => {
+    showUserGateView("select");
+  });
+  el.userCreateForm && el.userCreateForm.addEventListener("submit", submitUserCreate);
+  el.userNameInput && el.userNameInput.addEventListener("input", syncUserCreateSubmit);
+  el.userConsent && el.userConsent.addEventListener("change", syncUserCreateSubmit);
+  el.avatarPhotoBtn && el.avatarPhotoBtn.addEventListener("click", startAvatarCamera);
+  el.avatarCaptureBtn && el.avatarCaptureBtn.addEventListener("click", captureAvatarPhoto);
+  el.avatarCameraCancel && el.avatarCameraCancel.addEventListener("click", stopAvatarCamera);
+  el.userChip && el.userChip.addEventListener("click", () => {
+    openUserGate().catch((error) => {
+      reportClientError(error, "Не удалось открыть выбор пользователя");
+    });
+  });
+  // Allow dismissing the gate by clicking the backdrop, but only when
+  // someone is already signed in — a user must always be selected.
+  el.userGate && el.userGate.addEventListener("click", (event) => {
+    if (event.target === el.userGate && state.activeUser) closeUserGate();
+  });
+}
+
+async function initUserGate() {
+  bindUserGateEvents();
+  // If the server already has an active user (page reload mid-session),
+  // pick it up silently instead of blocking the UI with the gate again.
+  const data = await fetchJson("/api/users");
+  if (data.active_user) {
+    state.userPresets = data.avatar_presets || [];
+    state.activeUser = data.active_user;
+    updateUserChip();
+    updateClockDisplay();
+    return;
+  }
+  await openUserGate();
+}
+
 function bindEvents() {
   if (!el.assistantForm || !el.assistantInput) {
     throw new Error("required UI elements are missing");
@@ -2185,6 +2985,20 @@ function bindEvents() {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       el.assistantForm.requestSubmit();
+    }
+  });
+  el.assistantInput.addEventListener("input", autoGrowAssistantInput);
+
+  // Composer is collapsed by default; expand on hint click (touch screens)
+  // and collapse back when it loses focus while empty
+  el.composerHint && el.composerHint.addEventListener("click", () => {
+    if (el.composerShell) el.composerShell.classList.add("expanded");
+    el.assistantInput && el.assistantInput.focus();
+  });
+  el.composerShell && el.composerShell.addEventListener("focusout", (event) => {
+    if (!el.composerShell.contains(event.relatedTarget) &&
+        el.assistantInput && !el.assistantInput.value.trim()) {
+      el.composerShell.classList.remove("expanded");
     }
   });
 
@@ -2209,6 +3023,7 @@ function bindEvents() {
 
   setupVoiceRecorder();
   setupWakeWord();
+  bindMainMenuEvents();
 }
 
 async function bootstrap() {
@@ -2226,6 +3041,15 @@ async function bootstrap() {
   installAudioUnlockHandlers();
   bindEvents();
   connectWebSocket();
+  try {
+    await initUserGate();
+  } catch (error) {
+    reportClientError(error, "Не удалось загрузить пользователей");
+  }
+  // Service deep-link: /?results=1 opens the results screen right away
+  if (new URLSearchParams(window.location.search).has("results")) {
+    openResults().catch(() => {});
+  }
   appendLogLine("[client] bootstrap completed");
 }
 

@@ -1,0 +1,5 @@
+﻿__pycache__/
+*.pyc
+runtime/users.json
+runtime/avatars/
+runtime/screenings.jsonl

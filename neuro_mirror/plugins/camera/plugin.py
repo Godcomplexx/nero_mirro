@@ -60,25 +60,22 @@ class CameraPlugin(ProcessorPlugin):
         if action == "start_preview":
             await self._ensure_worker_started()
             self._preview_enabled = True
-            await self._publish_status_message("Предпросмотр камеры включён.")
+            logger.info("[camera] preview enabled")
             return
 
         if action == "stop_preview":
             self._preview_enabled = False
             await self._release_worker_camera()
+            # Technical status — log only, don't show it to the patient
             await self.bus.publish(
                 Event(
                     topic=Topics.UI_UPDATE,
                     source=self.name,
-                    payload={
-                        "preview_image_base64": "",
-                        "message": "Предпросмотр камеры остановлен.",
-                        "assistant_source": "",
-                        "screen": "idle",
-                    },
+                    payload={"preview_image_base64": ""},
                 )
             )
             await self._publish_status_snapshot({"worker_available": True, "camera_available": False})
+            logger.info("[camera] preview stopped")
             return
 
         if action == "release_camera":
@@ -86,7 +83,7 @@ class CameraPlugin(ProcessorPlugin):
             await self._release_worker_camera()
             await self.worker.stop()
             await self._publish_status_snapshot({"worker_available": False, "camera_available": False})
-            await self._publish_status_message("Backend-камера освобождена и worker остановлен.")
+            logger.info("[camera] backend camera released, worker stopped")
 
     async def _capture_for_session(self, payload: dict[str, Any]) -> None:
         mode = str(payload.get("mode") or "")

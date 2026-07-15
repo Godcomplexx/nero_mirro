@@ -26,10 +26,16 @@ class Topics:
     MOCA_STOP = "cmd.moca_stop"
     MOCA_TASK_RESULT = "test.moca_task_result"
     MOCA_TEST_RESULT = "test.moca_result"
+    HADS_START = "cmd.hads_start"
+    HADS_STOP = "cmd.hads_stop"
+    HADS_TEST_RESULT = "test.hads_result"
     REPORT_DATA = "report.data"
+    USER_SELECTED = "user.selected"
     STORAGE_WRITE = "storage.write"
     STORAGE_READ = "storage.read"
     STORAGE_READ_RESULT = "storage.read_result"
+    REQ_STORAGE_QUERY = "req.storage.query"
+    RESP_STORAGE_QUERY = "resp.storage.query"
 
     # Request-reply topics: web layer sends a request, plugin replies
     REQ_ASSISTANT_MESSAGE = "req.assistant.message"

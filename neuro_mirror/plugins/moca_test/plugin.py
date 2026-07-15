@@ -205,6 +205,11 @@ class MocaTestPlugin(ProcessorPlugin):
                 logger.info("moca_test: получен запрос на остановку")
                 self._stop_requested = True
                 self._resolve_pending_tts(False)
+                # Cancel the task outright so a long await (recording,
+                # transcription) doesn't keep the test "running" and
+                # block a restart
+                if self._test_task is not None:
+                    self._test_task.cancel()
             return
 
         if event.topic == Topics.UI_ACTION:
@@ -302,7 +307,9 @@ class MocaTestPlugin(ProcessorPlugin):
             topic=Topics.UI_UPDATE,
             source=self.name,
             payload={
-                "screen": "moca",
+                # On early stop the aggregator has already switched the UI to idle —
+                # don't drag it back to the test screen
+                "screen": "idle" if stopped_early else "moca",
                 "moca_recording": False,
                 "moca_stopped": stopped_early,
                 "message": "Тест прерван." if stopped_early else "Голосовой тест завершён. Обрабатываю результаты...",

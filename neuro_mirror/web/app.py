@@ -24,8 +24,10 @@ from pydantic import BaseModel
 
 from neuro_mirror.app.runtime import RuntimeHandle, create_runtime
 from neuro_mirror.core.settings import Settings
+from neuro_mirror.core.user_profiles import CONSENT_TEXT, PRESET_AVATARS, UserProfileStore
 from neuro_mirror.models.events import Event, Topics
 from neuro_mirror.plugins.ui.web_plugin import WebUIPlugin, WebUIStateStore
+from neuro_mirror.plugins.user_progress.plugin import UserProgressPlugin
 
 _log = logging.getLogger("neuro_mirror.web")
 
@@ -50,6 +52,18 @@ class TTSRequest(BaseModel):
     text: str
 
 
+class UserCreateIn(BaseModel):
+    name: str
+    consent: bool = False
+    avatar_preset: str = ""
+    photo_base64: str = ""
+
+
+class ClientLogIn(BaseModel):
+    level: str = "info"
+    message: str = ""
+
+
 # ---- Minimal application context ----
 
 @dataclass(slots=True)
@@ -58,6 +72,7 @@ class WebAppContext:
     runtime: RuntimeHandle
     state_store: WebUIStateStore
     web_ui: WebUIPlugin
+    user_store: UserProfileStore
 
 
 # ---- Helpers ----
@@ -65,7 +80,7 @@ class WebAppContext:
 async def _wait_for_camera_release(
     state_store: WebUIStateStore,
     *,
-    timeout_seconds: float = 3.0,
+    timeout_seconds: float = 8.0,
 ) -> dict[str, Any]:
     deadline = asyncio.get_running_loop().time() + timeout_seconds
     snapshot: dict[str, Any] = {}
@@ -109,6 +124,11 @@ def create_app() -> FastAPI:
         web_ui = WebUIPlugin(runtime.bus)
         runtime.plugin_manager.register(web_ui)
 
+        user_store = UserProfileStore()
+        runtime.plugin_manager.register(
+            UserProgressPlugin(runtime.bus, user_store=user_store)
+        )
+
         await runtime.start()
         await runtime.bootstrap(auto_start_override=False)
 
@@ -117,6 +137,7 @@ def create_app() -> FastAPI:
             runtime=runtime,
             state_store=web_ui.state_store,
             web_ui=web_ui,
+            user_store=user_store,
         )
         try:
             yield
@@ -162,6 +183,146 @@ def create_app() -> FastAPI:
                 "device_errors": snapshot.get("device_errors") or [],
             }
         )
+
+    # ---- User profiles (личный кабинет) ----
+
+    def _serialize_user(user: dict[str, Any]) -> dict[str, Any]:
+        avatar = user.get("avatar") or {}
+        if avatar.get("type") == "photo":
+            avatar_url = f"/api/users/{user['id']}/avatar"
+        else:
+            preset = avatar.get("value") or PRESET_AVATARS[0]
+            avatar_url = f"/static/assets/avatars/{preset}.svg"
+        return {
+            "id": user.get("id", ""),
+            "name": user.get("name", ""),
+            "avatar_url": avatar_url,
+            "created_at": user.get("created_at", ""),
+            "progress": user.get("progress") or {},
+        }
+
+    @app.get("/api/users")
+    async def list_users() -> JSONResponse:
+        ctx: WebAppContext = app.state.context
+        active = ctx.user_store.get_active_user()
+        return JSONResponse(
+            {
+                "users": [_serialize_user(user) for user in ctx.user_store.list_users()],
+                "active_user": _serialize_user(active) if active else None,
+                "consent_text": CONSENT_TEXT,
+                "avatar_presets": [
+                    {"id": preset, "url": f"/static/assets/avatars/{preset}.svg"}
+                    for preset in PRESET_AVATARS
+                ],
+            }
+        )
+
+    @app.post("/api/users")
+    async def create_user(payload: UserCreateIn) -> JSONResponse:
+        ctx: WebAppContext = app.state.context
+        try:
+            user = ctx.user_store.create_user(
+                payload.name,
+                consent=payload.consent,
+                avatar_preset=payload.avatar_preset.strip(),
+                photo_base64=payload.photo_base64,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        return JSONResponse({"user": _serialize_user(user)}, status_code=201)
+
+    def _next_step_suggestion(user: dict[str, Any]) -> str:
+        """Assistant onboarding: suggest the next step from progress flags."""
+        progress = user.get("progress") or {}
+        if not progress.get("screening_done"):
+            return "Давайте начнём с быстрой диагностики — нажмите «Проверка» внизу экрана."
+        if not progress.get("moca_done"):
+            return "Предлагаю пройти голосовой тест MoCA — нажмите «Тест MoCA» внизу экрана."
+        if progress.get("training_course"):
+            return (
+                f"Продолжим тренировки по курсу «{progress['training_course']}»? "
+                "Откройте «Меню» → «Тренировка»."
+            )
+        return (
+            "Все базовые проверки пройдены. Можно повторить проверку "
+            "или посмотреть «Мои результаты»."
+        )
+
+    @app.post("/api/users/{user_id}/select")
+    async def select_user(user_id: str) -> JSONResponse:
+        ctx: WebAppContext = app.state.context
+        try:
+            user = ctx.user_store.select_user(user_id)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="Пользователь не найден.")
+
+        serialized = _serialize_user(user)
+        await ctx.runtime.bus.publish(
+            Event(
+                topic=Topics.USER_SELECTED,
+                source="web.users",
+                payload={"user_id": user["id"], "user_name": user["name"]},
+            )
+        )
+        greeting = f"Здравствуйте, {user['name']}! {_next_step_suggestion(user)}"
+        await ctx.state_store.apply_update(
+            {
+                "screen": "assistant",
+                "active_user": serialized,
+                "message": greeting,
+                "assistant_source": "ассистент",
+            },
+            source="web.users",
+        )
+        return JSONResponse({"user": serialized})
+
+    @app.get("/api/results")
+    async def user_results() -> JSONResponse:
+        """Stored screening history for the active user (newest first)."""
+        ctx: WebAppContext = app.state.context
+        active = ctx.user_store.get_active_user()
+        if active is None:
+            raise HTTPException(status_code=400, detail="Сначала выберите пользователя.")
+        try:
+            reply = await ctx.runtime.bus.request(
+                Event(
+                    topic=Topics.REQ_STORAGE_QUERY,
+                    source="web.results",
+                    payload={"user_id": active["id"]},
+                ),
+                timeout=10.0,
+            )
+        except asyncio.TimeoutError:
+            raise HTTPException(status_code=504, detail="Хранилище не ответило.")
+
+        items = reply.get("items") or []
+        items.sort(key=lambda item: str(item.get("stored_at") or ""), reverse=True)
+        return JSONResponse({"user": _serialize_user(active), "items": items})
+
+    # ---- Client-side log relay (browser errors go to the server terminal) ----
+
+    _client_log = logging.getLogger("neuro_mirror.web.client")
+
+    @app.post("/api/client-log")
+    async def client_log(payload: ClientLogIn) -> JSONResponse:
+        message = payload.message.strip()[:2000]
+        if message:
+            level = payload.level.lower()
+            if level == "error":
+                _client_log.error("[browser] %s", message)
+            elif level in ("warn", "warning"):
+                _client_log.warning("[browser] %s", message)
+            else:
+                _client_log.info("[browser] %s", message)
+        return JSONResponse({"accepted": True})
+
+    @app.get("/api/users/{user_id}/avatar")
+    async def user_avatar(user_id: str) -> FileResponse:
+        ctx: WebAppContext = app.state.context
+        path = ctx.user_store.avatar_photo_path(user_id)
+        if path is None:
+            raise HTTPException(status_code=404, detail="Аватар не найден.")
+        return FileResponse(path, media_type="image/png")
 
     # ---- Action endpoints (fire-and-forget via EventBus) ----
 

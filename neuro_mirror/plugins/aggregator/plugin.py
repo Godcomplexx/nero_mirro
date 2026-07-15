@@ -16,6 +16,7 @@ class SessionState(str, Enum):
     IDLE = "idle"
     SCREENING = "screening"
     MOCA = "moca"
+    HADS = "hads"
     APPEARANCE = "appearance"
     REPORTING = "reporting"
 
@@ -27,6 +28,8 @@ IGNORED_UI_ACTIONS = {
     "start_voice_capture",
     "stop_voice_capture",
     "moca_tts_finished",
+    "hads_tts_finished",
+    "hads_answer",  # handled by HadsTestPlugin
     "analyze_appearance",  # handled entirely by the browser via /api/appearance/analyze
     "camera_vision_query",  # handled entirely by the browser via /api/assistant/camera-vision
 }
@@ -42,6 +45,9 @@ class AggregatorPlugin(ProcessorPlugin):
         self.history_count = 0
         self._latest_results: dict[str, dict[str, Any]] = {}
         self._pending_capture_mode = ""
+        # True when the HADS test was launched as part of the basic screening
+        # chain (video analysis → anxiety test → combined report)
+        self._screening_chain = False
 
     def subscribed_topics(self) -> tuple[str, ...]:
         return (
@@ -54,6 +60,7 @@ class AggregatorPlugin(ProcessorPlugin):
             Topics.RPPG_RESULT,
             Topics.VOICE_TEST_RESULT,
             Topics.MOCA_TEST_RESULT,
+            Topics.HADS_TEST_RESULT,
             Topics.STORAGE_READ_RESULT,
         )
 
@@ -97,6 +104,11 @@ class AggregatorPlugin(ProcessorPlugin):
         if event.topic == Topics.MOCA_TEST_RESULT:
             self._latest_results["moca"] = event.payload
             await self._finish_moca()
+            return
+
+        if event.topic == Topics.HADS_TEST_RESULT:
+            self._latest_results["hads"] = event.payload
+            await self._finish_hads()
 
     async def _handle_bootstrap(self) -> None:
         await self.bus.publish(
@@ -127,6 +139,25 @@ class AggregatorPlugin(ProcessorPlugin):
 
         if action == "start_screening":
             await self._start_screening()
+            return
+
+        if action == "start_moca":
+            await self._start_moca_standalone()
+            return
+
+        if action == "start_hads":
+            await self._start_hads(chain=False)
+            return
+
+        if action == "stop_hads":
+            await self.bus.publish(Event(topic=Topics.HADS_STOP, source=self.name, payload={}))
+            self.state = SessionState.IDLE
+            self._screening_chain = False
+            await self.bus.publish(Event(
+                topic=Topics.UI_UPDATE,
+                source=self.name,
+                payload={"screen": "idle", "message": "Тест на тревожность прерван."},
+            ))
             return
 
         if action == "stop_moca":
@@ -283,7 +314,7 @@ class AggregatorPlugin(ProcessorPlugin):
         self.state = SessionState.IDLE
 
     async def _maybe_finish_screening(self) -> None:
-        """Called when face scan result arrives — show heart rate, then launch MoCA."""
+        """Called when face scan result arrives — show heart rate, then launch HADS."""
         import asyncio
         if self.state != SessionState.SCREENING:
             logger.info("[aggregator] _maybe_finish_screening skipped: state=%s", self.state)
@@ -293,7 +324,7 @@ class AggregatorPlugin(ProcessorPlugin):
             return
 
         # Guard against double-entry (e.g. second ANALYSIS_RESULT arriving during sleep)
-        self.state = SessionState.MOCA
+        self.state = SessionState.HADS
 
         video = self._latest_results["video"]
         hr_bpm = video.get("heart_rate_bpm")
@@ -311,7 +342,7 @@ class AggregatorPlugin(ProcessorPlugin):
         else:
             hr_line = "Пульс не удалось измерить."
 
-        # Show heart rate result on screening screen before switching to MoCA
+        # Show heart rate result on screening screen before switching to HADS
         await self.bus.publish(
             Event(
                 topic=Topics.UI_UPDATE,
@@ -320,7 +351,7 @@ class AggregatorPlugin(ProcessorPlugin):
                     "screen": "screening",
                     "message": (
                         f"Видео-скрининг завершён. {hr_line} "
-                        "Через несколько секунд начнётся голосовой тест MoCA."
+                        "Через несколько секунд начнётся тест на тревожность."
                     ),
                     "heart_rate_bpm": hr_bpm,
                     "heart_rate_status": hr_status,
@@ -330,8 +361,17 @@ class AggregatorPlugin(ProcessorPlugin):
             )
         )
 
-        # Give the patient 4 seconds to see the heart rate result
-        await asyncio.sleep(4.0)
+        # Give the patient time to see and hear the heart rate result
+        # before the anxiety test takes over the screen and the speaker
+        await asyncio.sleep(8.0)
+
+        await self._start_hads(chain=True)
+
+    async def _start_moca_standalone(self) -> None:
+        """Launch the MoCA voice test directly from the main menu."""
+        self.state = SessionState.MOCA
+        self._latest_results.pop("moca", None)
+        self._screening_chain = False
 
         await self.bus.publish(
             Event(
@@ -340,21 +380,124 @@ class AggregatorPlugin(ProcessorPlugin):
                 payload={
                     "screen": "moca",
                     "message": (
-                        "Скрининг лица завершён. "
-                        "Сейчас начнётся голосовой тест — следуйте инструкциям."
+                        "Сейчас начнётся голосовой тест MoCA — следуйте инструкциям."
                     ),
                     "moca_task_index": 0,
                     "moca_task_total": 11,
                 },
             )
         )
+        await self.bus.publish(Event(topic=Topics.MOCA_START, source=self.name, payload={}))
+
+    async def _start_hads(self, *, chain: bool) -> None:
+        """Launch the HADS anxiety/depression test.
+
+        ``chain=True`` means it runs as the second step of the basic screening
+        and the final report should combine video + HADS results.
+        """
+        self.state = SessionState.HADS
+        self._screening_chain = chain
+        if not chain:
+            self._latest_results.pop("video", None)
+        self._latest_results.pop("hads", None)
+
         await self.bus.publish(
             Event(
-                topic=Topics.MOCA_START,
+                topic=Topics.UI_UPDATE,
                 source=self.name,
-                payload={},
+                payload={
+                    "screen": "hads",
+                    "message": (
+                        "Начинается тест на тревожность и депрессию (HADS). "
+                        "Отвечайте голосом или нажимайте на вариант ответа."
+                    ),
+                    "hads_question_index": 0,
+                    "hads_question_total": 14,
+                },
             )
         )
+        await self.bus.publish(Event(topic=Topics.HADS_START, source=self.name, payload={}))
+
+    async def _finish_hads(self) -> None:
+        """Called when the HADS result arrives — publish the report."""
+        if self.state != SessionState.HADS:
+            return
+
+        self.state = SessionState.REPORTING
+        chained = self._screening_chain
+        self._screening_chain = False
+
+        video = self._latest_results.get("video", {})
+        hads = self._latest_results.get("hads", {})
+
+        hads_domains = {
+            "hads_anxiety_score": hads.get("anxiety_score"),
+            "hads_anxiety_max": hads.get("anxiety_max"),
+            "hads_depression_score": hads.get("depression_score"),
+            "hads_depression_max": hads.get("depression_max"),
+            "hads_answered_count": hads.get("answered_count"),
+            "hads_question_count": hads.get("question_count"),
+        }
+        hads_summary = {
+            "hads_anxiety_interpretation": hads.get("anxiety_interpretation", ""),
+            "hads_depression_interpretation": hads.get("depression_interpretation", ""),
+            "hads_notes": hads.get("notes", ""),
+        }
+
+        if chained:
+            report_payload = {
+                "report_type": "screening",
+                "state": "needs_review",
+                "domains": {
+                    "attention": video.get("attention_score"),
+                    "gaze": video.get("gaze_stability"),
+                    "heart_rate_bpm": video.get("heart_rate_bpm"),
+                    "heart_rate_status": video.get("heart_rate_status"),
+                    "heart_rate_algorithm": video.get("heart_rate_algorithm"),
+                    **hads_domains,
+                },
+                "summary": hads_summary,
+                "sources": {"video": video, "hads": hads},
+            }
+            anx = hads.get("anxiety_score")
+            dep = hads.get("depression_score")
+            message = (
+                "Базовый скрининг завершён. "
+                f"Тревога: {anx} из 21 ({hads.get('anxiety_interpretation', '')}). "
+                f"Депрессия: {dep} из 21 ({hads.get('depression_interpretation', '')})."
+            )
+        else:
+            report_payload = {
+                "report_type": "hads",
+                "state": "completed",
+                "domains": hads_domains,
+                "summary": hads_summary,
+                "sources": {"hads": hads},
+            }
+            message = (
+                "Тест на тревожность завершён. "
+                f"Тревога: {hads.get('anxiety_score')} из 21 "
+                f"({hads.get('anxiety_interpretation', '')}). "
+                f"Депрессия: {hads.get('depression_score')} из 21 "
+                f"({hads.get('depression_interpretation', '')})."
+            )
+
+        await self.bus.publish(Event(topic=Topics.REPORT_DATA, source=self.name, payload=report_payload))
+        await self.bus.publish(Event(topic=Topics.STORAGE_WRITE, source=self.name, payload=report_payload))
+        await self.bus.publish(
+            Event(
+                topic=Topics.UI_UPDATE,
+                source=self.name,
+                payload={
+                    "screen": "summary",
+                    "message": message,
+                    "report": report_payload,
+                    "assistant_source": "тест HADS" if not chained else "скрининг",
+                },
+            )
+        )
+
+        self.state = SessionState.IDLE
 
     async def _finish_moca(self) -> None:
         """Called when MoCA test result arrives — compile and publish final report."""
@@ -367,7 +510,7 @@ class AggregatorPlugin(ProcessorPlugin):
         moca = self._latest_results.get("moca", {})
 
         report_payload = {
-            "report_type": "screening",
+            "report_type": "moca",
             "state": "needs_review",
             "domains": {
                 "attention": video.get("attention_score"),
@@ -399,9 +542,9 @@ class AggregatorPlugin(ProcessorPlugin):
                 source=self.name,
                 payload={
                     "screen": "summary",
-                    "message": "Скрининг завершён. Все задания выполнены.",
+                    "message": "Тест MoCA завершён. Все задания выполнены.",
                     "report": report_payload,
-                    "assistant_source": "скрининг MoCA",
+                    "assistant_source": "тест MoCA",
                 },
             )
         )
