@@ -6,6 +6,7 @@ from pathlib import Path
 
 from neuro_mirror.interfaces.storage import StoragePluginBase
 from neuro_mirror.models.events import Event, Topics
+from neuro_mirror.version import APP_VERSION, SCENARIO_VERSIONS
 
 
 class StoragePlugin(StoragePluginBase):
@@ -34,10 +35,13 @@ class StoragePlugin(StoragePluginBase):
             return
 
         if event.topic == Topics.STORAGE_WRITE:
+            report_type = str(event.payload.get("report_type") or "")
             item = {
                 **self._active_user,
                 **event.payload,
                 "stored_at": datetime.now(UTC).isoformat(),
+                "app_version": APP_VERSION,
+                "scenario_version": SCENARIO_VERSIONS.get(report_type, ""),
             }
             self._items.append(item)
             self._append_item(item)

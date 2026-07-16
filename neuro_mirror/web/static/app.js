@@ -138,6 +138,12 @@ const el = {
   resultsList: $("results-list"),
   resultsSub: $("results-sub"),
   resultsClose: $("results-close"),
+  checkPanel: $("check-panel"),
+  checkSub: $("check-sub"),
+  checkStatus: $("check-status"),
+  checkStart: $("check-start"),
+  checkRetry: $("check-retry"),
+  checkCancel: $("check-cancel"),
   hadsPanel: $("hads-panel"),
   hadsPart: $("hads-part"),
   hadsProgressFill: $("hads-progress-fill"),
@@ -1346,6 +1352,7 @@ function resultInterpretations(item) {
     summary.hads_depression_interpretation,
     summary.moca_interpretation,
     summary.hads_notes,
+    summary.limitations,
   ].filter(Boolean).join(" · ");
 }
 
@@ -1418,6 +1425,338 @@ function closeResults() {
   setHidden(el.resultsPanel, true);
 }
 
+// ---- Контроль условий сессии (ТЗ 6.3.2) ----
+
+// Какие проверки нужны каждому сценарию; required — без чего запуск заблокирован
+const CHECK_REQUIREMENTS = {
+  screening: { camera: true, face: true, mic: true, voice: true, required: ["camera", "face"] },
+  moca: { camera: false, face: false, mic: true, voice: true, required: ["mic", "voice"] },
+  // HADS можно пройти нажатием — микрофон желателен, но не обязателен
+  hads: { camera: false, face: false, mic: true, voice: true, required: [] },
+};
+
+const CHECK_NAMES = ["camera", "face", "mic", "voice"];
+
+const sessionCheck = {
+  scenario: null,
+  results: {},
+  running: false,
+  audioStream: null,
+  audioCtx: null,
+  analyser: null,
+};
+
+function checkItemEl(name) {
+  return document.querySelector(`.check-item[data-check="${name}"]`);
+}
+
+function setCheckItem(name, checkState, note) {
+  const item = checkItemEl(name);
+  if (item) {
+    setHidden(item, false);
+    const icon = item.querySelector(".check-icon");
+    if (icon) icon.dataset.state = checkState;
+  }
+  const noteEl = $(`check-note-${name}`);
+  if (noteEl) setText(noteEl, note || "");
+  sessionCheck.results[name] = {
+    ...(sessionCheck.results[name] || {}),
+    state: checkState,
+    note: note || "",
+  };
+}
+
+async function openSessionCheck(scenario) {
+  if (!el.checkPanel) return;
+  sessionCheck.scenario = scenario;
+  sessionCheck.results = {};
+
+  const req = CHECK_REQUIREMENTS[scenario] || CHECK_REQUIREMENTS.hads;
+  for (const name of CHECK_NAMES) {
+    const item = checkItemEl(name);
+    if (item) {
+      setHidden(item, !req[name]);
+      const icon = item.querySelector(".check-icon");
+      if (icon) icon.dataset.state = "idle";
+    }
+    const noteEl = $(`check-note-${name}`);
+    if (noteEl) setText(noteEl, "");
+  }
+  setText(el.checkStatus, "");
+  setDisabled(el.checkStart, true);
+  setHidden(el.checkRetry, true);
+  setHidden(el.checkPanel, false);
+
+  runSessionChecks().catch((error) => {
+    setText(el.checkStatus, `Ошибка проверки: ${error.message || error}`);
+    setHidden(el.checkRetry, false);
+  });
+}
+
+function closeSessionCheck() {
+  stopCheckAudio();
+  setHidden(el.checkPanel, true);
+}
+
+async function runSessionChecks() {
+  if (sessionCheck.running) return;
+  sessionCheck.running = true;
+  const req = CHECK_REQUIREMENTS[sessionCheck.scenario] || CHECK_REQUIREMENTS.hads;
+  try {
+    if (req.camera) await checkCameraAndFace();
+    if (req.mic) await checkMicAndNoise();
+    if (req.voice) await checkVoiceSample();
+  } finally {
+    stopCheckAudio();
+    sessionCheck.running = false;
+  }
+  finalizeSessionCheck();
+}
+
+function captureCameraFrame() {
+  const video = el.cameraPreview;
+  if (!video || !video.videoWidth) return "";
+  const width = Math.min(640, video.videoWidth);
+  const height = Math.round(video.videoHeight * (width / video.videoWidth));
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  canvas.getContext("2d").drawImage(video, 0, 0, width, height);
+  return canvas.toDataURL("image/jpeg", 0.85);
+}
+
+async function checkCameraAndFace() {
+  setCheckItem("camera", "wait", "Включаю камеру...");
+  if (!state.cameraActive) {
+    try {
+      await toggleCamera();
+    } catch (_) {
+      // toggleCamera сам показывает ошибку
+    }
+  }
+  if (!state.cameraActive) {
+    setCheckItem("camera", "fail", "Камера недоступна. Проверьте подключение и разрешение в браузере.");
+    setCheckItem("face", "fail", "Без камеры проверить лицо и свет нельзя.");
+    return;
+  }
+  setCheckItem("camera", "ok", "Камера работает");
+
+  setCheckItem("face", "wait", "Смотрю на кадр...");
+  // Пауза, чтобы автоэкспозиция камеры успела подстроиться
+  await new Promise((resolve) => setTimeout(resolve, 900));
+  const frame = captureCameraFrame();
+  if (!frame) {
+    setCheckItem("face", "fail", "Не удалось получить кадр с камеры.");
+    return;
+  }
+  let data;
+  try {
+    data = await fetchJson("/api/session/check-face", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ image_base64: frame }),
+    });
+  } catch (error) {
+    setCheckItem("face", "fail", `Проверка кадра не удалась: ${error.message || error}`);
+    return;
+  }
+  sessionCheck.results.face = { ...(sessionCheck.results.face || {}), data };
+
+  const advice = (data.advice || []).join(" ");
+  if (data.face_detected && data.brightness_ok && data.face_close_enough) {
+    setCheckItem("face", "ok", advice || "Лицо видно, света достаточно");
+  } else if (data.face_detected && data.brightness_ok) {
+    // Только дистанция — предупреждение, не блокируем
+    setCheckItem("face", "warn", advice || "Приблизьтесь к экрану.");
+  } else {
+    setCheckItem("face", "fail", advice || "Поправьте положение и освещение, затем проверьте снова.");
+  }
+}
+
+function setupCheckAnalyser(stream) {
+  const AudioCtor = window.AudioContext || window.webkitAudioContext;
+  if (!AudioCtor) return false;
+  sessionCheck.audioCtx = new AudioCtor();
+  const source = sessionCheck.audioCtx.createMediaStreamSource(stream);
+  sessionCheck.analyser = sessionCheck.audioCtx.createAnalyser();
+  sessionCheck.analyser.fftSize = 2048;
+  source.connect(sessionCheck.analyser);
+  return true;
+}
+
+function stopCheckAudio() {
+  if (sessionCheck.audioStream) {
+    for (const track of sessionCheck.audioStream.getTracks()) track.stop();
+    sessionCheck.audioStream = null;
+  }
+  if (sessionCheck.audioCtx) {
+    sessionCheck.audioCtx.close().catch(() => {});
+    sessionCheck.audioCtx = null;
+  }
+  sessionCheck.analyser = null;
+}
+
+async function measureRms(durationMs, mode) {
+  const analyser = sessionCheck.analyser;
+  if (!analyser) return 0;
+  const buffer = new Uint8Array(analyser.fftSize);
+  const samples = [];
+  const deadline = Date.now() + durationMs;
+  while (Date.now() < deadline) {
+    analyser.getByteTimeDomainData(buffer);
+    let sum = 0;
+    for (const value of buffer) {
+      const centered = (value - 128) / 128;
+      sum += centered * centered;
+    }
+    samples.push(Math.sqrt(sum / buffer.length));
+    await new Promise((resolve) => setTimeout(resolve, 60));
+  }
+  if (samples.length === 0) return 0;
+  if (mode === "peak") return Math.max(...samples);
+  return samples.reduce((a, b) => a + b, 0) / samples.length;
+}
+
+async function checkMicAndNoise() {
+  setCheckItem("mic", "wait", "Проверяю микрофон...");
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (error) {
+    setCheckItem("mic", "fail", "Микрофон недоступен. Проверьте подключение и разрешение в браузере.");
+    setCheckItem("voice", "fail", "Без микрофона проба голоса невозможна.");
+    return;
+  }
+  sessionCheck.audioStream = stream;
+  if (!setupCheckAnalyser(stream)) {
+    setCheckItem("mic", "warn", "Микрофон подключён, но замерить уровень звука не удалось.");
+    return;
+  }
+
+  setCheckItem("mic", "wait", "Побудьте в тишине — замеряю фоновый шум...");
+  const noise = await measureRms(1800, "avg");
+  sessionCheck.results.mic = { ...(sessionCheck.results.mic || {}), noise };
+
+  if (noise < 0.025) {
+    setCheckItem("mic", "ok", "Микрофон работает, фон тихий");
+  } else if (noise < 0.06) {
+    setCheckItem("mic", "warn", "Слышен фоновый шум — по возможности уберите его.");
+  } else {
+    setCheckItem("mic", "warn", "Сильный фоновый шум — выключите телевизор или музыку.");
+  }
+}
+
+async function checkVoiceSample() {
+  if (!sessionCheck.analyser) {
+    if ((sessionCheck.results.voice || {}).state !== "fail") {
+      setCheckItem("voice", "fail", "Проба голоса недоступна без микрофона.");
+    }
+    return;
+  }
+  setCheckItem("voice", "wait", "Скажите вслух: «раз, два, три»");
+  const voice = await measureRms(4000, "peak");
+  const noise = (sessionCheck.results.mic || {}).noise || 0;
+  sessionCheck.results.voice = { ...(sessionCheck.results.voice || {}), level: voice };
+
+  if (voice > Math.max(0.04, noise * 2.2)) {
+    setCheckItem("voice", "ok", "Голос слышно хорошо");
+  } else {
+    setCheckItem("voice", "fail", "Голос слишком тихий — сядьте ближе, говорите громче и проверьте снова.");
+  }
+}
+
+function finalizeSessionCheck() {
+  const req = CHECK_REQUIREMENTS[sessionCheck.scenario] || CHECK_REQUIREMENTS.hads;
+  const stateOf = (name) => (sessionCheck.results[name] || {}).state || "idle";
+  const failedRequired = req.required.filter((name) => stateOf(name) === "fail");
+  const anyFail = CHECK_NAMES.some((name) => req[name] && stateOf(name) === "fail");
+
+  setHidden(el.checkRetry, false);
+  if (failedRequired.length > 0) {
+    setDisabled(el.checkStart, true);
+    setText(el.checkStatus, "Исправьте отмеченное красным и нажмите «Проверить снова».");
+    return;
+  }
+  setDisabled(el.checkStart, false);
+  if (anyFail && sessionCheck.scenario === "hads") {
+    setText(el.checkStatus, "Голос недоступен — можно начинать, отвечать будете нажатием на варианты.");
+  } else if (anyFail) {
+    setText(el.checkStatus, "Часть проверок не пройдена — результат может быть ограничен.");
+  } else {
+    setText(el.checkStatus, "Всё готово — нажмите «Начать тест».");
+  }
+}
+
+function collectSessionConditions() {
+  const stateOf = (name) => (sessionCheck.results[name] || {}).state || "skipped";
+  const faceData = (sessionCheck.results.face || {}).data || {};
+  const req = CHECK_REQUIREMENTS[sessionCheck.scenario] || {};
+  const conditions = {
+    scenario: sessionCheck.scenario,
+    checked_at: new Date().toISOString(),
+  };
+  if (req.camera) {
+    conditions.camera_ok = stateOf("camera") === "ok";
+    conditions.face_detected = Boolean(faceData.face_detected);
+    conditions.face_close_enough = Boolean(faceData.face_close_enough);
+    conditions.brightness = faceData.brightness ?? null;
+    conditions.brightness_ok = Boolean(faceData.brightness_ok);
+  }
+  if (req.mic) {
+    conditions.mic_ok = stateOf("mic") !== "fail";
+    conditions.noise_level = Number(((sessionCheck.results.mic || {}).noise || 0).toFixed(4));
+    conditions.noise_ok = stateOf("mic") === "ok";
+  }
+  if (req.voice) {
+    conditions.voice_ok = stateOf("voice") === "ok";
+    conditions.voice_level = Number(((sessionCheck.results.voice || {}).level || 0).toFixed(4));
+  }
+  return conditions;
+}
+
+async function startCheckedTest() {
+  const scenario = sessionCheck.scenario;
+  const conditions = collectSessionConditions();
+  closeSessionCheck();
+  try {
+    await unlockAudioPlayback();
+  } catch (_) {}
+  try {
+    switch (scenario) {
+      case "screening":
+        await startScreening(conditions);
+        break;
+      case "moca":
+        await fetchJson("/api/actions/start_moca", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ session_conditions: conditions }),
+        });
+        break;
+      case "hads":
+        await fetchJson("/api/actions/start_hads", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ session_conditions: conditions }),
+        });
+        break;
+      default:
+        break;
+    }
+  } catch (error) {
+    setText(el.messageValue, `Не удалось запустить тест: ${error.message || error}`);
+    appendLogLine(`[check] start ${scenario} error: ${error.message || error}`);
+  }
+}
+
+function bindSessionCheckEvents() {
+  el.checkStart && el.checkStart.addEventListener("click", startCheckedTest);
+  el.checkRetry && el.checkRetry.addEventListener("click", () => {
+    openSessionCheck(sessionCheck.scenario);
+  });
+  el.checkCancel && el.checkCancel.addEventListener("click", closeSessionCheck);
+}
+
 // ---- Main menu ----
 
 function openMainMenu() {
@@ -1434,22 +1773,12 @@ async function handleMenuAction(item) {
   closeMainMenu();
   try {
     switch (item) {
+      // Тесты запускаются только через проверку условий сессии (ТЗ 6.3.2)
       case "screening":
-        // One-tap flow for elderly users: turn the camera on automatically
-        if (!state.cameraActive) {
-          await toggleCamera();
-        }
-        if (state.cameraActive) {
-          await startScreening();
-        }
-        break;
       case "moca":
-        await unlockAudioPlayback().catch(() => {});
-        await fetchJson("/api/actions/start_moca", { method: "POST" });
-        break;
       case "hads":
         await unlockAudioPlayback().catch(() => {});
-        await fetchJson("/api/actions/start_hads", { method: "POST" });
+        await openSessionCheck(item);
         break;
       case "training":
         setText(el.messageValue, "Режим «Тренировка» пока в разработке.");
@@ -1459,10 +1788,14 @@ async function handleMenuAction(item) {
         break;
       case "about": {
         const config = state.config || {};
+        const scenarios = config.scenario_versions || {};
         const parts = [
-          "Neuro Mirror — программный комплекс когнитивного скрининга.",
+          `«Нейро-зеркало» — версия ${config.app_version || "?"}.`,
+          scenarios.screening ? `Сценарий скрининга ${scenarios.screening},` : "",
+          scenarios.moca ? `MoCA ${scenarios.moca},` : "",
+          scenarios.hads ? `HADS ${scenarios.hads}.` : "",
           config.assistant_backend_label ? `Ассистент: ${config.assistant_backend_label}.` : "",
-          config.weather_source_label ? `Погода: ${config.weather_source_label}.` : "",
+          "Результаты являются скрининговой информацией и не заменяют консультацию врача.",
         ].filter(Boolean);
         setText(el.messageValue, parts.join(" "));
         break;
@@ -1493,6 +1826,7 @@ function bindMainMenuEvents() {
   el.resultsPanel && el.resultsPanel.addEventListener("click", (event) => {
     if (event.target === el.resultsPanel) closeResults();
   });
+  bindSessionCheckEvents();
 }
 
 function cleanupSpeechAudio() {
@@ -1980,7 +2314,7 @@ async function submitAssistantMessage(event) {
   }
 }
 
-async function startScreening() {
+async function startScreening(sessionConditions) {
   try {
     await unlockAudioPlayback();
   } catch (_) {}
@@ -1995,7 +2329,11 @@ async function startScreening() {
   setButtonLoading(el.screeningButton, true);
   try {
     // Tell server screening is starting (shows screening screen on UI)
-    await fetchJson("/api/actions/start_screening", { method: "POST" });
+    await fetchJson("/api/actions/start_screening", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_conditions: sessionConditions || null }),
+    });
   } catch (error) {
     setText(el.messageValue, `Screening start failed: ${error.message || error}`);
     appendLogLine(`[client] screening error: ${error.message || error}`);
@@ -3031,8 +3369,23 @@ async function bootstrap() {
   updateClockDisplay();
   window.setInterval(updateClockDisplay, 1000);
   await loadConfig();
-  await loadDevices();
-  await setupLive2D();
+  try {
+    await loadDevices();
+  } catch (error) {
+    appendLogLine(`[client] loadDevices failed (continuing): ${error.message || error}`);
+  }
+  // Live2D грузится с внешнего CDN — без интернета он не должен
+  // блокировать запуск зеркала (останется статичная картинка маскота)
+  try {
+    await Promise.race([
+      setupLive2D(),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("live2d load timeout")), 8000)
+      ),
+    ]);
+  } catch (error) {
+    appendLogLine(`[client] live2d unavailable (continuing): ${error.message || error}`);
+  }
   setButtonLabel(el.cameraToggle, "Turn camera on");
   setButtonLabel(el.appearanceButton, "Analyze appearance");
   appendLogLine("[client] requesting /api/state");
@@ -3046,9 +3399,15 @@ async function bootstrap() {
   } catch (error) {
     reportClientError(error, "Не удалось загрузить пользователей");
   }
-  // Service deep-link: /?results=1 opens the results screen right away
-  if (new URLSearchParams(window.location.search).has("results")) {
+  // Service deep-links: /?results=1 opens the results screen,
+  // /?check=<scenario> opens the session-conditions check right away
+  const searchParams = new URLSearchParams(window.location.search);
+  if (searchParams.has("results")) {
     openResults().catch(() => {});
+  }
+  const checkScenario = searchParams.get("check");
+  if (checkScenario && CHECK_REQUIREMENTS[checkScenario]) {
+    openSessionCheck(checkScenario).catch(() => {});
   }
   appendLogLine("[client] bootstrap completed");
 }
