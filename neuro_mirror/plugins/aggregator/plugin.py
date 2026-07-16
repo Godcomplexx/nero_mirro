@@ -48,6 +48,8 @@ class AggregatorPlugin(ProcessorPlugin):
         # True when the HADS test was launched as part of the basic screening
         # chain (video analysis → anxiety test → combined report)
         self._screening_chain = False
+        # Результаты последней проверки условий сессии (ТЗ 6.3.2)
+        self._session_conditions: dict[str, Any] = {}
 
     def subscribed_topics(self) -> tuple[str, ...]:
         return (
@@ -136,6 +138,13 @@ class AggregatorPlugin(ProcessorPlugin):
 
         if action in IGNORED_UI_ACTIONS:
             return
+
+        # Результаты проверки условий приходят вместе с командой запуска
+        conditions = payload.get("session_conditions")
+        if action.startswith("start_") and isinstance(conditions, dict):
+            self._session_conditions = conditions
+        elif action.startswith("start_"):
+            self._session_conditions = {}
 
         if action == "start_screening":
             await self._start_screening()
@@ -418,6 +427,27 @@ class AggregatorPlugin(ProcessorPlugin):
         )
         await self.bus.publish(Event(topic=Topics.HADS_START, source=self.name, payload={}))
 
+    def _conditions_limitation(self) -> str:
+        """Пометка об ограничении результата условиями (ТЗ 6.3.10)."""
+        conditions = self._session_conditions
+        if not conditions:
+            return ""
+        problems = []
+        if conditions.get("brightness_ok") is False:
+            problems.append("слабое освещение")
+        if conditions.get("face_detected") is False:
+            problems.append("лицо не было видно при проверке")
+        if conditions.get("noise_ok") is False:
+            problems.append("фоновый шум")
+        if conditions.get("voice_ok") is False:
+            problems.append("тихий голос")
+        if not problems:
+            return ""
+        return (
+            "Результат может быть ограничен условиями прохождения: "
+            + ", ".join(problems) + "."
+        )
+
     async def _finish_hads(self) -> None:
         """Called when the HADS result arrives — publish the report."""
         if self.state != SessionState.HADS:
@@ -442,12 +472,14 @@ class AggregatorPlugin(ProcessorPlugin):
             "hads_anxiety_interpretation": hads.get("anxiety_interpretation", ""),
             "hads_depression_interpretation": hads.get("depression_interpretation", ""),
             "hads_notes": hads.get("notes", ""),
+            "limitations": self._conditions_limitation(),
         }
 
         if chained:
             report_payload = {
                 "report_type": "screening",
                 "state": "needs_review",
+                "session_conditions": dict(self._session_conditions),
                 "domains": {
                     "attention": video.get("attention_score"),
                     "gaze": video.get("gaze_stability"),
@@ -470,6 +502,7 @@ class AggregatorPlugin(ProcessorPlugin):
             report_payload = {
                 "report_type": "hads",
                 "state": "completed",
+                "session_conditions": dict(self._session_conditions),
                 "domains": hads_domains,
                 "summary": hads_summary,
                 "sources": {"hads": hads},
@@ -512,6 +545,7 @@ class AggregatorPlugin(ProcessorPlugin):
         report_payload = {
             "report_type": "moca",
             "state": "needs_review",
+            "session_conditions": dict(self._session_conditions),
             "domains": {
                 "attention": video.get("attention_score"),
                 "gaze": video.get("gaze_stability"),
@@ -527,6 +561,7 @@ class AggregatorPlugin(ProcessorPlugin):
             "summary": {
                 "moca_interpretation": moca.get("interpretation", ""),
                 "moca_notes": moca.get("notes", ""),
+                "limitations": self._conditions_limitation(),
             },
             "sources": {
                 "video": video,

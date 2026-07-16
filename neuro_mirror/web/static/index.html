@@ -10,7 +10,7 @@
       href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Manrope:wght@300;400;500;600;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="/static/styles.css?v=20260715j" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260715m" />
   </head>
   <body data-ui-state="idle">
     <div class="stage-shell">
@@ -315,6 +315,50 @@
         </div>
       </div>
 
+      <!-- Подготовка к тесту: контроль условий сессии -->
+      <div class="check-panel" id="check-panel" hidden>
+        <div class="check-inner">
+          <h2 class="user-gate-title">Подготовка к тесту</h2>
+          <p class="user-gate-sub" id="check-sub">Проверяю камеру, свет и звук — это займёт несколько секунд</p>
+          <ul class="check-list" id="check-list">
+            <li class="check-item" data-check="camera" hidden>
+              <span class="check-icon" data-state="wait"></span>
+              <div class="check-copy">
+                <strong>Камера</strong>
+                <span class="check-note" id="check-note-camera"></span>
+              </div>
+            </li>
+            <li class="check-item" data-check="face" hidden>
+              <span class="check-icon" data-state="wait"></span>
+              <div class="check-copy">
+                <strong>Лицо в кадре и освещение</strong>
+                <span class="check-note" id="check-note-face"></span>
+              </div>
+            </li>
+            <li class="check-item" data-check="mic" hidden>
+              <span class="check-icon" data-state="wait"></span>
+              <div class="check-copy">
+                <strong>Микрофон и тишина</strong>
+                <span class="check-note" id="check-note-mic"></span>
+              </div>
+            </li>
+            <li class="check-item" data-check="voice" hidden>
+              <span class="check-icon" data-state="wait"></span>
+              <div class="check-copy">
+                <strong>Проба голоса</strong>
+                <span class="check-note" id="check-note-voice"></span>
+              </div>
+            </li>
+          </ul>
+          <p class="check-status" id="check-status"></p>
+          <div class="check-actions">
+            <button type="button" class="icon-btn primary-btn" id="check-start" disabled><span>Начать тест</span></button>
+            <button type="button" class="icon-btn" id="check-retry" hidden><span>Проверить снова</span></button>
+            <button type="button" class="icon-btn" id="check-cancel"><span>Отмена</span></button>
+          </div>
+        </div>
+      </div>
+
       <!-- Тест на тревожность (HADS) -->
       <div class="hads-panel" id="hads-panel" hidden>
         <div class="hads-inner">
@@ -389,6 +433,6 @@
       </div>
     </div>
 
-    <script src="/static/app.js?v=20260715j" defer></script>
+    <script src="/static/app.js?v=20260715m" defer></script>
   </body>
 </html>

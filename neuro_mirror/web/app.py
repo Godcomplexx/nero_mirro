@@ -28,6 +28,7 @@ from neuro_mirror.core.user_profiles import CONSENT_TEXT, PRESET_AVATARS, UserPr
 from neuro_mirror.models.events import Event, Topics
 from neuro_mirror.plugins.ui.web_plugin import WebUIPlugin, WebUIStateStore
 from neuro_mirror.plugins.user_progress.plugin import UserProgressPlugin
+from neuro_mirror.version import APP_VERSION, SCENARIO_VERSIONS
 
 _log = logging.getLogger("neuro_mirror.web")
 
@@ -62,6 +63,10 @@ class UserCreateIn(BaseModel):
 class ClientLogIn(BaseModel):
     level: str = "info"
     message: str = ""
+
+
+class SessionFrameIn(BaseModel):
+    image_base64: str
 
 
 # ---- Minimal application context ----
@@ -169,6 +174,8 @@ def create_app() -> FastAPI:
                 "live2d_cubism_core_url": ctx.settings.web_live2d_cubism_core_url,
                 "weather_source_label": ctx.runtime.weather_source_label,
                 "assistant_backend_label": ctx.runtime.assistant_backend_label,
+                "app_version": APP_VERSION,
+                "scenario_versions": SCENARIO_VERSIONS,
             }
         )
 
@@ -298,6 +305,25 @@ def create_app() -> FastAPI:
         items = reply.get("items") or []
         items.sort(key=lambda item: str(item.get("stored_at") or ""), reverse=True)
         return JSONResponse({"user": _serialize_user(active), "items": items})
+
+    # ---- Session conditions check (ТЗ 6.3.2): face / lighting / distance ----
+
+    @app.post("/api/session/check-face")
+    async def session_check_face(payload: SessionFrameIn) -> JSONResponse:
+        import base64 as _base64
+
+        from neuro_mirror.screening.session_check import analyze_frame_conditions
+
+        stripped = payload.image_base64.split(",", 1)[-1].strip()
+        try:
+            jpeg_bytes = _base64.b64decode(stripped, validate=True)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Некорректное изображение.")
+        if len(jpeg_bytes) > 8 * 1024 * 1024:
+            raise HTTPException(status_code=400, detail="Кадр слишком большой.")
+
+        result = await asyncio.to_thread(analyze_frame_conditions, jpeg_bytes)
+        return JSONResponse(result)
 
     # ---- Client-side log relay (browser errors go to the server terminal) ----
 
