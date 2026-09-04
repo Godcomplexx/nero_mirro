@@ -149,7 +149,7 @@ python main.py
 | `NEURO_MIRROR_CAMERA_INDEX` | `0` | Индекс камеры |
 | `NEURO_MIRROR_TTS_VOICE` | `ru-RU-SvetlanaNeural` | Голос озвучки |
 | `NEURO_MIRROR_TTS_RATE` | `+0%` | Скорость речи |
-| `NEURO_MIRROR_STT_MODEL` | `medium` | Модель Whisper для распознавания речи |
+| `NEURO_MIRROR_STT_MODEL` | `v3_rnnt` | Модель GigaAM для распознавания речи |
 | `NEURO_MIRROR_STT_LANGUAGE` | `ru` | Язык распознавания |
 | `NEURO_MIRROR_WEB_HOST` | `127.0.0.1` | Адрес Web UI |
 | `NEURO_MIRROR_WEB_PORT` | `8000` | Порт Web UI |
@@ -211,10 +211,11 @@ python main.py
 
 ### Медленно работает без GPU
 
-Используй более лёгкую STT-модель:
+GigaAM автоматически переключается на CPU, если CUDA недоступна. Режим
+можно задать явно:
 
 ```powershell
-$env:NEURO_MIRROR_STT_MODEL = "small"
+$env:NEURO_MIRROR_STT_DEVICE = "cpu"
 python main.py
 ```
 
@@ -226,7 +227,7 @@ python main.py
 - TTS-озвучка ответов через `edge-tts` (русский голос)
 - Просмотр камеры в браузере в реальном времени
 - Анализ эмоций по лицу
-- Голосовой ввод через Whisper (локально, без интернета)
+- Голосовой ввод через GigaAM (локально, без интернета)
 - Ответы на вопросы «Как я выгляжу?», «Что на камере?»
 - Погода и курсы валют
 - Измерение пульса по видео (rPPG)

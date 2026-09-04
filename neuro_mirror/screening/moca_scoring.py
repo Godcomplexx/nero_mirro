@@ -8,7 +8,46 @@ from typing import Any
 VOICE_MOCA_MAX_SCORE = 15
 
 MEMORY_WORDS = ("лицо", "бархат", "церковь", "фиалка", "красный")
+MEMORY_WORD_FORMS = {
+    "лицо": ("лицо", "лица", "лицом", "лицу"),
+    "бархат": (
+        "бархат",
+        "бархата",
+        "бархатом",
+        "бархатный",
+    ),
+    "церковь": ("церковь", "церкви", "церковью"),
+    "фиалка": ("фиалка", "фиалки", "фиалку", "фиалкой"),
+    "красный": (
+        "красный",
+        "красная",
+        "красное",
+        "красные",
+        "красного",
+        "красному",
+        "красным",
+    ),
+}
 SERIAL_EXPECTED = (93, 86, 79, 72, 65)
+SERIAL_NUMBER_FORMS = {
+    "одного": "один",
+    "двух": "два",
+    "трех": "три",
+    "четырех": "четыре",
+    "пяти": "пять",
+    "шести": "шесть",
+    "семи": "семь",
+    "восьми": "восемь",
+    "девяти": "девять",
+    "двадцати": "двадцать",
+    "тридцати": "тридцать",
+    "сорока": "сорок",
+    "пятидесяти": "пятьдесят",
+    "шестидесяти": "шестьдесят",
+    "семидесяти": "семьдесят",
+    "восьмидесяти": "восемьдесят",
+    "девяноста": "девяносто",
+}
 DIGITS_FORWARD_EXPECTED = (2, 1, 8, 5, 4)
 DIGITS_BACKWARD_EXPECTED = (2, 4, 7)
 
@@ -52,8 +91,15 @@ TENS = {
 }
 
 
-def score_moca_tasks(tasks: list[dict[str, Any]]) -> dict[str, Any]:
-    scored_tasks = [_score_task(task) for task in tasks]
+def score_moca_task(task_id: str, transcript: str) -> dict[str, Any]:
+    """Оценить одно задание MoCA по идентификатору и транскрипции."""
+    return _score_task({"task_id": task_id, "transcript": transcript})
+
+
+def summarize_moca_tasks(
+    scored_tasks: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Сформировать общий результат из уже оценённых заданий."""
     total = sum(int(task.get("score") or 0) for task in scored_tasks)
     percent = round(total / VOICE_MOCA_MAX_SCORE, 3) if VOICE_MOCA_MAX_SCORE else 0.0
     return {
@@ -67,6 +113,12 @@ def score_moca_tasks(tasks: list[dict[str, Any]]) -> dict[str, Any]:
             "Это voice-only профиль MoCA без зрительно-пространственных заданий и ориентации."
         ),
     }
+
+
+def score_moca_tasks(tasks: list[dict[str, Any]]) -> dict[str, Any]:
+    """Оценить список заданий и вернуть баллы по заданиям и общий итог."""
+    scored_tasks = [_score_task(task) for task in tasks]
+    return summarize_moca_tasks(scored_tasks)
 
 
 def _score_task(task: dict[str, Any]) -> dict[str, Any]:
@@ -98,11 +150,11 @@ def _score_task(task: dict[str, Any]) -> dict[str, Any]:
 
     if task_id == "language_sentence_1":
         expected = "я знаю только одно что иван это тот кто может сегодня помочь"
-        return _score_similarity(base, transcript, expected)
+        return _score_sentence_words(base, transcript, expected)
 
     if task_id == "language_sentence_2":
         expected = "кошка всегда пряталась под диваном когда собаки были в комнате"
-        return _score_similarity(base, transcript, expected)
+        return _score_sentence_words(base, transcript, expected)
 
     if task_id == "language_fluency":
         return _score_fluency(base, transcript)
@@ -112,7 +164,7 @@ def _score_task(task: dict[str, Any]) -> dict[str, Any]:
             base,
             transcript,
             expected="транспорт / средство передвижения",
-            markers=("транспорт", "передвиж", "езд", "ехать", "перемещ"),
+            word_stems=("транспорт", "передвиж", "перемещ", "езд", "ехать"),
         )
 
     if task_id == "abstraction_2":
@@ -120,7 +172,22 @@ def _score_task(task: dict[str, Any]) -> dict[str, Any]:
             base,
             transcript,
             expected="измерительные предметы",
-            markers=("измер", "мер", "длин", "врем", "прибор", "инструмент"),
+            word_stems=(
+                "измер",
+                "замер",
+                "мерить",
+                "меряют",
+                "длин",
+                "врем",
+                "прибор",
+                "инструмент",
+                "шкал",
+                "делени",
+                "цифр",
+                "числ",
+                "циферблат",
+            ),
+            fuzzy_phrases=("измерительный прибор",),
         )
 
     if task_id == "delayed_recall":
@@ -129,27 +196,50 @@ def _score_task(task: dict[str, Any]) -> dict[str, Any]:
     return base
 
 
-def _score_digit_span(base: dict[str, Any], transcript: str, expected: tuple[int, ...]) -> dict[str, Any]:
+def _score_digit_span(
+    base: dict[str, Any],
+    transcript: str,
+    expected: tuple[int, ...],
+) -> dict[str, Any]:
     numbers = _extract_numbers(transcript)
-    correct = tuple(numbers[: len(expected)]) == expected
+    expected_length = len(expected)
+    correct = any(
+        tuple(numbers[start : start + expected_length]) == expected
+        for start in range(len(numbers) - expected_length + 1)
+    )
     return {
         **base,
         "score": 1 if correct else 0,
         "max_score": 1,
         "status": "correct" if correct else "incorrect",
         "expected": " ".join(map(str, expected)),
-        "details": f"Распознано: {' '.join(map(str, numbers)) or '-'}",
+        "details": (
+            f"Точная последовательность "
+            f"{'найдена' if correct else 'не найдена'}. "
+            f"Распознано: {' '.join(map(str, numbers)) or '-'}"
+        ),
     }
 
 
 def _score_serial_subtraction(base: dict[str, Any], transcript: str) -> dict[str, Any]:
-    parts = [part.strip() for part in transcript.split("|") if part.strip()]
-    if parts:
-        answers = [_extract_numbers(part)[-1] for part in parts if _extract_numbers(part)]
-    else:
-        answers = _extract_numbers(transcript)
-    # Allow ±1 tolerance: STT sometimes mishears a digit
-    correct_count = sum(1 for answer, expected in zip(answers, SERIAL_EXPECTED) if abs(answer - expected) <= 1)
+    extracted_numbers = _split_serial_compound_hundreds(
+        _extract_numbers(_normalize_serial_number_forms(transcript))
+    )
+    # 100 — исходное число, а однозначные числа обычно являются вслух
+    # произнесённым оператором («минус семь»), а не результатом вычитания.
+    raw_answers = [
+        number for number in extracted_numbers if 10 <= number < 100
+    ]
+    answers, corrected_answers = _remove_immediate_serial_corrections(
+        raw_answers
+    )
+    transitions = list(zip((100, *answers), answers))
+    correct_transitions = [
+        (previous, current)
+        for previous, current in transitions
+        if previous - current == 7
+    ][:5]
+    correct_count = len(correct_transitions)
     if correct_count >= 4:
         score = 3
     elif correct_count >= 2:
@@ -164,24 +254,168 @@ def _score_serial_subtraction(base: dict[str, Any], transcript: str) -> dict[str
         "max_score": 3,
         "status": "correct" if score == 3 else "partial" if score else "incorrect",
         "expected": " ".join(map(str, SERIAL_EXPECTED)),
-        "details": f"Верных вычитаний: {correct_count}/5. Распознано: {' '.join(map(str, answers)) or '-'}",
+        "details": (
+            f"Верных вычитаний: {correct_count}/5. "
+            f"Верные переходы: "
+            f"{_format_serial_transitions(correct_transitions)}. "
+            f"Результаты: {' '.join(map(str, answers)) or '-'}. "
+            f"Исправления: "
+            f"{' '.join(map(str, corrected_answers)) or '-'}"
+        ),
     }
 
 
-def _score_similarity(base: dict[str, Any], transcript: str, expected: str) -> dict[str, Any]:
-    ratio = SequenceMatcher(None, _normalize_text(transcript), _normalize_text(expected)).ratio()
-    correct = ratio >= 0.68
+def _normalize_serial_number_forms(text: str) -> str:
+    """Привести падежные формы числительных к именительному падежу."""
+    normalized = text.lower().replace("ё", "е")
+    # В спонтанной речи глагол иногда проглатывается: «восьмидесяти семь,
+    # это будет семьдесят три» означает 80 − 7, а не число 87. Служебное
+    # слово не даёт общему парсеру склеить десяток и оператор вычитания.
+    for source, target in SERIAL_NUMBER_FORMS.items():
+        if target not in TENS:
+            continue
+        normalized = re.sub(
+            rf"(?<![а-я]){source}\s+семь(?=\s+(?:это|будет))",
+            f"{target} операция семь",
+            normalized,
+        )
+    for source, target in SERIAL_NUMBER_FORMS.items():
+        normalized = re.sub(
+            rf"(?<![а-я]){source}(?![а-я])",
+            target,
+            normalized,
+        )
+    return normalized
+
+
+def _split_serial_compound_hundreds(numbers: list[int]) -> list[int]:
+    """Разделить склеенные ASR числа вида «сто девяносто три».
+
+    В задании отсчёт всегда начинается со 100, поэтому распознанное число
+    101–199 означает, что ASR объединила повтор исходного числа и следующий
+    ответ: 193 преобразуется в 100, 93.
+    """
+    separated = []
+    for number in numbers:
+        if 100 < number < 200:
+            separated.extend((100, number - 100))
+        else:
+            separated.append(number)
+    return separated
+
+
+def _remove_immediate_serial_corrections(
+    answers: list[int],
+) -> tuple[list[int], list[int]]:
+    """Убрать один черновой ответ перед немедленным исправлением.
+
+    Число пропускается только тогда, когда оно ошибочно относительно
+    предыдущего принятого результата, а следующее число ровно на 7 меньше
+    этого результата. Произвольные числа и длинные разрывы не пропускаются.
+    """
+    cleaned = []
+    corrected = []
+    previous = 100
+    index = 0
+    while index < len(answers):
+        current = answers[index]
+        has_replacement = index + 1 < len(answers)
+        replacement = answers[index + 1] if has_replacement else 0
+        looks_like_correction = has_replacement and (
+            current == previous
+            or abs(current - replacement) <= 2
+            or (
+                current % 10 == 0
+                and current // 10 == replacement // 10
+            )
+        )
+        if (
+            previous - current != 7
+            and looks_like_correction
+            and previous - replacement == 7
+        ):
+            corrected.append(current)
+            current = replacement
+            index += 1
+        cleaned.append(current)
+        previous = current
+        index += 1
+    return cleaned, corrected
+
+
+def _format_serial_transitions(transitions: list[tuple[int, int]]) -> str:
+    """Подготовить найденные правильные вычитания для отчёта."""
+    if not transitions:
+        return "-"
+    return ", ".join(
+        f"{previous}→{current}"
+        for previous, current in transitions
+    )
+
+
+def _score_sentence_words(
+    base: dict[str, Any],
+    transcript: str,
+    expected: str,
+) -> dict[str, Any]:
+    """Проверить строгий порядок слов, разрешив изменение окончаний."""
+    expected_words = _normalize_text(expected).split()
+    actual_words = _normalize_text(transcript).split()
+    same_length = len(actual_words) == len(expected_words)
+    mismatches = [
+        (index, expected_word, actual_word)
+        for index, (expected_word, actual_word) in enumerate(
+            zip(expected_words, actual_words),
+            start=1,
+        )
+        if not _same_word_with_different_ending(expected_word, actual_word)
+    ]
+    correct = same_length and not mismatches
+
+    if not same_length:
+        details = (
+            "Количество слов не совпало: "
+            f"ожидалось {len(expected_words)}, распознано {len(actual_words)}."
+        )
+    elif mismatches:
+        details = "Не совпали слова: " + "; ".join(
+            f"{index}: {expected_word} ≠ {actual_word}"
+            for index, expected_word, actual_word in mismatches
+        )
+    else:
+        details = (
+            "Строгая последовательность слов совпала; "
+            "различия окончаний разрешены."
+        )
     return {
         **base,
         "score": 1 if correct else 0,
         "max_score": 1,
         "status": "correct" if correct else "incorrect",
         "expected": expected,
-        "details": f"Сходство: {ratio:.2f}",
+        "details": details,
     }
 
 
+def _same_word_with_different_ending(expected: str, actual: str) -> bool:
+    """Сравнить слова, допуская замену не более трёх букв окончания."""
+    if expected == actual:
+        return True
+    common_prefix_length = 0
+    for expected_char, actual_char in zip(expected, actual):
+        if expected_char != actual_char:
+            break
+        common_prefix_length += 1
+    return (
+        common_prefix_length >= 4
+        and len(expected) - common_prefix_length <= 3
+        and len(actual) - common_prefix_length <= 3
+    )
+
+
 def _score_fluency(base: dict[str, Any], transcript: str) -> dict[str, Any]:
+    # Длительность здесь намеренно не проверяется: оценщик обрабатывает весь
+    # диапазон аудио, который был передан между маркерами начала и окончания.
     words = {
         word
         for word in _normalize_text(transcript).split()
@@ -193,7 +427,7 @@ def _score_fluency(base: dict[str, Any], transcript: str) -> dict[str, Any]:
         "score": 1 if correct else 0,
         "max_score": 1,
         "status": "correct" if correct else "incorrect",
-        "expected": "11+ слов на букву Л за 1 минуту",
+        "expected": "11+ уникальных слов на букву Л во всем диапазоне",
         "details": f"Уникальных слов на Л: {len(words)}",
     }
 
@@ -203,27 +437,76 @@ def _score_abstraction(
     transcript: str,
     *,
     expected: str,
-    markers: tuple[str, ...],
+    word_stems: tuple[str, ...],
+    fuzzy_phrases: tuple[str, ...] = (),
 ) -> dict[str, Any]:
     normalized = _normalize_text(transcript)
-    correct = any(marker in normalized for marker in markers)
+    words = normalized.split()
+    matched_rule = next(
+        (
+            stem
+            for word in words
+            for stem in word_stems
+            if word.startswith(stem)
+        ),
+        "",
+    )
+    if not matched_rule:
+        matched_rule = _find_fuzzy_phrase(words, fuzzy_phrases)
+    correct = bool(matched_rule)
     return {
         **base,
         "score": 1 if correct else 0,
         "max_score": 1,
         "status": "correct" if correct else "incorrect",
         "expected": expected,
-        "details": "Найдена категория." if correct else "Категория не найдена автоматически.",
+        "details": (
+            f"Найдена категория: {matched_rule}."
+            if correct
+            else "Категория не найдена автоматически."
+        ),
     }
 
 
+def _find_fuzzy_phrase(
+    words: list[str],
+    expected_phrases: tuple[str, ...],
+) -> str:
+    """Найти фразу с типичными небольшими ошибками ASR."""
+    for expected in expected_phrases:
+        normalized_expected = _normalize_text(expected)
+        expected_length = len(normalized_expected.split())
+        for window_length in range(
+            max(1, expected_length - 1),
+            expected_length + 2,
+        ):
+            for start in range(len(words) - window_length + 1):
+                candidate = " ".join(words[start : start + window_length])
+                similarity = SequenceMatcher(
+                    None,
+                    candidate,
+                    normalized_expected,
+                ).ratio()
+                if similarity >= 0.75:
+                    return candidate
+    return ""
+
+
 def _score_delayed_recall(base: dict[str, Any], transcript: str) -> dict[str, Any]:
-    recalled = [word for word in MEMORY_WORDS if _contains_word_like(transcript, word)]
+    recalled = [
+        word
+        for word in MEMORY_WORDS
+        if _contains_word_like(transcript, word)
+    ]
     return {
         **base,
         "score": len(recalled),
         "max_score": 5,
-        "status": "correct" if len(recalled) == 5 else "partial" if recalled else "incorrect",
+        "status": (
+            "correct"
+            if len(recalled) == 5
+            else "partial" if recalled else "incorrect"
+        ),
         "expected": ", ".join(MEMORY_WORDS),
         "details": f"Вспомнено: {', '.join(recalled) or '-'}",
     }
@@ -234,16 +517,16 @@ def _extract_numbers(text: str) -> list[int]:
     merged = re.sub(r"(\d+)-(\d+)", lambda m: str(m.group(1)) + m.group(2), text)
     normalized = _normalize_text(merged)
 
-    # Extract all digit sequences
-    numbers = [int(match.group(0)) for match in re.finditer(r"\d+", normalized)]
-
-    # Second pass: parse written-out Russian numbers from remaining text
-    without_digits = re.sub(r"\d+", " ", normalized)
-    tokens = without_digits.split()
+    # Цифры и числа, записанные словами, извлекаются за один
+    # проход, чтобы сохранить исходный порядок в смешанной записи.
+    numbers = []
+    tokens = normalized.split()
     index = 0
     while index < len(tokens):
         token = tokens[index]
-        if token == "сто":
+        if token.isdigit():
+            numbers.append(int(token))
+        elif token == "сто":
             # Check if followed by tens/units (e.g. "сто девяносто три")
             value = 100
             while index + 1 < len(tokens):
@@ -277,11 +560,15 @@ def _extract_numbers(text: str) -> list[int]:
 
 
 def _contains_word_like(text: str, expected: str) -> bool:
-    normalized_expected = _normalize_text(expected)
+    expected_forms = MEMORY_WORD_FORMS.get(expected, (expected,))
+    normalized_forms = tuple(_normalize_text(form) for form in expected_forms)
     for word in _normalize_text(text).split():
-        if word == normalized_expected:
+        if word in normalized_forms:
             return True
-        if SequenceMatcher(None, word, normalized_expected).ratio() >= 0.78:
+        if any(
+            SequenceMatcher(None, word, form).ratio() >= 0.78
+            for form in normalized_forms
+        ):
             return True
     return False
 
