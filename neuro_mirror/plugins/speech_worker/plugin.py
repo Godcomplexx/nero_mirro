@@ -65,12 +65,16 @@ class SpeechWorkerPlugin(ProcessorPlugin):
         request_id = event.payload.get("_request_id", "")
         audio_path = str(event.payload.get("audio_path") or "")
         suppress_ui = bool(event.payload.get("suppress_ui"))
+        split_on_silence = bool(event.payload.get("split_on_silence"))
         if not audio_path:
             await self._send_reply(request_id, {"accepted": False, "transcript": "", "message": "audio_path is empty"})
             return
 
         transcribe_timeout = max(self.settings.worker_request_timeout_seconds, 120.0)
-        stt_payload = self._build_stt_payload(audio_path)
+        stt_payload = self._build_stt_payload(
+            audio_path,
+            split_on_silence=split_on_silence,
+        )
 
         try:
             if not _uses_gpu(self.settings.stt_device):
@@ -180,7 +184,12 @@ class SpeechWorkerPlugin(ProcessorPlugin):
         except Exception:
             pass
 
-    def _build_stt_payload(self, audio_path: str) -> dict[str, Any]:
+    def _build_stt_payload(
+        self,
+        audio_path: str,
+        *,
+        split_on_silence: bool = False,
+    ) -> dict[str, Any]:
         return {
             "audio_path": audio_path,
             "model_name": self.settings.stt_model_name,
@@ -191,6 +200,7 @@ class SpeechWorkerPlugin(ProcessorPlugin):
             "best_of": self.settings.stt_best_of,
             "vad_filter": self.settings.stt_vad_filter,
             "hotwords": self.settings.stt_hotwords,
+            "split_on_silence": split_on_silence,
         }
 
     async def _transcribe_audio_path(self, audio_path: str) -> None:
