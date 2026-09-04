@@ -18,7 +18,11 @@ try:
 except Exception:
     WhisperModel = None
 
+# ── CONFIG ───────────────────────────────────────────────────────────────────
 DEFAULT_MODEL_NAME = "v3_rnnt"
+GIGAAM_MODELS_DIR = (
+    Path(__file__).resolve().parents[1] / "models" / "gigaam"
+)
 GIGAAM_SAMPLE_RATE = 16_000
 GIGAAM_MAX_CHUNK_SECONDS = 24.0
 GIGAAM_MIN_CHUNK_SECONDS = 10.0
@@ -273,6 +277,9 @@ def _load_gigaam_model(
 
     import torch
 
+    # Веса хранятся внутри проекта, но не добавляются в Git.
+    GIGAAM_MODELS_DIR.mkdir(parents=True, exist_ok=True)
+
     requested_device = str(device or "auto").strip().lower()
     candidates = []
     if requested_device in {"auto", "cuda"} and torch.cuda.is_available():
@@ -294,6 +301,7 @@ def _load_gigaam_model(
         try:
             model = gigaam.load_model(
                 model_name,
+                download_root=str(GIGAAM_MODELS_DIR),
                 fp16_encoder=candidate_device == "cuda",
                 use_flash=False,
                 device=candidate_device,

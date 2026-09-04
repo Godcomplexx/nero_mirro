@@ -9,8 +9,8 @@ runtime/screenings.jsonl
 .venv-*/
 
 # Сторонние локальные репозитории
-GigaAM/
-SpeechMirror/
+/GigaAM/
+/SpeechMirror/
 
 # Аудио и результаты экспериментов
 audio/
@@ -19,3 +19,7 @@ moca_recall_split_experiment/
 
 # Журналы запусков
 *.log
+
+# Локальные веса моделей (скачиваются при первом запуске)
+runtime/models/gigaam/*.ckpt
+runtime/models/gigaam/*.model
