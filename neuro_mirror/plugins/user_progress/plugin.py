@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from neuro_mirror.core.user_profiles import UserProfileStore
@@ -70,7 +70,7 @@ class UserProgressPlugin(ProcessorPlugin):
             if not user_id:
                 return
             report = dict(event.payload)
-            report.setdefault("stored_at", datetime.now(UTC).isoformat())
+            report.setdefault("stored_at", datetime.now(timezone.utc).isoformat())
             flags = _flags_for_report(report)
             if flags:
                 self.user_store.update_progress(user_id, **flags)

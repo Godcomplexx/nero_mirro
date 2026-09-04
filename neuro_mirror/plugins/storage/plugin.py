@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from neuro_mirror.interfaces.storage import StoragePluginBase
@@ -39,7 +39,7 @@ class StoragePlugin(StoragePluginBase):
             item = {
                 **self._active_user,
                 **event.payload,
-                "stored_at": datetime.now(UTC).isoformat(),
+                "stored_at": datetime.now(timezone.utc).isoformat(),
                 "app_version": APP_VERSION,
                 "scenario_version": SCENARIO_VERSIONS.get(report_type, ""),
             }
