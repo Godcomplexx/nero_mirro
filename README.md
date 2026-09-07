@@ -37,6 +37,19 @@ python -m pip install -r runtime\speech_worker\requirements.txt
 python -m pip install sounddevice fastapi uvicorn websockets edge-tts httpx
 ```
 
+Речевой worker использует GigaAM `v3_rnnt`. Файл
+`runtime\speech_worker\requirements.txt` устанавливает закреплённую ревизию
+официального репозитория GigaAM вместе с PyTorch и torchaudio. Не заменяйте
+эту команду на `pip install gigaam`: версия из PyPI может не поддерживать
+API, который использует worker. Для чтения аудио нужен `ffmpeg` в `PATH`.
+
+Если зависимости речи установлены в отдельное виртуальное окружение,
+перед запуском `main.py` укажите его Python:
+
+```powershell
+$env:NEURO_MIRROR_SPEECH_WORKER_PYTHON = (Resolve-Path .venv-gigaam\Scripts\python.exe).Path
+```
+
 > Если у тебя есть GPU NVIDIA — дополнительно установи PyTorch с CUDA:
 > ```powershell
 > python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
