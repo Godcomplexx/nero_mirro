@@ -6,6 +6,12 @@ import time
 from pathlib import Path
 from typing import Any
 
+# WorkerClient launches this file directly, so Python otherwise only adds
+# runtime/speech_worker to sys.path, leaving shared project modules unavailable.
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from neuro_mirror.utils.speech_split import split_audio
 
 try:
