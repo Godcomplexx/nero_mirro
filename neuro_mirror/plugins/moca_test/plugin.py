@@ -19,21 +19,23 @@ Each task:
   - Waits for TTS audio duration + a short buffer
   - Records the patient's voice response
   - Transcribes it via SpeechWorkerPlugin (REQ_SPEECH_TRANSCRIBE)
-  - Stores the transcript for that task
-After all tasks publishes MOCA_TEST_RESULT with all transcripts and metadata.
+  - Immediately scores the transcript for that task
+After all tasks publishes MOCA_TEST_RESULT with per-task and total scores.
 """
 from __future__ import annotations
 
 import asyncio
 import logging
-import time
 from dataclasses import dataclass, field
 from typing import Any
 
 from neuro_mirror.core.settings import Settings
 from neuro_mirror.interfaces.processor import ProcessorPlugin
 from neuro_mirror.models.events import Event, Topics
-from neuro_mirror.screening.moca_scoring import score_moca_tasks
+from neuro_mirror.screening.moca_scoring import (
+    score_moca_task,
+    summarize_moca_tasks,
+)
 from neuro_mirror.utils.audio import VoiceRecorder
 
 logger = logging.getLogger(__name__)
@@ -283,17 +285,21 @@ class MocaTestPlugin(ProcessorPlugin):
 
             # ── Record patient response ────────────────────────────────────────
             if task.task_id == "attention_serial":
-                transcript, audio_ms = await self._run_serial_subtraction(task, idx, total)
+                transcript = await self._run_serial_subtraction(task, idx, total)
             else:
-                transcript, audio_ms = await self._record_and_transcribe(task)
+                transcript = await self._record_and_transcribe(task)
 
-            results.append({
-                "task_id": task.task_id,
-                "domain": task.domain,
-                "transcript": transcript,
-                "audio_ms": audio_ms,
-            })
-            logger.info("moca_test [%s]: %r (%d ms)", task.task_id, transcript[:80], audio_ms)
+            # Для оценки достаточно идентификатора задания и транскрипции.
+            # Результат задания формируется сразу после распознавания.
+            task_result = score_moca_task(task.task_id, transcript)
+            results.append(task_result)
+            logger.info(
+                "moca_test [%s]: %r, score=%d/%d",
+                task.task_id,
+                transcript[:80],
+                task_result["score"],
+                task_result["max_score"],
+            )
 
             if self._stop_requested:
                 break
@@ -318,15 +324,14 @@ class MocaTestPlugin(ProcessorPlugin):
             },
         ))
 
-        scoring = score_moca_tasks(results)
+        scoring = summarize_moca_tasks(results)
 
         await self.bus.publish(Event(
             topic=Topics.MOCA_TEST_RESULT,
             source=self.name,
             payload={
                 "tasks": scoring["tasks"],
-                "task_count": total,
-                "domains": list({r["domain"] for r in results}),
+                "task_count": len(results),
                 "score": scoring["score"],
                 "max_score": scoring["max_score"],
                 "percent": scoring["percent"],
@@ -337,13 +342,12 @@ class MocaTestPlugin(ProcessorPlugin):
 
     async def _run_serial_subtraction(
         self, task: MocaTask, idx: int, total: int
-    ) -> tuple[str, int]:
+    ) -> str:
         """Run the 100-7 subtraction task step by step: 5 rounds."""
         all_transcripts: list[str] = []
-        t_start = time.monotonic()
 
         # First answer already prompted by the main task prompt (100-7=?)
-        transcript, _ = await self._record_and_transcribe(task)
+        transcript = await self._record_and_transcribe(task)
         all_transcripts.append(transcript)
 
         for step_prompt, _ in SERIAL_SUBTRACTION_STEPS:
@@ -376,11 +380,10 @@ class MocaTestPlugin(ProcessorPlugin):
                 max_record_seconds=10.0,
                 hint=task.hint,
             )
-            t, _ = await self._record_and_transcribe(step_task)
+            t = await self._record_and_transcribe(step_task)
             all_transcripts.append(t)
 
-        audio_ms = int((time.monotonic() - t_start) * 1000)
-        return " | ".join(all_transcripts), audio_ms
+        return " | ".join(all_transcripts)
 
     async def _speak(self, text: str) -> bool:
         """Send TTS text to browser and wait until playback is finished."""
@@ -432,8 +435,8 @@ class MocaTestPlugin(ProcessorPlugin):
                 waiter.set_result(result)
         self._tts_waiters.clear()
 
-    async def _record_and_transcribe(self, task: MocaTask) -> tuple[str, int]:
-        """Record patient audio and return (transcript, duration_ms)."""
+    async def _record_and_transcribe(self, task: MocaTask) -> str:
+        """Записать ответ пациента и вернуть его транскрипцию."""
         recorder = VoiceRecorder(
             sample_rate=self.settings.voice_sample_rate,
             channels=self.settings.voice_channels,
@@ -445,14 +448,13 @@ class MocaTestPlugin(ProcessorPlugin):
 
         if not recorder.available:
             logger.warning("moca_test: микрофон недоступен")
-            return "", 0
+            return ""
 
-        t_start = time.monotonic()
         try:
             audio_path = recorder.start()
         except Exception as exc:
             logger.exception("moca_test: ошибка старта записи для %s", task.task_id)
-            return "", 0
+            return ""
 
         # Signal UI: recording started — show mic indicator NOW
         await self.bus.publish(Event(
@@ -499,9 +501,7 @@ class MocaTestPlugin(ProcessorPlugin):
                 recorder.stop()
             except Exception:
                 pass
-            return "", 0
-
-        audio_ms = int((time.monotonic() - t_start) * 1000)
+            return ""
 
         # Hide mic indicator immediately after recording stops
         await self.bus.publish(Event(
@@ -514,17 +514,30 @@ class MocaTestPlugin(ProcessorPlugin):
             },
         ))
 
-        # Transcribe via SpeechWorkerPlugin request-reply
-        transcript = await self._transcribe(audio_path)
-        return transcript, audio_ms
+        # В отсроченном воспроизведении короткие слова разделены паузами.
+        # Worker обрабатывает реплики в памяти, не создавая временные WAV.
+        transcript = await self._transcribe(
+            audio_path,
+            split_on_silence=task.task_id == "delayed_recall",
+        )
+        return transcript
 
-    async def _transcribe(self, audio_path: str) -> str:
+    async def _transcribe(
+        self,
+        audio_path: str,
+        *,
+        split_on_silence: bool = False,
+    ) -> str:
         try:
             reply = await self.bus.request(
                 Event(
                     topic=Topics.REQ_SPEECH_TRANSCRIBE,
                     source=self.name,
-                    payload={"audio_path": audio_path, "suppress_ui": True},
+                    payload={
+                        "audio_path": audio_path,
+                        "suppress_ui": True,
+                        "split_on_silence": split_on_silence,
+                    },
                 ),
                 timeout=120.0,
             )

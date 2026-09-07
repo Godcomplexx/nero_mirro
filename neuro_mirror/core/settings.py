@@ -51,10 +51,10 @@ class Settings:
     emotion_engine: str = "onnx"
     emotion_device: str = "auto"
 
-    stt_model_name: str = "medium"
+    stt_model_name: str = "v3_rnnt"
     stt_language: str = "ru"
     stt_device: str = "auto"
-    stt_compute_type: str = "int8"
+    stt_compute_type: str = "auto"
     stt_beam_size: int = 5
     stt_best_of: int = 5
     stt_vad_filter: bool = True
@@ -156,7 +156,10 @@ class Settings:
         # Per-component device overrides; fall back to global device
         raw_emotion_device = os.getenv("NEURO_MIRROR_EMOTION_DEVICE", raw_device).strip().lower()
 
-        raw_stt_model = os.getenv("NEURO_MIRROR_STT_MODEL", "medium").strip()
+        raw_stt_model = os.getenv(
+            "NEURO_MIRROR_STT_MODEL",
+            "v3_rnnt",
+        ).strip()
         raw_stt_language = os.getenv("NEURO_MIRROR_STT_LANGUAGE", "ru").strip()
         raw_stt_device = os.getenv("NEURO_MIRROR_STT_DEVICE", raw_device).strip().lower()
         raw_stt_compute_type = os.getenv("NEURO_MIRROR_STT_COMPUTE_TYPE", "auto").strip()

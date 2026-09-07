@@ -10,7 +10,7 @@ import base64
 import binascii
 import json
 import re
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -99,9 +99,9 @@ class UserProfileStore:
             "consent": {
                 "given": True,
                 "text": CONSENT_TEXT,
-                "timestamp": datetime.now(UTC).isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             },
-            "created_at": datetime.now(UTC).isoformat(),
+            "created_at": datetime.now(timezone.utc).isoformat(),
             "progress": dict(DEFAULT_PROGRESS),
         }
         self._users.append(user)
