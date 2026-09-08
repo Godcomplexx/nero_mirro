@@ -3,14 +3,13 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import asdict
-from pathlib import Path
 from typing import Any
 
 from neuro_mirror.core.settings import Settings
 from neuro_mirror.interfaces.processor import ProcessorPlugin
 from neuro_mirror.models.events import Event, Topics
 from neuro_mirror.screening.audio_analyzer import analyze_audio
-from neuro_mirror.utils.audio import VoiceRecorder
+from neuro_mirror.utils.audio import VoiceRecorder, delete_temp_audio
 
 logger = logging.getLogger(__name__)
 
@@ -48,8 +47,8 @@ class VoiceTestPlugin(ProcessorPlugin):
                     topic=Topics.VOICE_TEST_RESULT,
                     source=self.name,
                     payload={
-                        "speech_score": 0.0,
-                        "reaction_ms": 0,
+                        "speech_score": None,
+                        "reaction_ms": None,
                         "notes": "Не удалось записать аудио для голосового теста.",
                     },
                 )
@@ -58,7 +57,11 @@ class VoiceTestPlugin(ProcessorPlugin):
 
         try:
             result = await asyncio.to_thread(analyze_audio, audio_path)
-            logger.info("voice_test: анализ завершён — speech_score=%.2f, reaction_ms=%d", result.speech_score, result.reaction_ms)
+            logger.info(
+                "voice_test: анализ завершён — speech_score=%s, reaction_ms=%s",
+                result.speech_score,
+                result.reaction_ms,
+            )
 
             await self.bus.publish(
                 Event(
@@ -83,14 +86,14 @@ class VoiceTestPlugin(ProcessorPlugin):
                     topic=Topics.VOICE_TEST_RESULT,
                     source=self.name,
                     payload={
-                        "speech_score": 0.0,
-                        "reaction_ms": 0,
+                        "speech_score": None,
+                        "reaction_ms": None,
                         "notes": f"Ошибка аудио-анализа: {exc}",
                     },
                 )
             )
         finally:
-            self._cleanup_audio(audio_path)
+            delete_temp_audio(audio_path)
 
     async def _record_sample(self) -> str:
         """Record a short audio sample using VoiceRecorder."""
@@ -98,25 +101,24 @@ class VoiceTestPlugin(ProcessorPlugin):
             logger.warning("voice_test: sounddevice недоступен, запись невозможна")
             return ""
 
+        audio_path = ""
         try:
             audio_path = self._recorder.start()
             logger.info("voice_test: запись %s сек...", _TEST_RECORD_SECONDS)
             # Wait for recording to finish (max_seconds will auto-stop via CallbackStop)
             await asyncio.sleep(_TEST_RECORD_SECONDS + 0.5)
             return self._recorder.stop() or audio_path
+        except asyncio.CancelledError:
+            try:
+                self._recorder.stop()
+            finally:
+                delete_temp_audio(audio_path)
+            raise
         except Exception as exc:
             logger.exception("voice_test: ошибка записи")
             try:
                 self._recorder.stop()
             except Exception:
                 pass
+            delete_temp_audio(audio_path)
             return ""
-
-    @staticmethod
-    def _cleanup_audio(audio_path: str) -> None:
-        if not audio_path:
-            return
-        try:
-            Path(audio_path).unlink(missing_ok=True)
-        except Exception:
-            pass

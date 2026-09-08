@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import UTC, datetime
 from typing import Any
 
 from neuro_mirror.core.settings import Settings
@@ -26,7 +27,7 @@ from neuro_mirror.screening.hads_scoring import (
     match_hads_answer,
     score_hads,
 )
-from neuro_mirror.utils.audio import VoiceRecorder
+from neuro_mirror.utils.audio import VoiceRecorder, delete_temp_audio
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +51,9 @@ class HadsTestPlugin(ProcessorPlugin):
         self._tts_waiters: dict[str, asyncio.Future[bool]] = {}
         self._answer_waiter: asyncio.Future[int] | None = None
         self._current_question_index = -1
+        self._audio_allowed = True
+        self._resume_checkpoint: dict[str, Any] = {}
+        self._session_id = ""
 
     def subscribed_topics(self) -> tuple[str, ...]:
         return (Topics.HADS_START, Topics.HADS_STOP, Topics.UI_ACTION)
@@ -66,6 +70,10 @@ class HadsTestPlugin(ProcessorPlugin):
                 # up to two more minutes and block a restart
                 if self._test_task is not None:
                     self._test_task.cancel()
+                    try:
+                        await self._test_task
+                    except asyncio.CancelledError:
+                        pass
             return
 
         if event.topic == Topics.UI_ACTION:
@@ -81,7 +89,11 @@ class HadsTestPlugin(ProcessorPlugin):
             logger.warning("hads_test: тест уже выполняется, игнорирую повторный запуск")
             return
         self._running = True
+        self._session_id = str(event.payload.get("session_id") or "")
         self._stop_requested = False
+        self._audio_allowed = bool(event.payload.get("audio_allowed", True))
+        checkpoint = event.payload.get("resume_checkpoint")
+        self._resume_checkpoint = dict(checkpoint) if isinstance(checkpoint, dict) else {}
         self._test_task = asyncio.create_task(self._run_test_guarded(), name="hads-test-run")
 
     async def on_stop(self) -> None:
@@ -102,8 +114,16 @@ class HadsTestPlugin(ProcessorPlugin):
             await self._run_test()
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except Exception as exc:
             logger.exception("hads_test: ошибка выполнения теста")
+            await self.bus.publish(
+                Event(
+                    topic=Topics.SESSION_ERROR,
+                    source=self.name,
+                    payload={"scenario": "hads", "session_id": self._session_id,
+                             "reason": f"Ошибка HADS: {exc}"},
+                )
+            )
         finally:
             self._resolve_pending_tts(False)
             self._cancel_answer_waiter()
@@ -112,21 +132,34 @@ class HadsTestPlugin(ProcessorPlugin):
             self._test_task = None
 
     async def _run_test(self) -> None:
-        answers: list[dict[str, Any]] = []
+        stored_answers = self._resume_checkpoint.get("answers") or []
+        answers: list[dict[str, Any]] = [
+            dict(item) for item in stored_answers if isinstance(item, dict)
+        ]
+        start_index = max(0, min(len(HADS_QUESTIONS), int(self._resume_checkpoint.get("next_index") or 0)))
+        if len(answers) != start_index or any(
+            item.get("question_id") != HADS_QUESTIONS[index].question_id
+            for index, item in enumerate(answers)
+        ):
+            raise ValueError("Контрольная точка HADS повреждена.")
         total = len(HADS_QUESTIONS)
 
+        input_instruction = (
+            "Отвечайте голосом — назовите номер варианта — или нажимайте на вариант на экране."
+            if self._audio_allowed
+            else "Выбирайте ответ нажатием на вариант на экране."
+        )
         intro = (
             "Начинаем тест на тревожность и депрессию. "
             "Я буду читать утверждения и варианты ответа. "
             "Выберите вариант, который лучше всего описывает ваше состояние "
-            "за последнюю неделю. Отвечайте голосом — назовите номер варианта — "
-            "или нажимайте на вариант на экране."
+            f"за последнюю неделю. {input_instruction}"
         )
         await self._publish_question_ui(None, -1, total, message="Приготовьтесь...")
         await self._speak(intro, screen_payload=self._question_payload(None, -1, total))
 
         loop = asyncio.get_running_loop()
-        for idx, question in enumerate(HADS_QUESTIONS):
+        for idx, question in enumerate(HADS_QUESTIONS[start_index:], start=start_index):
             if self._stop_requested:
                 break
             self._current_question_index = idx
@@ -162,7 +195,20 @@ class HadsTestPlugin(ProcessorPlugin):
                 "option_index": option_index,
                 "option_text": option.text,
                 "score": option.score,
+                "answered_at": datetime.now(UTC).isoformat(),
             })
+            await self.bus.publish(
+                Event(
+                    topic=Topics.SESSION_CHECKPOINT,
+                    source=self.name,
+                    payload={
+                        "source": "hads",
+                        "session_id": self._session_id,
+                        "next_index": idx + 1,
+                        "answers": list(answers),
+                    },
+                )
+            )
             logger.info(
                 "hads_test [%s]: вариант %d (%s) = %d баллов",
                 question.question_id, option_index + 1, option.text, option.score,
@@ -198,6 +244,7 @@ class HadsTestPlugin(ProcessorPlugin):
 
         scoring = score_hads(answers)
         scoring["stopped_early"] = stopped_early
+        scoring["session_id"] = self._session_id
         await self.bus.publish(Event(
             topic=Topics.HADS_TEST_RESULT,
             source=self.name,
@@ -214,6 +261,24 @@ class HadsTestPlugin(ProcessorPlugin):
         waiter: asyncio.Future[int],
     ) -> int | None:
         try:
+            if not self._audio_allowed:
+                await self.bus.publish(
+                    Event(
+                        topic=Topics.UI_UPDATE,
+                        source=self.name,
+                        payload={
+                            **self._question_payload(question, idx, total),
+                            "hads_recording": False,
+                            "message": "Выберите вариант ответа на экране.",
+                        },
+                    )
+                )
+                try:
+                    return await asyncio.wait_for(
+                        asyncio.shield(waiter), timeout=CLICK_WAIT_SECONDS
+                    )
+                except (asyncio.TimeoutError, asyncio.CancelledError):
+                    return None
             for attempt in range(VOICE_RETRIES + 1):
                 if self._stop_requested or waiter.done():
                     break
@@ -320,15 +385,23 @@ class HadsTestPlugin(ProcessorPlugin):
                 if waiter.done() or self._stop_requested:
                     break
             audio_path = recorder.stop() or audio_path
+        except asyncio.CancelledError:
+            try:
+                recorder.stop()
+            finally:
+                delete_temp_audio(audio_path)
+            raise
         except Exception:
             logger.exception("hads_test: ошибка записи")
             try:
                 recorder.stop()
             except Exception:
                 pass
+            delete_temp_audio(audio_path)
             return ""
 
         if waiter.done() or self._stop_requested:
+            delete_temp_audio(audio_path)
             return ""
 
         await self.bus.publish(Event(
@@ -519,3 +592,5 @@ class HadsTestPlugin(ProcessorPlugin):
         except Exception as exc:
             logger.warning("hads_test: transcribe error: %s", exc)
             return ""
+        finally:
+            delete_temp_audio(audio_path)

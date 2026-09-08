@@ -27,6 +27,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Any
 
 from neuro_mirror.core.settings import Settings
@@ -36,7 +37,7 @@ from neuro_mirror.screening.moca_scoring import (
     score_moca_task,
     summarize_moca_tasks,
 )
-from neuro_mirror.utils.audio import VoiceRecorder
+from neuro_mirror.utils.audio import VoiceRecorder, delete_temp_audio
 
 logger = logging.getLogger(__name__)
 
@@ -197,6 +198,8 @@ class MocaTestPlugin(ProcessorPlugin):
         self._test_task: asyncio.Task[None] | None = None
         self._tts_sequence = 0
         self._tts_waiters: dict[str, asyncio.Future[bool]] = {}
+        self._resume_checkpoint: dict[str, Any] = {}
+        self._session_id = ""
 
     def subscribed_topics(self) -> tuple[str, ...]:
         return (Topics.MOCA_START, Topics.MOCA_STOP, Topics.UI_ACTION)
@@ -212,6 +215,10 @@ class MocaTestPlugin(ProcessorPlugin):
                 # block a restart
                 if self._test_task is not None:
                     self._test_task.cancel()
+                    try:
+                        await self._test_task
+                    except asyncio.CancelledError:
+                        pass
             return
 
         if event.topic == Topics.UI_ACTION:
@@ -224,7 +231,10 @@ class MocaTestPlugin(ProcessorPlugin):
             logger.warning("moca_test: тест уже выполняется, игнорирую повторный запуск")
             return
         self._running = True
+        self._session_id = str(event.payload.get("session_id") or "")
         self._stop_requested = False
+        checkpoint = event.payload.get("resume_checkpoint")
+        self._resume_checkpoint = dict(checkpoint) if isinstance(checkpoint, dict) else {}
         self._test_task = asyncio.create_task(self._run_test_guarded(), name="moca-test-run")
 
     async def on_stop(self) -> None:
@@ -242,8 +252,16 @@ class MocaTestPlugin(ProcessorPlugin):
             await self._run_test()
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except Exception as exc:
             logger.exception("moca_test: ошибка выполнения теста")
+            await self.bus.publish(
+                Event(
+                    topic=Topics.SESSION_ERROR,
+                    source=self.name,
+                    payload={"scenario": "moca", "session_id": self._session_id,
+                             "reason": f"Ошибка MoCA: {exc}"},
+                )
+            )
         finally:
             self._resolve_pending_tts(False)
             self._running = False
@@ -253,10 +271,21 @@ class MocaTestPlugin(ProcessorPlugin):
     # ── Internal ────────────────────────────────────────────────────────────────
 
     async def _run_test(self) -> None:
-        results: list[dict[str, Any]] = []
+        stored_results = self._resume_checkpoint.get("results") or []
+        results: list[dict[str, Any]] = [
+            {**item, **score_moca_task(str(item.get("task_id") or ""),
+                                      str(item.get("transcript") or ""))}
+            for item in stored_results if isinstance(item, dict)
+        ]
+        start_index = max(0, min(len(MOCA_TASKS), int(self._resume_checkpoint.get("next_index") or 0)))
+        if len(results) != start_index or any(
+            item.get("task_id") != MOCA_TASKS[index].task_id
+            for index, item in enumerate(results)
+        ):
+            raise ValueError("Контрольная точка MoCA повреждена.")
         total = len(MOCA_TASKS)
 
-        for idx, task in enumerate(MOCA_TASKS):
+        for idx, task in enumerate(MOCA_TASKS[start_index:], start=start_index):
             if self._stop_requested:
                 break
 
@@ -289,10 +318,20 @@ class MocaTestPlugin(ProcessorPlugin):
             else:
                 transcript = await self._record_and_transcribe(task)
 
+            if not transcript.strip():
+                raise RuntimeError("Ответ не распознан. Проверьте микрофон и повторите тест.")
+
             # Для оценки достаточно идентификатора задания и транскрипции.
             # Результат задания формируется сразу после распознавания.
             task_result = score_moca_task(task.task_id, transcript)
+            task_result["answered_at"] = datetime.now(UTC).isoformat()
             results.append(task_result)
+            await self.bus.publish(Event(
+                topic=Topics.SESSION_CHECKPOINT,
+                source=self.name,
+                payload={"session_id": self._session_id, "source": "moca",
+                         "next_index": idx + 1, "results": list(results)},
+            ))
             logger.info(
                 "moca_test [%s]: %r, score=%d/%d",
                 task.task_id,
@@ -331,6 +370,8 @@ class MocaTestPlugin(ProcessorPlugin):
             source=self.name,
             payload={
                 "tasks": scoring["tasks"],
+                "session_id": self._session_id,
+                "stopped_early": stopped_early,
                 "task_count": len(results),
                 "score": scoring["score"],
                 "max_score": scoring["max_score"],
@@ -348,6 +389,8 @@ class MocaTestPlugin(ProcessorPlugin):
 
         # First answer already prompted by the main task prompt (100-7=?)
         transcript = await self._record_and_transcribe(task)
+        if not transcript.strip():
+            raise RuntimeError("Ответ не распознан. Проверьте микрофон и повторите тест.")
         all_transcripts.append(transcript)
 
         for step_prompt, _ in SERIAL_SUBTRACTION_STEPS:
@@ -381,6 +424,8 @@ class MocaTestPlugin(ProcessorPlugin):
                 hint=task.hint,
             )
             t = await self._record_and_transcribe(step_task)
+            if not t.strip():
+                raise RuntimeError("Ответ не распознан. Проверьте микрофон и повторите тест.")
             all_transcripts.append(t)
 
         return " | ".join(all_transcripts)
@@ -495,12 +540,19 @@ class MocaTestPlugin(ProcessorPlugin):
                         },
                     ))
             audio_path = recorder.stop() or audio_path
+        except asyncio.CancelledError:
+            try:
+                recorder.stop()
+            finally:
+                delete_temp_audio(audio_path)
+            raise
         except Exception as exc:
             logger.exception("moca_test: ошибка записи для %s", task.task_id)
             try:
                 recorder.stop()
             except Exception:
                 pass
+            delete_temp_audio(audio_path)
             return ""
 
         # Hide mic indicator immediately after recording stops
@@ -541,7 +593,11 @@ class MocaTestPlugin(ProcessorPlugin):
                 ),
                 timeout=120.0,
             )
+            if reply.get("accepted") is False:
+                raise RuntimeError(str(reply.get("message") or "Не удалось распознать ответ."))
             return str(reply.get("transcript") or "")
         except Exception as exc:
             logger.warning("moca_test: transcribe error: %s", exc)
-            return ""
+            raise
+        finally:
+            delete_temp_audio(audio_path)

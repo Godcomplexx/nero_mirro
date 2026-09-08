@@ -10,8 +10,8 @@ from neuro_mirror.screening.audio_analyzer import AudioAnalysisResult
 class ScreeningScore:
     """Aggregated screening score with risk assessment."""
 
-    overall_score: float = 0.0          # 0.0-1.0
-    risk_level: str = "medium"          # "low" | "medium" | "high"
+    overall_score: float | None = None
+    risk_level: str = "unavailable"
     domain_scores: dict[str, float] = field(default_factory=dict)
     recommendations: list[str] = field(default_factory=list)
     notes: str = ""
@@ -63,13 +63,28 @@ def compute_screening_score(
     ScreeningScore with overall_score, risk_level, domain breakdowns
     and recommendations.
     """
+    if any(
+        value is None
+        for value in (
+            video.attention_score,
+            video.gaze_stability,
+            audio.speech_score,
+            audio.reaction_ms,
+            audio.pitch_variability,
+            audio.pause_ratio,
+        )
+    ):
+        return ScreeningScore(
+            notes="Итоговый показатель недоступен: один или несколько алгоритмов не реализованы."
+        )
+
     domain_scores: dict[str, float] = {
-        "attention": max(0.0, min(1.0, video.attention_score)),
-        "gaze": max(0.0, min(1.0, video.gaze_stability)),
-        "speech": max(0.0, min(1.0, audio.speech_score)),
-        "reaction": _normalise_reaction(audio.reaction_ms),
-        "pitch": max(0.0, min(1.0, audio.pitch_variability)),
-        "pause": _invert_ratio(audio.pause_ratio),
+        "attention": max(0.0, min(1.0, float(video.attention_score))),
+        "gaze": max(0.0, min(1.0, float(video.gaze_stability))),
+        "speech": max(0.0, min(1.0, float(audio.speech_score))),
+        "reaction": _normalise_reaction(int(audio.reaction_ms)),
+        "pitch": max(0.0, min(1.0, float(audio.pitch_variability))),
+        "pause": _invert_ratio(float(audio.pause_ratio)),
     }
 
     # Weighted average

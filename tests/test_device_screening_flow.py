@@ -46,7 +46,11 @@ class ScreeningDeviceFlowTest(unittest.IsolatedAsyncioTestCase):
         aggregator = AggregatorPlugin(bus, appearance_composer=_NoopComposer())
 
         await aggregator.handle_event(
-            Event(topic=Topics.UI_ACTION, source="test", payload={"action": "start_screening"})
+            Event(
+                topic=Topics.UI_ACTION,
+                source="test",
+                payload={"action": "start_screening", "video_allowed": True},
+            )
         )
 
         # Only UI_UPDATE is published; no PREPARE_SESSION follows

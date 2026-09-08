@@ -226,7 +226,7 @@ class VisionWorkerPlugin(ProcessorPlugin):
                 frame_data = base64.b64decode(frame_base64) if frame_base64 else b""
                 video_result = await asyncio.to_thread(analyze_frames, [frame_data] if frame_data else [])
                 logger.info(
-                    "screening video analysis: attention=%.2f gaze=%.2f face=%s",
+                    "screening video analysis: attention=%s gaze=%s face=%s",
                     video_result.attention_score,
                     video_result.gaze_stability,
                     video_result.face_detected,
@@ -235,7 +235,6 @@ class VisionWorkerPlugin(ProcessorPlugin):
                 logger.exception("screening video analysis failed, using fallback")
                 from neuro_mirror.screening.video_analyzer import VideoAnalysisResult
                 video_result = VideoAnalysisResult(
-                    attention_score=0.5,
                     face_detected=bool(raw.get("face_detected", False)),
                     face_count=int(raw.get("face_count") or 0),
                     notes=f"Fallback из-за ошибки анализа: {exc}",
@@ -265,8 +264,9 @@ class VisionWorkerPlugin(ProcessorPlugin):
                 source=self.name,
                 payload={
                     "analysis_type": "screening",
-                    "attention_score": 0.0,
-                    "gaze_stability": 0.0,
+                    "attention_score": None,
+                    "gaze_stability": None,
+                    "behavioral_markers_status": "unavailable",
                     "micro_expression_flags": [],
                     "face_detected": False,
                     "face_count": 0,
@@ -296,7 +296,9 @@ class VisionWorkerPlugin(ProcessorPlugin):
         else:
             payload = {
                 "analysis_type": "screening",
-                "attention_score": 0.25,
+                "attention_score": None,
+                "gaze_stability": None,
+                "behavioral_markers_status": "unavailable",
                 "face_detected": False,
                 "face_count": 0,
                 "notes": message,

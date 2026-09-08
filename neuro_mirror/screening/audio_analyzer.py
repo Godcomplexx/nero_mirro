@@ -1,17 +1,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Optional
 
 
 @dataclass(slots=True)
 class AudioAnalysisResult:
     """Result of audio analysis for screening."""
 
-    speech_score: float = 0.0           # 0.0-1.0  (clarity / coherence)
-    speech_rate_wpm: float = 0.0        # words per minute
-    pause_ratio: float = 0.0           # fraction of silence
-    reaction_ms: int = 0               # time to first utterance
-    pitch_variability: float = 0.0     # tonal variability
+    speech_score: Optional[float] = None
+    speech_rate_wpm: Optional[float] = None
+    pause_ratio: Optional[float] = None
+    reaction_ms: Optional[int] = None
+    pitch_variability: Optional[float] = None
     biomarker_flags: list[str] = field(default_factory=list)
     transcript: str = ""               # ASR transcript (if available)
     notes: str = ""
@@ -38,17 +39,10 @@ def analyze_audio(audio_path: str) -> AudioAnalysisResult:
 
     if not audio_path:
         return AudioAnalysisResult(
-            notes="STUB: путь к аудио-файлу не задан.",
+            notes="Акустические маркеры недоступны: путь к аудио не задан.",
         )
 
-    # Stub: имитируем базовый результат
+    # The algorithm is not implemented: never return fabricated measurements.
     return AudioAnalysisResult(
-        speech_score=0.72,
-        speech_rate_wpm=120.0,
-        pause_ratio=0.15,
-        reaction_ms=650,
-        pitch_variability=0.40,
-        biomarker_flags=[],
-        transcript="",
-        notes="STUB: подставить реальный код аудио-анализа.",
+        notes="Акустические речевые маркеры недоступны: алгоритм не реализован.",
     )

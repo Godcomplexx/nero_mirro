@@ -24,7 +24,12 @@ from pydantic import BaseModel
 
 from neuro_mirror.app.runtime import RuntimeHandle, create_runtime
 from neuro_mirror.core.settings import Settings
-from neuro_mirror.core.user_profiles import CONSENT_TEXT, PRESET_AVATARS, UserProfileStore
+from neuro_mirror.core.user_profiles import (
+    CONSENT_TEXT,
+    CONSENT_TEXTS,
+    PRESET_AVATARS,
+    UserProfileStore,
+)
 from neuro_mirror.models.events import Event, Topics
 from neuro_mirror.plugins.ui.web_plugin import WebUIPlugin, WebUIStateStore
 from neuro_mirror.plugins.user_progress.plugin import UserProgressPlugin
@@ -56,6 +61,9 @@ class TTSRequest(BaseModel):
 class UserCreateIn(BaseModel):
     name: str
     consent: bool = False
+    personal_data_consent: bool | None = None
+    audio_data_consent: bool | None = None
+    video_data_consent: bool | None = None
     avatar_preset: str = ""
     photo_base64: str = ""
 
@@ -152,6 +160,28 @@ def create_app() -> FastAPI:
     app = FastAPI(title="Neuro Mirror Web", lifespan=lifespan)
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
+    def _active_user_or_400() -> dict[str, Any]:
+        ctx: WebAppContext = app.state.context
+        user = ctx.user_store.get_active_user()
+        if user is None:
+            raise HTTPException(status_code=400, detail="Сначала выберите пользователя.")
+        return user
+
+    def _require_consent(consent_type: str) -> dict[str, Any]:
+        ctx: WebAppContext = app.state.context
+        user = _active_user_or_400()
+        if not ctx.user_store.has_consent(str(user.get("id") or ""), consent_type):
+            labels = {
+                "personal": "персональных данных",
+                "audio": "аудиоданных",
+                "video": "видеоданных",
+            }
+            raise HTTPException(
+                status_code=403,
+                detail=f"Нет согласия на обработку {labels.get(consent_type, consent_type)}.",
+            )
+        return user
+
     # ---- Read-only endpoints ----
 
     @app.get("/")
@@ -206,6 +236,24 @@ def create_app() -> FastAPI:
             "avatar_url": avatar_url,
             "created_at": user.get("created_at", ""),
             "progress": user.get("progress") or {},
+            "consents": {
+                consent_type: bool(
+                    isinstance((user.get("consents") or {}).get(consent_type), dict)
+                    and (user.get("consents") or {}).get(consent_type, {}).get("given")
+                )
+                for consent_type in CONSENT_TEXTS
+            },
+        }
+
+    def _serialize_incomplete_session(session: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "session_id": session.get("session_id", ""),
+            "scenario": session.get("scenario", ""),
+            "status": session.get("status", ""),
+            "started_at": session.get("started_at"),
+            "updated_at": session.get("updated_at"),
+            "interruption_reason": session.get("interruption_reason", ""),
+            "checkpoint": session.get("checkpoint") or {},
         }
 
     @app.get("/api/users")
@@ -217,6 +265,7 @@ def create_app() -> FastAPI:
                 "users": [_serialize_user(user) for user in ctx.user_store.list_users()],
                 "active_user": _serialize_user(active) if active else None,
                 "consent_text": CONSENT_TEXT,
+                "consent_texts": CONSENT_TEXTS,
                 "avatar_presets": [
                     {"id": preset, "url": f"/static/assets/avatars/{preset}.svg"}
                     for preset in PRESET_AVATARS
@@ -231,6 +280,9 @@ def create_app() -> FastAPI:
             user = ctx.user_store.create_user(
                 payload.name,
                 consent=payload.consent,
+                personal_data_consent=payload.personal_data_consent,
+                audio_data_consent=payload.audio_data_consent,
+                video_data_consent=payload.video_data_consent,
                 avatar_preset=payload.avatar_preset.strip(),
                 photo_base64=payload.photo_base64,
             )
@@ -268,7 +320,7 @@ def create_app() -> FastAPI:
             Event(
                 topic=Topics.USER_SELECTED,
                 source="web.users",
-                payload={"user_id": user["id"], "user_name": user["name"]},
+                payload={"user_id": user["id"]},
             )
         )
         greeting = f"Здравствуйте, {user['name']}! {_next_step_suggestion(user)}"
@@ -281,7 +333,18 @@ def create_app() -> FastAPI:
             },
             source="web.users",
         )
-        return JSONResponse({"user": serialized})
+        incomplete_sessions = ctx.runtime.session_store.list_for_user(
+            str(user.get("id") or ""),
+            resumable_only=True,
+        )
+        return JSONResponse(
+            {
+                "user": serialized,
+                "incomplete_sessions": [
+                    _serialize_incomplete_session(item) for item in incomplete_sessions
+                ],
+            }
+        )
 
     @app.get("/api/results")
     async def user_results() -> JSONResponse:
@@ -306,10 +369,53 @@ def create_app() -> FastAPI:
         items.sort(key=lambda item: str(item.get("stored_at") or ""), reverse=True)
         return JSONResponse({"user": _serialize_user(active), "items": items})
 
+    @app.get("/api/sessions/incomplete")
+    async def incomplete_sessions() -> JSONResponse:
+        ctx: WebAppContext = app.state.context
+        active = _active_user_or_400()
+        items = ctx.runtime.session_store.list_for_user(
+            str(active.get("id") or ""),
+            resumable_only=True,
+        )
+        return JSONResponse(
+            {"items": [_serialize_incomplete_session(item) for item in items]}
+        )
+
+    @app.post("/api/sessions/{session_id}/resume")
+    async def resume_session(session_id: str) -> JSONResponse:
+        ctx: WebAppContext = app.state.context
+        active = _active_user_or_400()
+        session = ctx.runtime.session_store.get(session_id)
+        if session is None or session.get("user_id") != active.get("id"):
+            raise HTTPException(status_code=404, detail="Незавершенная сессия не найдена.")
+        if session.get("status") != "interrupted":
+            raise HTTPException(status_code=409, detail="Сессия не является прерванной.")
+        scenario = str(session.get("scenario") or "")
+        if scenario == "moca":
+            _require_consent("audio")
+        elif scenario == "screening":
+            _require_consent("video")
+        reply = await ctx.runtime.bus.request(
+            Event(
+                topic=Topics.UI_ACTION,
+                source="web.sessions",
+                payload={
+                    "action": "resume_session",
+                    "session_id": session_id,
+                    "audio_allowed": ctx.user_store.active_has_consent("audio"),
+                    "video_allowed": ctx.user_store.active_has_consent("video"),
+                },
+            )
+        )
+        if not reply.get("accepted"):
+            raise HTTPException(status_code=409, detail="Не удалось продолжить сессию. Завершите текущий тест и обновите список.")
+        return JSONResponse({"accepted": True, "session_id": session_id})
+
     # ---- Session conditions check (ТЗ 6.3.2): face / lighting / distance ----
 
     @app.post("/api/session/check-face")
     async def session_check_face(payload: SessionFrameIn) -> JSONResponse:
+        _require_consent("video")
         import base64 as _base64
 
         from neuro_mirror.screening.session_check import analyze_frame_conditions
@@ -370,6 +476,8 @@ def create_app() -> FastAPI:
     @app.post("/api/actions/{action}")
     async def ui_action(action: str, request: Request) -> JSONResponse:
         ctx: WebAppContext = app.state.context
+        if action == "resume_session":
+            raise HTTPException(status_code=400, detail="Используйте /api/sessions/{session_id}/resume.")
         event_payload: dict[str, Any] = {"action": action}
         if request.headers.get("content-type", "").lower().startswith("application/json"):
             try:
@@ -378,6 +486,18 @@ def create_app() -> FastAPI:
                 body = None
             if isinstance(body, dict):
                 event_payload.update(body)
+        event_payload["action"] = action
+        if action in {"start_moca", "start_voice_capture"}:
+            _require_consent("audio")
+            event_payload["audio_allowed"] = True
+        if action in {"start_screening", "measure_pulse", "start_preview"}:
+            _require_consent("video")
+            event_payload["video_allowed"] = True
+        if action in {"start_screening", "start_hads"}:
+            _active_user_or_400()
+            event_payload["audio_allowed"] = ctx.user_store.active_has_consent("audio")
+        if action == "start_screening":
+            event_payload["video_allowed"] = True
         await ctx.runtime.bus.publish(
             Event(topic=Topics.UI_ACTION, source="web.action", payload=event_payload)
         )
@@ -424,6 +544,7 @@ def create_app() -> FastAPI:
     @app.post("/api/appearance/analyze")
     async def appearance_analyze(image: UploadFile = File(...)) -> JSONResponse:
         ctx: WebAppContext = app.state.context
+        _require_consent("video")
 
         # Notify UI that analysis is starting
         await ctx.runtime.bus.publish(
@@ -469,6 +590,7 @@ def create_app() -> FastAPI:
     @app.post("/api/camera/vision")
     async def camera_vision(payload: CameraVisionRequest) -> JSONResponse:
         ctx: WebAppContext = app.state.context
+        _require_consent("video")
         if not payload.text.strip():
             raise HTTPException(status_code=400, detail="text is required")
         if not payload.image_base64.strip():
@@ -497,6 +619,7 @@ def create_app() -> FastAPI:
     @app.post("/api/speech/transcribe")
     async def speech_transcribe(audio: UploadFile = File(...)) -> JSONResponse:
         ctx: WebAppContext = app.state.context
+        _require_consent("audio")
         suffix = Path(audio.filename or "voice.webm").suffix or ".webm"
         fd, temp_path = tempfile.mkstemp(prefix="neuro_mirror_voice_", suffix=suffix)
         os.close(fd)
@@ -608,6 +731,12 @@ def create_app() -> FastAPI:
           duration=N      — total monitor seconds (default 60, ignored in screening mode)
         """
         ctx: WebAppContext = app.state.context
+        if (
+            ctx.user_store.get_active_user() is None
+            or not ctx.user_store.active_has_consent("video")
+        ):
+            await websocket.close(code=4403, reason="Требуется согласие на обработку видеоданных.")
+            return
         await websocket.accept()
 
         # Parse query params from the request scope
@@ -667,8 +796,9 @@ def create_app() -> FastAPI:
                 "analysis_type": "screening" if source == "browser_rppg" else "monitor",
                 "face_detected": len(face_boxes) > 0,
                 "face_count": len(face_boxes),
-                "attention_score": 0.78 if face_boxes else 0.42,
-                "gaze_stability": 0.72 if face_boxes else 0.0,
+                "attention_score": None,
+                "gaze_stability": None,
+                "behavioral_markers_status": "unavailable",
                 "screening_frame_count": len(frames),
                 "screening_fps": round(actual_fps, 2),
                 "source_backend": source,

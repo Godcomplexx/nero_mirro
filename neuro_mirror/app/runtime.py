@@ -8,6 +8,7 @@ from neuro_mirror.core.event_bus import EventBus
 from neuro_mirror.core.device_manager import DeviceManager
 from neuro_mirror.core.plugin_manager import PluginManager
 from neuro_mirror.core.settings import Settings
+from neuro_mirror.core.session_store import SessionStore
 from neuro_mirror.interfaces.plugin import Plugin
 from neuro_mirror.models.events import Event, Topics
 from neuro_mirror.plugins.aggregator.plugin import AggregatorPlugin
@@ -33,6 +34,7 @@ class RuntimeHandle:
     stop_event: asyncio.Event
     assistant_backend_label: str
     weather_source_label: str
+    session_store: SessionStore
 
     async def start(self) -> None:
         await self.plugin_manager.start_all()
@@ -100,6 +102,7 @@ def create_runtime(
             limit=settings.appearance_memory_limit,
         ),
     )
+    session_store = SessionStore()
 
     plugin_manager.register(DeviceManager(bus, settings=settings))
     plugin_manager.register(StoragePlugin(bus))
@@ -112,7 +115,14 @@ def create_runtime(
     plugin_manager.register(VoiceTestPlugin(bus, settings=settings))
     plugin_manager.register(MocaTestPlugin(bus, settings=settings))
     plugin_manager.register(HadsTestPlugin(bus, settings=settings))
-    plugin_manager.register(AggregatorPlugin(bus, appearance_composer=appearance_composer))
+    plugin_manager.register(
+        AggregatorPlugin(
+            bus,
+            appearance_composer=appearance_composer,
+            session_store=session_store,
+            settings=settings,
+        )
+    )
 
     if include_ai_plugin:
         plugin_manager.register(
@@ -134,4 +144,5 @@ def create_runtime(
         stop_event=stop_event,
         assistant_backend_label=assistant_backend_label,
         weather_source_label=weather_source_label,
+        session_store=session_store,
     )

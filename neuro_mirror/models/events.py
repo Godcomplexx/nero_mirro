@@ -29,6 +29,8 @@ class Topics:
     HADS_START = "cmd.hads_start"
     HADS_STOP = "cmd.hads_stop"
     HADS_TEST_RESULT = "test.hads_result"
+    SESSION_CHECKPOINT = "session.checkpoint"
+    SESSION_ERROR = "session.error"
     REPORT_DATA = "report.data"
     USER_SELECTED = "user.selected"
     STORAGE_WRITE = "storage.write"

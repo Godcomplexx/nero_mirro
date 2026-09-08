@@ -5,8 +5,11 @@ from enum import Enum
 from typing import Any
 
 from neuro_mirror.interfaces.processor import ProcessorPlugin
+from neuro_mirror.core.session_store import SessionStore
+from neuro_mirror.core.settings import Settings
 from neuro_mirror.models.events import Event, Topics
 from neuro_mirror.plugins.ai_assistant.appearance_response import AppearanceResponseComposer
+from neuro_mirror.version import session_version_manifest
 
 
 logger = logging.getLogger(__name__)
@@ -38,7 +41,14 @@ IGNORED_UI_ACTIONS = {
 class AggregatorPlugin(ProcessorPlugin):
     plugin_name = "aggregator"
 
-    def __init__(self, bus, *, appearance_composer: AppearanceResponseComposer) -> None:
+    def __init__(
+        self,
+        bus,
+        *,
+        appearance_composer: AppearanceResponseComposer,
+        session_store: SessionStore | None = None,
+        settings: Settings | None = None,
+    ) -> None:
         super().__init__(bus)
         self.appearance_composer = appearance_composer
         self.state = SessionState.IDLE
@@ -50,6 +60,11 @@ class AggregatorPlugin(ProcessorPlugin):
         self._screening_chain = False
         # Результаты последней проверки условий сессии (ТЗ 6.3.2)
         self._session_conditions: dict[str, Any] = {}
+        self.session_store = session_store
+        self.settings = settings
+        self._active_user_id = ""
+        self._active_session_id = ""
+        self._session_permissions: dict[str, bool] = {}
 
     def subscribed_topics(self) -> tuple[str, ...]:
         return (
@@ -64,9 +79,17 @@ class AggregatorPlugin(ProcessorPlugin):
             Topics.MOCA_TEST_RESULT,
             Topics.HADS_TEST_RESULT,
             Topics.STORAGE_READ_RESULT,
+            Topics.USER_SELECTED,
+            Topics.SESSION_CHECKPOINT,
+            Topics.SESSION_ERROR,
         )
 
     async def handle_event(self, event: Event) -> None:
+        if event.topic in {Topics.SESSION_CHECKPOINT, Topics.SESSION_ERROR,
+                           Topics.MOCA_TEST_RESULT, Topics.HADS_TEST_RESULT}:
+            session_id = event.payload.get("session_id")
+            if session_id is not None and session_id != self._active_session_id:
+                return
         if event.topic == Topics.SYSTEM_BOOTSTRAP:
             await self._handle_bootstrap()
             return
@@ -75,8 +98,51 @@ class AggregatorPlugin(ProcessorPlugin):
             self.history_count = len(event.payload.get("items", []))
             return
 
+        if event.topic == Topics.USER_SELECTED:
+            next_user = str(event.payload.get("user_id") or "")
+            if next_user != self._active_user_id and self._active_session_id:
+                self.state = SessionState.IDLE
+                self._interrupt_session("Выбран другой пользователь.")
+                await self.bus.publish(Event(topic=Topics.MOCA_STOP, source=self.name))
+                await self.bus.publish(Event(topic=Topics.HADS_STOP, source=self.name))
+                self._latest_results.clear()
+                self._screening_chain = False
+            self._active_user_id = next_user
+            return
+
+        if event.topic == Topics.SESSION_CHECKPOINT:
+            if self.session_store is not None and self._active_session_id:
+                current = self.session_store.get(self._active_session_id) or {}
+                merged_checkpoint = {
+                    **dict(current.get("checkpoint") or {}),
+                    **event.payload,
+                }
+                self.session_store.checkpoint(self._active_session_id, merged_checkpoint)
+            return
+
+        if event.topic == Topics.SESSION_ERROR:
+            reason = str(event.payload.get("reason") or "Ошибка выполнения сессии.")
+            self._fail_session(reason)
+            self.state = SessionState.IDLE
+            await self.bus.publish(
+                Event(
+                    topic=Topics.UI_UPDATE,
+                    source=self.name,
+                    payload={"screen": "idle", "message": reason},
+                )
+            )
+            return
+
         if event.topic in {Topics.UI_ACTION, Topics.AI_COMMAND}:
+            was_busy = self.state != SessionState.IDLE
             await self._handle_action(event.payload)
+            if event.payload.get("_request_id") and event.payload.get("action") == "resume_session":
+                await self.bus.publish(Event(
+                    topic="session.resume.reply", source=self.name,
+                    payload={"_reply_to": event.payload["_request_id"],
+                             "accepted": not was_busy and self.state != SessionState.IDLE
+                             and self._active_session_id == event.payload.get("session_id")},
+                ))
             return
 
         if event.topic == Topics.DEVICE_SELECTION_RESOLVED:
@@ -90,6 +156,15 @@ class AggregatorPlugin(ProcessorPlugin):
         if event.topic == Topics.RPPG_RESULT:
             if self.state == SessionState.SCREENING:
                 self._latest_results["video"] = event.payload
+                if self.session_store is not None and self._active_session_id:
+                    self.session_store.checkpoint(
+                        self._active_session_id,
+                        {
+                            "source": "screening_video",
+                            "next_index": 0,
+                            "video": event.payload,
+                        },
+                    )
                 await self._maybe_finish_screening()
             return
 
@@ -139,29 +214,53 @@ class AggregatorPlugin(ProcessorPlugin):
         if action in IGNORED_UI_ACTIONS:
             return
 
+        if action in {"start_screening", "start_moca", "start_hads", "resume_session"}:
+            if self.state != SessionState.IDLE:
+                await self.bus.publish(Event(
+                    topic=Topics.UI_UPDATE, source=self.name,
+                    payload={"message": "Сначала завершите или остановите текущий тест."},
+                ))
+                return
+
         # Результаты проверки условий приходят вместе с командой запуска
         conditions = payload.get("session_conditions")
         if action.startswith("start_") and isinstance(conditions, dict):
             self._session_conditions = conditions
         elif action.startswith("start_"):
             self._session_conditions = {}
+        if action.startswith("start_"):
+            self._session_permissions = {
+                "audio": bool(payload.get("audio_allowed", False)),
+                "video": bool(payload.get("video_allowed", False)),
+            }
 
         if action == "start_screening":
-            await self._start_screening()
+            if not self._session_permissions.get("video"):
+                await self._publish_consent_required("видеоданных")
+                return
+            await self._start_screening(payload)
             return
 
         if action == "start_moca":
-            await self._start_moca_standalone()
+            if not self._session_permissions.get("audio"):
+                await self._publish_consent_required("аудиоданных")
+                return
+            await self._start_moca_standalone(payload)
             return
 
         if action == "start_hads":
-            await self._start_hads(chain=False)
+            await self._start_hads(chain=False, payload=payload)
+            return
+
+        if action == "resume_session":
+            await self._resume_session(str(payload.get("session_id") or ""), payload)
             return
 
         if action == "stop_hads":
             await self.bus.publish(Event(topic=Topics.HADS_STOP, source=self.name, payload={}))
             self.state = SessionState.IDLE
             self._screening_chain = False
+            self._interrupt_session(str(payload.get("reason") or "Остановлено пользователем."))
             await self.bus.publish(Event(
                 topic=Topics.UI_UPDATE,
                 source=self.name,
@@ -172,6 +271,7 @@ class AggregatorPlugin(ProcessorPlugin):
         if action == "stop_moca":
             await self.bus.publish(Event(topic=Topics.MOCA_STOP, source=self.name, payload={}))
             self.state = SessionState.IDLE
+            self._interrupt_session(str(payload.get("reason") or "Остановлено пользователем."))
             await self.bus.publish(Event(
                 topic=Topics.UI_UPDATE,
                 source=self.name,
@@ -206,7 +306,14 @@ class AggregatorPlugin(ProcessorPlugin):
             )
         )
 
-    async def _start_screening(self) -> None:
+    async def _start_screening(
+        self,
+        payload: dict[str, Any] | None = None,
+        *,
+        start_session: bool = True,
+    ) -> None:
+        if start_session:
+            self._begin_session("screening", payload or {})
         self.state = SessionState.SCREENING
         self._latest_results.clear()
         self._pending_capture_mode = ""
@@ -280,6 +387,7 @@ class AggregatorPlugin(ProcessorPlugin):
         )
         if not self._pending_capture_mode:
             self.state = SessionState.IDLE
+            self._fail_session("; ".join(map(str, errors)) or "Ошибка проверки устройства.")
 
     async def _finish_appearance_analysis(self, payload: dict[str, Any]) -> None:
         self.state = SessionState.REPORTING
@@ -374,10 +482,20 @@ class AggregatorPlugin(ProcessorPlugin):
         # before the anxiety test takes over the screen and the speaker
         await asyncio.sleep(8.0)
 
-        await self._start_hads(chain=True)
+        if self.state == SessionState.HADS:
+            await self._start_hads(chain=True, payload={"audio_allowed": self._session_permissions.get("audio", False)})
 
-    async def _start_moca_standalone(self) -> None:
+    async def _start_moca_standalone(
+        self,
+        payload: dict[str, Any] | None = None,
+        *,
+        start_session: bool = True,
+        checkpoint: dict[str, Any] | None = None,
+    ) -> None:
         """Launch the MoCA voice test directly from the main menu."""
+        payload = payload or {}
+        if start_session:
+            self._begin_session("moca", payload)
         self.state = SessionState.MOCA
         self._latest_results.pop("moca", None)
         self._screening_chain = False
@@ -396,14 +514,32 @@ class AggregatorPlugin(ProcessorPlugin):
                 },
             )
         )
-        await self.bus.publish(Event(topic=Topics.MOCA_START, source=self.name, payload={}))
+        await self.bus.publish(
+            Event(
+                topic=Topics.MOCA_START,
+                source=self.name,
+                payload={"resume_checkpoint": checkpoint or {},
+                         "session_id": self._active_session_id},
+            )
+        )
 
-    async def _start_hads(self, *, chain: bool) -> None:
+    async def _start_hads(
+        self,
+        *,
+        chain: bool,
+        payload: dict[str, Any] | None = None,
+        start_session: bool = True,
+        checkpoint: dict[str, Any] | None = None,
+    ) -> None:
         """Launch the HADS anxiety/depression test.
 
         ``chain=True`` means it runs as the second step of the basic screening
         and the final report should combine video + HADS results.
         """
+        payload = payload or {}
+        audio_allowed = bool(payload.get("audio_allowed", self._session_permissions.get("audio", False)))
+        if not chain and start_session:
+            self._begin_session("hads", payload)
         self.state = SessionState.HADS
         self._screening_chain = chain
         if not chain:
@@ -418,14 +554,171 @@ class AggregatorPlugin(ProcessorPlugin):
                     "screen": "hads",
                     "message": (
                         "Начинается тест на тревожность и депрессию (HADS). "
-                        "Отвечайте голосом или нажимайте на вариант ответа."
+                        + (
+                            "Отвечайте голосом или нажимайте на вариант ответа."
+                            if audio_allowed
+                            else "Выбирайте ответ нажатием на экран."
+                        )
                     ),
                     "hads_question_index": 0,
                     "hads_question_total": 14,
                 },
             )
         )
-        await self.bus.publish(Event(topic=Topics.HADS_START, source=self.name, payload={}))
+        await self.bus.publish(
+            Event(
+                topic=Topics.HADS_START,
+                source=self.name,
+                payload={
+                    "audio_allowed": audio_allowed,
+                    "session_id": self._active_session_id,
+                    "resume_checkpoint": checkpoint or {},
+                },
+            )
+        )
+
+    def _begin_session(self, scenario: str, payload: dict[str, Any]) -> None:
+        if self.session_store is None or not self._active_user_id:
+            return
+        if self._active_session_id:
+            self.session_store.interrupt(
+                self._active_session_id,
+                "Начат новый сценарий до завершения предыдущего.",
+            )
+        stt_model = self.settings.stt_model_name if self.settings is not None else ""
+        emotion_model = self.settings.emotion_model_name if self.settings is not None else ""
+        record = self.session_store.start(
+            user_id=self._active_user_id,
+            scenario=scenario,
+            versions=session_version_manifest(
+                scenario,
+                stt_model=stt_model,
+                emotion_model=emotion_model,
+            ),
+            technical_params=dict(payload.get("session_conditions") or self._session_conditions),
+            permissions={
+                "audio": bool(payload.get("audio_allowed", False)),
+                "video": bool(payload.get("video_allowed", False)),
+            },
+        )
+        self._active_session_id = str(record.get("session_id") or "")
+
+    async def _publish_consent_required(self, data_type: str) -> None:
+        await self.bus.publish(
+            Event(
+                topic=Topics.UI_UPDATE,
+                source=self.name,
+                payload={
+                    "screen": "idle",
+                    "message": f"Для запуска требуется согласие на обработку {data_type}.",
+                },
+            )
+        )
+
+    def _interrupt_session(self, reason: str) -> None:
+        if self.session_store is not None and self._active_session_id:
+            self.session_store.interrupt(self._active_session_id, reason)
+        self._active_session_id = ""
+
+    def _fail_session(self, reason: str) -> None:
+        if self.session_store is not None and self._active_session_id:
+            self.session_store.fail(self._active_session_id, reason)
+        self._active_session_id = ""
+
+    def _complete_report(self, report: dict[str, Any]) -> dict[str, Any]:
+        if self.session_store is None or not self._active_session_id:
+            return report
+        current = self.session_store.get(self._active_session_id) or {}
+        report["session_id"] = self._active_session_id
+        report["user_id"] = current.get("user_id", self._active_user_id)
+        report["session_started_at"] = current.get("started_at")
+        report["versions"] = current.get("versions") or {}
+        completed = self.session_store.complete(self._active_session_id, report) or {}
+        report["session_status"] = completed.get("status", "completed")
+        report["session_finished_at"] = completed.get("finished_at")
+        self._active_session_id = ""
+        return report
+
+    async def _resume_session(self, session_id: str, payload: dict[str, Any] | None = None) -> None:
+        if self.session_store is None or not session_id or not self._active_user_id:
+            await self.bus.publish(
+                Event(
+                    topic=Topics.UI_UPDATE,
+                    source=self.name,
+                    payload={
+                        "screen": "idle",
+                        "message": "Незавершенная сессия не найдена.",
+                    },
+                )
+            )
+            return
+        try:
+            previous = self.session_store.get(session_id)
+            if previous is None or previous.get("user_id") != self._active_user_id:
+                raise KeyError(session_id)
+            permissions = {
+                "audio": bool((payload or {}).get("audio_allowed", False)),
+                "video": bool((payload or {}).get("video_allowed", False)),
+            }
+            scenario = previous.get("scenario")
+            if scenario == "moca" and not permissions["audio"]:
+                await self._publish_consent_required("аудиоданных")
+                return
+            if scenario == "screening" and not permissions["video"]:
+                await self._publish_consent_required("видеоданных")
+                return
+            record = self.session_store.resume(
+                session_id, user_id=self._active_user_id, permissions=permissions,
+            )
+        except (KeyError, PermissionError, ValueError) as exc:
+            await self.bus.publish(
+                Event(
+                    topic=Topics.UI_UPDATE,
+                    source=self.name,
+                    payload={
+                        "screen": "idle",
+                        "message": f"Не удалось возобновить сессию: {exc}",
+                    },
+                )
+            )
+            return
+
+        self._active_session_id = session_id
+        self._session_conditions = dict(record.get("technical_params") or {})
+        self._session_permissions = dict(record.get("permissions") or {})
+        checkpoint = dict(record.get("checkpoint") or {})
+        scenario = str(record.get("scenario") or "")
+        self._latest_results.clear()
+
+        if scenario == "moca":
+            await self._start_moca_standalone(
+                {"audio_allowed": self._session_permissions.get("audio", True)},
+                start_session=False,
+                checkpoint=checkpoint,
+            )
+            return
+        if scenario == "hads":
+            await self._start_hads(
+                chain=False,
+                payload={"audio_allowed": self._session_permissions.get("audio", True)},
+                start_session=False,
+                checkpoint=checkpoint,
+            )
+            return
+        if scenario == "screening" and checkpoint.get("source") == "hads":
+            if isinstance(checkpoint.get("video"), dict):
+                self._latest_results["video"] = dict(checkpoint["video"])
+            await self._start_hads(
+                chain=True,
+                payload={"audio_allowed": self._session_permissions.get("audio", True)},
+                start_session=False,
+                checkpoint=checkpoint,
+            )
+            return
+        if scenario == "screening":
+            await self._start_screening(start_session=False)
+            return
+        self._fail_session("Неизвестный тип сценария при возобновлении.")
 
     def _conditions_limitation(self) -> str:
         """Пометка об ограничении результата условиями (ТЗ 6.3.10)."""
@@ -459,6 +752,10 @@ class AggregatorPlugin(ProcessorPlugin):
 
         video = self._latest_results.get("video", {})
         hads = self._latest_results.get("hads", {})
+        if hads.get("stopped_early"):
+            self._interrupt_session("HADS прерван до получения всех ответов.")
+            self.state = SessionState.IDLE
+            return
 
         hads_domains = {
             "hads_anxiety_score": hads.get("anxiety_score"),
@@ -515,6 +812,7 @@ class AggregatorPlugin(ProcessorPlugin):
                 f"({hads.get('depression_interpretation', '')})."
             )
 
+        report_payload = self._complete_report(report_payload)
         await self.bus.publish(Event(topic=Topics.REPORT_DATA, source=self.name, payload=report_payload))
         await self.bus.publish(Event(topic=Topics.STORAGE_WRITE, source=self.name, payload=report_payload))
         await self.bus.publish(
@@ -541,6 +839,10 @@ class AggregatorPlugin(ProcessorPlugin):
 
         video = self._latest_results.get("video", {})
         moca = self._latest_results.get("moca", {})
+        if moca.get("stopped_early"):
+            self._interrupt_session("MoCA прерван до завершения теста.")
+            self.state = SessionState.IDLE
+            return
 
         report_payload = {
             "report_type": "moca",
@@ -569,6 +871,7 @@ class AggregatorPlugin(ProcessorPlugin):
             },
         }
 
+        report_payload = self._complete_report(report_payload)
         await self.bus.publish(Event(topic=Topics.REPORT_DATA, source=self.name, payload=report_payload))
         await self.bus.publish(Event(topic=Topics.STORAGE_WRITE, source=self.name, payload=report_payload))
         await self.bus.publish(

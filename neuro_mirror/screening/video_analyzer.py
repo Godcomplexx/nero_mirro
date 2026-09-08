@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Optional
 
 
 @dataclass(slots=True)
 class VideoAnalysisResult:
     """Result of video-frame analysis for screening."""
 
-    attention_score: float = 0.0        # 0.0-1.0
-    gaze_stability: float = 0.0         # 0.0-1.0
+    attention_score: Optional[float] = None
+    gaze_stability: Optional[float] = None
     micro_expression_flags: list[str] = field(default_factory=list)
     face_detected: bool = False
     face_count: int = 0
@@ -37,15 +38,10 @@ def analyze_frames(frames: list[bytes]) -> VideoAnalysisResult:
 
     if not frames:
         return VideoAnalysisResult(
-            notes="STUB: нет кадров для анализа.",
+            notes="Видео-маркеры недоступны: кадры для анализа не получены.",
         )
 
-    # Stub: имитируем базовый результат
+    # The algorithm is not implemented: never return fabricated measurements.
     return VideoAnalysisResult(
-        attention_score=0.75,
-        gaze_stability=0.70,
-        micro_expression_flags=[],
-        face_detected=True,
-        face_count=1,
-        notes="STUB: подставить реальный код видео-анализа.",
+        notes="Видео-маркеры внимания и взгляда недоступны: алгоритм не реализован.",
     )

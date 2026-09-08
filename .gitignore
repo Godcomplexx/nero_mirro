@@ -23,3 +23,4 @@ moca_recall_split_experiment/
 # Локальные веса моделей (скачиваются при первом запуске)
 runtime/models/gigaam/*.ckpt
 runtime/models/gigaam/*.model
+runtime/deidentified/

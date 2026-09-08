@@ -283,6 +283,10 @@
               <strong>Отчёт</strong>
               <span>Последние результаты</span>
             </button>
+            <button type="button" class="menu-item" data-menu="resume" hidden>
+              <strong>Продолжить сессию</strong>
+              <span>Вернуться к незавершенному тесту</span>
+            </button>
             <button type="button" class="menu-item" data-menu="about">
               <strong>Сведения о ПО</strong>
               <span>Версия и состояние модулей</span>
@@ -416,9 +420,17 @@
                 </div>
               </div>
 
-              <label class="consent-row" for="user-consent">
-                <input type="checkbox" id="user-consent" />
-                <span id="consent-text">Я даю согласие на обработку персональных данных, в том числе биометрических данных.</span>
+              <label class="consent-row" for="user-consent-personal">
+                <input type="checkbox" id="user-consent-personal" />
+                <span id="consent-text-personal">Я даю согласие на обработку персональных данных.</span>
+              </label>
+              <label class="consent-row" for="user-consent-audio">
+                <input type="checkbox" id="user-consent-audio" />
+                <span id="consent-text-audio">Я даю согласие на запись и временную обработку аудиоданных.</span>
+              </label>
+              <label class="consent-row" for="user-consent-video">
+                <input type="checkbox" id="user-consent-video" />
+                <span id="consent-text-video">Я даю согласие на запись и временную обработку видеоданных.</span>
               </label>
 
               <p class="user-create-error" id="user-create-error" hidden></p>

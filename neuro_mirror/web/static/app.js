@@ -123,8 +123,12 @@ const el = {
   avatarCameraVideo: $("avatar-camera-video"),
   avatarCaptureBtn: $("avatar-capture-btn"),
   avatarCameraCancel: $("avatar-camera-cancel"),
-  userConsent: $("user-consent"),
-  consentText: $("consent-text"),
+  userConsentPersonal: $("user-consent-personal"),
+  userConsentAudio: $("user-consent-audio"),
+  userConsentVideo: $("user-consent-video"),
+  consentTextPersonal: $("consent-text-personal"),
+  consentTextAudio: $("consent-text-audio"),
+  consentTextVideo: $("consent-text-video"),
   userCreateError: $("user-create-error"),
   userCreateSubmit: $("user-create-submit"),
   userCreateBack: $("user-create-back"),
@@ -1435,6 +1439,20 @@ const CHECK_REQUIREMENTS = {
   hads: { camera: false, face: false, mic: true, voice: true, required: [] },
 };
 
+function getCheckRequirements(scenario) {
+  const base = CHECK_REQUIREMENTS[scenario] || CHECK_REQUIREMENTS.hads;
+  const consents = (state.activeUser && state.activeUser.consents) || {};
+  if (consents.audio === false) {
+    return {
+      ...base,
+      mic: false,
+      voice: false,
+      required: base.required.filter((item) => !["mic", "voice"].includes(item)),
+    };
+  }
+  return base;
+}
+
 const CHECK_NAMES = ["camera", "face", "mic", "voice"];
 
 const sessionCheck = {
@@ -1468,10 +1486,15 @@ function setCheckItem(name, checkState, note) {
 
 async function openSessionCheck(scenario) {
   if (!el.checkPanel) return;
+  const consents = (state.activeUser && state.activeUser.consents) || {};
+  if (scenario === "moca" && consents.audio === false) {
+    setText(el.messageValue, "Для MoCA требуется согласие на обработку аудиоданных.");
+    return;
+  }
   sessionCheck.scenario = scenario;
   sessionCheck.results = {};
 
-  const req = CHECK_REQUIREMENTS[scenario] || CHECK_REQUIREMENTS.hads;
+  const req = getCheckRequirements(scenario);
   for (const name of CHECK_NAMES) {
     const item = checkItemEl(name);
     if (item) {
@@ -1501,7 +1524,7 @@ function closeSessionCheck() {
 async function runSessionChecks() {
   if (sessionCheck.running) return;
   sessionCheck.running = true;
-  const req = CHECK_REQUIREMENTS[sessionCheck.scenario] || CHECK_REQUIREMENTS.hads;
+  const req = getCheckRequirements(sessionCheck.scenario);
   try {
     if (req.camera) await checkCameraAndFace();
     if (req.mic) await checkMicAndNoise();
@@ -1666,7 +1689,7 @@ async function checkVoiceSample() {
 }
 
 function finalizeSessionCheck() {
-  const req = CHECK_REQUIREMENTS[sessionCheck.scenario] || CHECK_REQUIREMENTS.hads;
+  const req = getCheckRequirements(sessionCheck.scenario);
   const stateOf = (name) => (sessionCheck.results[name] || {}).state || "idle";
   const failedRequired = req.required.filter((name) => stateOf(name) === "fail");
   const anyFail = CHECK_NAMES.some((name) => req[name] && stateOf(name) === "fail");
@@ -1690,7 +1713,7 @@ function finalizeSessionCheck() {
 function collectSessionConditions() {
   const stateOf = (name) => (sessionCheck.results[name] || {}).state || "skipped";
   const faceData = (sessionCheck.results.face || {}).data || {};
-  const req = CHECK_REQUIREMENTS[sessionCheck.scenario] || {};
+  const req = getCheckRequirements(sessionCheck.scenario);
   const conditions = {
     scenario: sessionCheck.scenario,
     checked_at: new Date().toISOString(),
@@ -1759,9 +1782,19 @@ function bindSessionCheckEvents() {
 
 // ---- Main menu ----
 
-function openMainMenu() {
+async function openMainMenu() {
   if (!el.mainMenu) return;
   setHidden(el.mainMenu, false);
+  const resumeItem = document.querySelector('[data-menu="resume"]');
+  if (resumeItem) setHidden(resumeItem, true);
+  try {
+    const result = await fetchJson("/api/sessions/incomplete");
+    state.incompleteSessions = (result.items || []).filter(item => item.status === "interrupted");
+    if (resumeItem) setHidden(resumeItem, state.incompleteSessions.length === 0);
+  } catch (error) {
+    state.incompleteSessions = [];
+    appendLogLine(`[sessions] ${error.message || error}`);
+  }
 }
 
 function closeMainMenu() {
@@ -1786,6 +1819,21 @@ async function handleMenuAction(item) {
       case "report":
         await openResults();
         break;
+      case "resume": {
+        await unlockAudioPlayback().catch(() => {});
+        const session = (state.incompleteSessions || [])[0];
+        if (!session) {
+          setText(el.messageValue, "Незавершенных сессий нет.");
+          break;
+        }
+        await fetchJson(`/api/sessions/${encodeURIComponent(session.session_id)}/resume`, {
+          method: "POST",
+        });
+        state.incompleteSessions = state.incompleteSessions.slice(1);
+        const resumeItem = document.querySelector('[data-menu="resume"]');
+        if (resumeItem) setHidden(resumeItem, state.incompleteSessions.length === 0);
+        break;
+      }
       case "about": {
         const config = state.config || {};
         const scenarios = config.scenario_versions || {};
@@ -2061,6 +2109,11 @@ function stopCamera() {
 async function toggleCamera() {
   if (state.cameraActive) {
     stopCamera();
+    return;
+  }
+  const consents = (state.activeUser && state.activeUser.consents) || {};
+  if (consents.video === false) {
+    setText(el.messageValue, "Для камеры требуется согласие на обработку видеоданных.");
     return;
   }
 
@@ -2585,6 +2638,9 @@ function isSecureContext() {
 }
 
 function getWakeWordUnavailableReason() {
+  if (!state.activeUser || !state.activeUser.consents || state.activeUser.consents.audio !== true) {
+    return "Для голосовой активации выберите профиль с согласием на обработку аудиоданных.";
+  }
   if (!isSpeechRecognitionSupported()) {
     return "SpeechRecognition API не поддерживается этим браузером (используйте Chrome или Edge)";
   }
@@ -2909,6 +2965,11 @@ function setupVoiceRecorder() {
       stopVoiceRecording();
       return;
     }
+    const consents = (state.activeUser && state.activeUser.consents) || {};
+    if (consents.audio === false) {
+      setText(el.voiceStatus, "Для голосового ввода требуется согласие на обработку аудиоданных.");
+      return;
+    }
 
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       setText(el.voiceStatus, "Browser microphone API is unavailable");
@@ -3075,8 +3136,11 @@ function showUserCreateError(message) {
 
 function syncUserCreateSubmit() {
   const nameOk = Boolean(el.userNameInput && el.userNameInput.value.trim());
-  const consentOk = Boolean(el.userConsent && el.userConsent.checked);
+  const consentOk = Boolean(el.userConsentPersonal && el.userConsentPersonal.checked);
   setDisabled(el.userCreateSubmit, !(nameOk && consentOk));
+  if (el.avatarPhotoBtn) {
+    setDisabled(el.avatarPhotoBtn, !(el.userConsentVideo && el.userConsentVideo.checked));
+  }
 }
 
 function renderUserGrid(users) {
@@ -3141,7 +3205,9 @@ function highlightSelectedAvatar() {
 
 function resetUserCreateForm() {
   if (el.userNameInput) el.userNameInput.value = "";
-  if (el.userConsent) el.userConsent.checked = false;
+  if (el.userConsentPersonal) el.userConsentPersonal.checked = false;
+  if (el.userConsentAudio) el.userConsentAudio.checked = false;
+  if (el.userConsentVideo) el.userConsentVideo.checked = false;
   state.userPhotoDataUrl = "";
   state.userSelectedPreset = state.userPresets.length ? state.userPresets[0].id : "";
   setText(el.avatarPhotoHint, "");
@@ -3161,7 +3227,10 @@ function showUserGateView(view, { allowBack = true } = {}) {
 async function openUserGate() {
   const data = await fetchJson("/api/users");
   state.userPresets = data.avatar_presets || [];
-  if (el.consentText && data.consent_text) setText(el.consentText, data.consent_text);
+  const consentTexts = data.consent_texts || {};
+  if (el.consentTextPersonal && consentTexts.personal) setText(el.consentTextPersonal, consentTexts.personal);
+  if (el.consentTextAudio && consentTexts.audio) setText(el.consentTextAudio, consentTexts.audio);
+  if (el.consentTextVideo && consentTexts.video) setText(el.consentTextVideo, consentTexts.video);
   renderUserGrid(data.users || []);
   renderAvatarPicker();
   resetUserCreateForm();
@@ -3180,6 +3249,14 @@ async function selectUser(userId) {
     method: "POST",
   });
   state.activeUser = result.user;
+  if (!state.activeUser.consents || state.activeUser.consents.audio !== true) {
+    stopWakeWordListening();
+    if (el.wakeWordToggle) el.wakeWordToggle.checked = false;
+  }
+  if (!state.activeUser.consents || state.activeUser.consents.video !== true) stopCamera();
+  state.incompleteSessions = result.incomplete_sessions || [];
+  const resumeItem = document.querySelector('[data-menu="resume"]');
+  if (resumeItem) setHidden(resumeItem, state.incompleteSessions.length === 0);
   updateUserChip();
   updateClockDisplay();
   closeUserGate();
@@ -3188,6 +3265,10 @@ async function selectUser(userId) {
 
 async function startAvatarCamera() {
   stopAvatarCamera();
+  if (!(el.userConsentVideo && el.userConsentVideo.checked)) {
+    showUserCreateError("Для фото-аватара сначала разрешите обработку видеоданных.");
+    return;
+  }
   try {
     const stream = await navigator.mediaDevices.getUserMedia({
       video: { facingMode: "user" },
@@ -3248,7 +3329,10 @@ async function submitUserCreate(event) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         name,
-        consent: Boolean(el.userConsent && el.userConsent.checked),
+        consent: Boolean(el.userConsentPersonal && el.userConsentPersonal.checked),
+        personal_data_consent: Boolean(el.userConsentPersonal && el.userConsentPersonal.checked),
+        audio_data_consent: Boolean(el.userConsentAudio && el.userConsentAudio.checked),
+        video_data_consent: Boolean(el.userConsentVideo && el.userConsentVideo.checked),
         avatar_preset: state.userPhotoDataUrl ? "" : state.userSelectedPreset,
         photo_base64: state.userPhotoDataUrl,
       }),
@@ -3282,7 +3366,9 @@ function bindUserGateEvents() {
   });
   el.userCreateForm && el.userCreateForm.addEventListener("submit", submitUserCreate);
   el.userNameInput && el.userNameInput.addEventListener("input", syncUserCreateSubmit);
-  el.userConsent && el.userConsent.addEventListener("change", syncUserCreateSubmit);
+  el.userConsentPersonal && el.userConsentPersonal.addEventListener("change", syncUserCreateSubmit);
+  el.userConsentAudio && el.userConsentAudio.addEventListener("change", syncUserCreateSubmit);
+  el.userConsentVideo && el.userConsentVideo.addEventListener("change", syncUserCreateSubmit);
   el.avatarPhotoBtn && el.avatarPhotoBtn.addEventListener("click", startAvatarCamera);
   el.avatarCaptureBtn && el.avatarCaptureBtn.addEventListener("click", captureAvatarPhoto);
   el.avatarCameraCancel && el.avatarCameraCancel.addEventListener("click", stopAvatarCamera);

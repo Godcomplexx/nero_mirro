@@ -14,10 +14,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-CONSENT_TEXT = (
-    "Я даю согласие на обработку персональных данных, "
-    "в том числе биометрических данных."
-)
+CONSENT_TEXTS: dict[str, str] = {
+    "personal": "Я даю согласие на обработку персональных данных.",
+    "audio": "Я даю согласие на запись и временную обработку аудиоданных.",
+    "video": "Я даю согласие на запись и временную обработку видеоданных.",
+}
+# Backward-compatible combined text used by older clients.
+CONSENT_TEXT = " ".join(CONSENT_TEXTS.values())
 
 # Preset avatars shipped with the web UI (web/static/assets/avatars/<id>.svg)
 PRESET_AVATARS = ("a01", "a02", "a03", "a04", "a05", "a06")
@@ -60,6 +63,24 @@ class UserProfileStore:
             return None
         return self.get_user(self.active_user_id)
 
+    def has_consent(self, user_id: str, consent_type: str) -> bool:
+        user = self.get_user(user_id)
+        if user is None:
+            return False
+        consents = user.get("consents") or {}
+        entry = consents.get(consent_type) if isinstance(consents, dict) else None
+        if isinstance(entry, dict):
+            return bool(entry.get("given"))
+        # Legacy profiles used one combined consent. They are migrated on load,
+        # but keep this fallback for callers holding an older in-memory object.
+        legacy = user.get("consent") or {}
+        return bool(isinstance(legacy, dict) and legacy.get("given"))
+
+    def active_has_consent(self, consent_type: str) -> bool:
+        if not self.active_user_id:
+            return False
+        return self.has_consent(self.active_user_id, consent_type)
+
     def avatar_photo_path(self, user_id: str) -> Path | None:
         user = self.get_user(user_id)
         if not user or user.get("avatar", {}).get("type") != "photo":
@@ -74,14 +95,22 @@ class UserProfileStore:
         name: str,
         *,
         consent: bool,
+        personal_data_consent: bool | None = None,
+        audio_data_consent: bool | None = None,
+        video_data_consent: bool | None = None,
         avatar_preset: str = "",
         photo_base64: str = "",
     ) -> dict[str, Any]:
         clean_name = " ".join(name.split())[:60]
         if not clean_name:
             raise ValueError("Имя не может быть пустым.")
-        if not consent:
+        personal_allowed = consent if personal_data_consent is None else personal_data_consent
+        audio_allowed = consent if audio_data_consent is None else audio_data_consent
+        video_allowed = consent if video_data_consent is None else video_data_consent
+        if not personal_allowed:
             raise ValueError("Без согласия на обработку данных создать профиль нельзя.")
+        if photo_base64 and not video_allowed:
+            raise ValueError("Для фото-аватара требуется согласие на обработку видеоданных.")
 
         user_id = self._next_id()
         avatar: dict[str, str]
@@ -92,6 +121,7 @@ class UserProfileStore:
             preset = avatar_preset if avatar_preset in PRESET_AVATARS else PRESET_AVATARS[0]
             avatar = {"type": "preset", "value": preset}
 
+        consent_timestamp = datetime.now(timezone.utc).isoformat()
         user = {
             "id": user_id,
             "name": clean_name,
@@ -99,7 +129,24 @@ class UserProfileStore:
             "consent": {
                 "given": True,
                 "text": CONSENT_TEXT,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": consent_timestamp,
+            },
+            "consents": {
+                "personal": {
+                    "given": bool(personal_allowed),
+                    "text": CONSENT_TEXTS["personal"],
+                    "timestamp": consent_timestamp if personal_allowed else None,
+                },
+                "audio": {
+                    "given": bool(audio_allowed),
+                    "text": CONSENT_TEXTS["audio"],
+                    "timestamp": consent_timestamp if audio_allowed else None,
+                },
+                "video": {
+                    "given": bool(video_allowed),
+                    "text": CONSENT_TEXTS["video"],
+                    "timestamp": consent_timestamp if video_allowed else None,
+                },
             },
             "created_at": datetime.now(timezone.utc).isoformat(),
             "progress": dict(DEFAULT_PROGRESS),
@@ -167,8 +214,24 @@ class UserProfileStore:
                 progress = user.setdefault("progress", {})
                 for key, value in DEFAULT_PROGRESS.items():
                     progress.setdefault(key, value)
+                self._backfill_consents(user)
             return users
         return []
+
+    @staticmethod
+    def _backfill_consents(user: dict[str, Any]) -> None:
+        consents = user.setdefault("consents", {})
+        legacy = user.get("consent") or {}
+        legacy_given = bool(isinstance(legacy, dict) and legacy.get("given"))
+        legacy_timestamp = legacy.get("timestamp") if isinstance(legacy, dict) else None
+        for consent_type, text in CONSENT_TEXTS.items():
+            entry = consents.setdefault(consent_type, {})
+            if not isinstance(entry, dict):
+                entry = {}
+                consents[consent_type] = entry
+            entry.setdefault("given", legacy_given)
+            entry.setdefault("text", text)
+            entry.setdefault("timestamp", legacy_timestamp if entry.get("given") else None)
 
     def _save_users(self) -> None:
         self.users_path.parent.mkdir(parents=True, exist_ok=True)

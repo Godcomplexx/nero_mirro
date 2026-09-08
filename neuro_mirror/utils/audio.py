@@ -5,6 +5,7 @@ import os
 import tempfile
 import threading
 import wave
+from pathlib import Path
 
 import numpy as np
 
@@ -12,6 +13,20 @@ try:
     import sounddevice as sd  # type: ignore
 except Exception:
     sd = None
+
+
+def delete_temp_audio(file_path: str) -> None:
+    """Best-effort removal of a temporary audio recording.
+
+    Callers that create a :class:`VoiceRecorder` file own its lifecycle and
+    must invoke this helper from ``finally`` after processing.
+    """
+    if not file_path:
+        return
+    try:
+        Path(file_path).unlink(missing_ok=True)
+    except OSError:
+        return
 
 
 class VoiceRecorder:
@@ -49,7 +64,7 @@ class VoiceRecorder:
 
     @property
     def recording(self) -> bool:
-        return self._stream is not None
+        return self._stream is not None and self._stream.active
 
     def start(self) -> str:
         if sd is None:
@@ -100,28 +115,37 @@ class VoiceRecorder:
                 if speech_started and silence_long_enough:
                     raise sd.CallbackStop()
 
-        self._stream = sd.InputStream(
-            samplerate=self.sample_rate,
-            channels=self.channels,
-            dtype="float32",
-            callback=callback,
-        )
-        self._stream.start()
+        try:
+            self._stream = sd.InputStream(
+                samplerate=self.sample_rate,
+                channels=self.channels,
+                dtype="float32",
+                callback=callback,
+            )
+            self._stream.start()
+        except BaseException:
+            try:
+                self.stop()
+            finally:
+                delete_temp_audio(file_path)
+            raise
         return file_path
 
     def stop(self) -> str:
-        if self._stream is None:
-            return ""
-
-        self._stream.stop()
-        self._stream.close()
-        self._stream = None
-
-        with self._lock:
-            if self._wave_file is not None:
-                self._wave_file.close()
-                self._wave_file = None
-
         file_path = self._file_path
-        self._file_path = ""
+        stream, self._stream = self._stream, None
+        try:
+            if stream is not None:
+                try:
+                    stream.stop()
+                finally:
+                    stream.close()
+        finally:
+            with self._lock:
+                try:
+                    if self._wave_file is not None:
+                        self._wave_file.close()
+                finally:
+                    self._wave_file = None
+                    self._file_path = ""
         return file_path

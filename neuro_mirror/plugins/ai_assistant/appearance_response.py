@@ -709,8 +709,9 @@ class AppearanceResponseComposer:
         if clothing:
             color = AppearanceResponseComposer._extract_color_phrase(clothing)
             if color:
-                return f"{color} тебе очень идёт"
-            return "это цветовое сочетание смотрится на тебе гармонично"
+                color_name = color.removeprefix("этот ").removesuffix(" цвет")
+                return f"цвет одежды — {color_name} — тебе очень идёт"
+            return "одежда по цвету смотрится на тебе гармонично"
         if hair:
             return "волосы выглядят аккуратно и хорошо обрамляют лицо"
         if accessories:
