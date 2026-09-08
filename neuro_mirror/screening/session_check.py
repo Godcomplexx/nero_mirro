@@ -10,7 +10,10 @@
 """
 from __future__ import annotations
 
+import logging
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 # Пороговые значения (яркость 0–255, доля площади кадра 0–1)
 BRIGHTNESS_DARK = 55.0      # темно — блокируем запуск
@@ -30,11 +33,17 @@ def analyze_frame_conditions(jpeg_bytes: bytes) -> dict[str, Any]:
         "face_close_enough": False,
         "brightness": 0.0,
         "brightness_ok": False,
+        "detector_available": True,
         "advice": [],
     }
-
-    array = np.frombuffer(jpeg_bytes, dtype=np.uint8)
-    frame = cv2.imdecode(array, cv2.IMREAD_COLOR)
+    try:
+        array = np.frombuffer(jpeg_bytes, dtype=np.uint8)
+        frame = cv2.imdecode(array, cv2.IMREAD_COLOR)
+    except Exception:
+        logger.exception("Не удалось декодировать кадр для проверки условий")
+        result["detector_available"] = False
+        result["advice"].append("Серверная проверка кадра временно недоступна.")
+        return result
     if frame is None:
         result["advice"].append("Не удалось получить кадр с камеры.")
         return result
@@ -43,12 +52,45 @@ def analyze_frame_conditions(jpeg_bytes: bytes) -> dict[str, Any]:
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     frame_height, frame_width = gray.shape[:2]
 
-    cascade = cv2.CascadeClassifier(
-        cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-    )
-    faces = cascade.detectMultiScale(
-        gray, scaleFactor=1.1, minNeighbors=5, minSize=(60, 60)
-    )
+    faces = []
+    try:
+        # Equalisation helps laptop cameras in dim or backlit rooms.  Two
+        # built-in cascades cover slightly different head angles.
+        search_images = (cv2.equalizeHist(gray), gray)
+        min_side = max(40, min(frame_width, frame_height) // 12)
+        cascade_names = (
+            "haarcascade_frontalface_alt2.xml",
+            "haarcascade_frontalface_default.xml",
+        )
+        detector_loaded = False
+        for cascade_name in cascade_names:
+            cascade = cv2.CascadeClassifier(cv2.data.haarcascades + cascade_name)
+            if cascade.empty():
+                continue
+            detector_loaded = True
+            for search_image in search_images:
+                detected = cascade.detectMultiScale(
+                    search_image,
+                    scaleFactor=1.08,
+                    minNeighbors=4,
+                    minSize=(min_side, min_side),
+                )
+                if len(detected) > 0:
+                    faces = detected
+                    break
+            if len(faces) > 0:
+                break
+        if not detector_loaded:
+            raise RuntimeError("OpenCV face cascades are missing")
+    except Exception:
+        logger.exception("Детектор лица OpenCV недоступен")
+        result["detector_available"] = False
+        result["brightness"] = round(float(gray.mean()), 1)
+        result["brightness_ok"] = result["brightness"] >= BRIGHTNESS_DARK
+        result["advice"].append(
+            "Автоматическая проверка лица недоступна; можно продолжить тест, если лицо видно в превью."
+        )
+        return result
 
     result["face_count"] = len(faces)
     result["face_detected"] = len(faces) > 0

@@ -264,3 +264,19 @@ def test_http_consents_cannot_be_overridden_by_action_body(tmp_path):
     assert published['action'] == 'start_hads'
     assert published['audio_allowed'] is False
     client.close()
+
+
+def test_face_check_gracefully_reports_missing_detector(monkeypatch):
+    import cv2
+    import numpy as np
+    from neuro_mirror.screening.session_check import analyze_frame_conditions
+    image = np.full((240, 320, 3), 128, dtype=np.uint8)
+    ok, encoded = cv2.imencode('.jpg', image)
+    assert ok
+    broken = Mock()
+    broken.empty.return_value = True
+    monkeypatch.setattr(cv2, 'CascadeClassifier', Mock(return_value=broken))
+    result = analyze_frame_conditions(encoded.tobytes())
+    assert result['frame_ok'] is True
+    assert result['detector_available'] is False
+    assert result['advice']

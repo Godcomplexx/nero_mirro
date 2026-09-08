@@ -428,7 +428,23 @@ def create_app() -> FastAPI:
         if len(jpeg_bytes) > 8 * 1024 * 1024:
             raise HTTPException(status_code=400, detail="Кадр слишком большой.")
 
-        result = await asyncio.to_thread(analyze_frame_conditions, jpeg_bytes)
+        try:
+            result = await asyncio.to_thread(analyze_frame_conditions, jpeg_bytes)
+        except Exception:
+            _log.exception("Ошибка серверной проверки лица")
+            result = {
+                "frame_ok": True,
+                "face_detected": False,
+                "face_count": 0,
+                "face_ratio": 0.0,
+                "face_close_enough": False,
+                "brightness": 0.0,
+                "brightness_ok": False,
+                "detector_available": False,
+                "advice": [
+                    "Автоматическая проверка лица недоступна; можно продолжить тест, если лицо видно в превью."
+                ],
+            }
         return JSONResponse(result)
 
     # ---- Client-side log relay (browser errors go to the server terminal) ----

@@ -1567,26 +1567,33 @@ async function checkCameraAndFace() {
   setCheckItem("face", "wait", "Смотрю на кадр...");
   // Пауза, чтобы автоэкспозиция камеры успела подстроиться
   await new Promise((resolve) => setTimeout(resolve, 900));
-  const frame = captureCameraFrame();
-  if (!frame) {
-    setCheckItem("face", "fail", "Не удалось получить кадр с камеры.");
-    return;
-  }
   let data;
-  try {
-    data = await fetchJson("/api/session/check-face", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ image_base64: frame }),
-    });
-  } catch (error) {
-    setCheckItem("face", "fail", `Проверка кадра не удалась: ${error.message || error}`);
-    return;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const frame = captureCameraFrame();
+    if (!frame) {
+      setCheckItem("face", "fail", "Не удалось получить кадр с камеры.");
+      return;
+    }
+    try {
+      const candidate = await fetchJson("/api/session/check-face", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ image_base64: frame }),
+      });
+      if (!data || candidate.face_detected || candidate.brightness > data.brightness) data = candidate;
+      if (candidate.face_detected || candidate.detector_available === false) break;
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    } catch (error) {
+      setCheckItem("face", "warn", "Автоматическая проверка лица недоступна. Убедитесь, что лицо видно в превью.");
+      return;
+    }
   }
   sessionCheck.results.face = { ...(sessionCheck.results.face || {}), data };
 
   const advice = (data.advice || []).join(" ");
-  if (data.face_detected && data.brightness_ok && data.face_close_enough) {
+  if (data.detector_available === false) {
+    setCheckItem("face", "warn", advice || "Автоматическая проверка лица недоступна. Проверьте превью.");
+  } else if (data.face_detected && data.brightness_ok && data.face_close_enough) {
     setCheckItem("face", "ok", advice || "Лицо видно, света достаточно");
   } else if (data.face_detected && data.brightness_ok) {
     // Только дистанция — предупреждение, не блокируем
@@ -1681,7 +1688,9 @@ async function checkVoiceSample() {
   const noise = (sessionCheck.results.mic || {}).noise || 0;
   sessionCheck.results.voice = { ...(sessionCheck.results.voice || {}), level: voice };
 
-  if (voice > Math.max(0.04, noise * 2.2)) {
+  // Compare with the measured room noise. Laptop/browser gain control often
+  // keeps speech below the old fixed 0.04 threshold even when it is clear.
+  if (voice > Math.max(0.012, noise * 1.6 + 0.004)) {
     setCheckItem("voice", "ok", "Голос слышно хорошо");
   } else {
     setCheckItem("voice", "fail", "Голос слишком тихий — сядьте ближе, говорите громче и проверьте снова.");
