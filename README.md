@@ -1,248 +1,116 @@
-# Neuro Mirror — Установка на новый ПК (пошагово)
+# Neuro Mirror
 
-Локальный прототип `Neuro Mirror`: Web UI, локальный ассистент через Ollama, камера, распознавание речи, TTS-озвучка, анализ эмоций.
+## 1. Описание проекта
 
----
+Neuro Mirror — локальное приложение с веб-интерфейсом для голосовых тестов,
+анализа изображения с камеры и общения с ИИ-ассистентом.
 
-## Требования
+В приложении доступны:
 
-- Windows 10/11 (64-bit)
-- Python 3.11 или 3.12 — [скачать здесь](https://www.python.org/downloads/)
-- Git — [скачать здесь](https://git-scm.com/download/win)
-- Ollama — [скачать здесь](https://ollama.com/download)
-- Веб-камера (USB или встроенная)
-- Микрофон
+- голосовой MoCA: 11 заданий, распознавание ответов через GigaAM `v3_rnnt`,
+  автоматическая оценка до 15 баллов и сохранение результатов;
+- опросник HADS;
+- анализ эмоций и внешнего вида, измерение пульса по видео (rPPG);
+- текстовый и голосовой ассистент через Ollama;
+- озвучка инструкций и ответов, профили пользователей и история результатов.
 
----
+Голосовой MoCA реализует часть заданий методики, а не полный тест на 30 баллов.
+Автоматические результаты требуют проверки специалистом и не являются диагнозом.
 
-## Шаг 1 — Скачать проект
+GigaAM обрабатывает записи локально после скачивания весов. Для озвучки через
+`edge-tts`, погоды и курсов валют нужен интернет. В текущей реализации ответы
+MoCA записываются микрофоном компьютера, на котором запущен Python, поэтому
+проходите тест в браузере на этом же компьютере.
 
-Открой PowerShell и выполни:
+## 2. Как запустить
 
-```powershell
-git clone --recurse-submodules https://github.com/Godcomplexx/neuro-mirror.git
-cd neuro-mirror
-```
+Инструкция рассчитана на Windows 10/11 и PowerShell. Нужны Python 3.12,
+Git, FFmpeg в `PATH`, микрофон и динамики или наушники. Для видеосценариев
+нужна камера, для ИИ-ассистента — установленная Ollama.
 
-> Если репозиторий приватный — скачай ZIP с GitHub и распакуй в любую папку, затем `cd` в неё.
-
----
-
-## Шаг 2 — Установить Python-зависимости
-
-```powershell
-python -m pip install --upgrade pip
-python -m pip install -r runtime\vision_worker\requirements.txt
-python -m pip install -r runtime\speech_worker\requirements.txt
-python -m pip install sounddevice fastapi uvicorn websockets edge-tts httpx
-```
-
-Речевой worker использует GigaAM `v3_rnnt`. Файл
-`runtime\speech_worker\requirements.txt` устанавливает закреплённую ревизию
-официального репозитория GigaAM вместе с PyTorch и torchaudio. Не заменяйте
-эту команду на `pip install gigaam`: версия из PyPI может не поддерживать
-API, который использует worker. Для чтения аудио нужен `ffmpeg` в `PATH`.
-
-Если зависимости речи установлены в отдельное виртуальное окружение,
-перед запуском `main.py` укажите его Python:
+Проверьте необходимые программы:
 
 ```powershell
-$env:NEURO_MIRROR_SPEECH_WORKER_PYTHON = (Resolve-Path .venv-gigaam\Scripts\python.exe).Path
+py -3.12 --version
+git --version
+ffmpeg -version
 ```
 
-> Если у тебя есть GPU NVIDIA — дополнительно установи PyTorch с CUDA:
-> ```powershell
-> python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
-> ```
-> Без GPU всё работает на CPU, просто медленнее.
+**Скачайте проект и создайте отдельное окружение:**
 
----
+```powershell
+git clone --branch main --recurse-submodules https://github.com/Godcomplexx/nero_mirro.git
+cd nero_mirro
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --upgrade pip
+```
 
-## Шаг 3 — Установить и запустить Ollama
+Все следующие команды выполняются из папки `nero_mirro`. Активировать
+окружение не требуется — команды явно используют его Python.
 
-1. Установи [Ollama](https://ollama.com/download) — запускается как фоновый сервис автоматически.
+**Установите зависимости:**
 
-2. Скачай языковую модель (нужен интернет, ~5 ГБ):
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r runtime\vision_worker\requirements.txt -r runtime\speech_worker\requirements.txt sounddevice fastapi uvicorn websockets edge-tts httpx python-multipart requests
+```
+
+Файл зависимостей речи устанавливает закреплённую ревизию GigaAM с API,
+который использует приложение. Устанавливайте её через этот файл.
+На CPU приложение работает без NVIDIA. Для ускорения на GPU установите
+совместимые сборки `torch` и `torchaudio` с CUDA в это же окружение по
+[инструкции PyTorch](https://pytorch.org/get-started/locally/).
+
+**Скачайте веса распознавания речи (около 446 МБ):**
+
+```powershell
+New-Item -ItemType Directory -Force runtime\models\gigaam | Out-Null
+curl.exe -fL --retry 5 --retry-delay 10 -C - -o runtime\models\gigaam\v3_rnnt.ckpt "https://cdn.chatwm.opensmodel.sberdevices.ru/GigaAM/v3_rnnt.ckpt"
+```
+
+Если скачивание прервалось, повторите команду `curl.exe`: загрузка
+продолжится. До запуска проверьте целостность файла:
+
+```powershell
+(Get-FileHash runtime\models\gigaam\v3_rnnt.ckpt -Algorithm MD5).Hash
+```
+
+Ожидаемое значение: `0FD2C9A1FF66ABD8D32A3A07F7592815`. При несовпадении
+удалите только файл `runtime\models\gigaam\v3_rnnt.ckpt` и скачайте его заново.
+
+**Для ИИ-ассистента подготовьте Ollama:**
 
 ```powershell
 ollama pull gemma4:e2b
-```
-
-3. Для работы анализа изображений с камеры — скачай vision-модель:
-
-```powershell
 ollama pull llava
-```
-
-4. Проверь, что Ollama работает:
-
-```powershell
 ollama list
 ```
 
-Должны появиться скачанные модели.
-
----
-
-## Шаг 4 — Первый запуск
-
-Из папки проекта:
+Ollama должна быть запущена. Если её служба не работает, выполните
+`ollama serve` в отдельном окне PowerShell. Для проверки MoCA без ассистента
+этот шаг можно пропустить и перед запуском задать:
 
 ```powershell
-python main.py
+$env:NEURO_MIRROR_ENABLE_AI_ASSISTANT = "0"
 ```
 
-Подожди 20–60 секунд — при первом запуске загружаются веса моделей распознавания эмоций (~200 МБ).
-
-Открой браузер и перейди по адресу:
-
-```
-http://127.0.0.1:8000
-```
-
----
-
-## Шаг 5 — Настройка (по желанию)
-
-Все параметры задаются через переменные окружения перед запуском. Примеры:
-
-### Принудительно CPU (если нет GPU):
+**Запустите приложение:**
 
 ```powershell
-$env:NEURO_MIRROR_DEVICE = "cpu"
-python main.py
+.\.venv\Scripts\python.exe main.py
 ```
 
-### Принудительно GPU:
+Дождитесь строки `Uvicorn running on http://127.0.0.1:8000` и откройте
+[http://127.0.0.1:8000](http://127.0.0.1:8000). Первый запуск может занять
+больше времени из-за загрузки моделей. Не закрывайте окно PowerShell,
+пока работаете с приложением; для остановки нажмите `Ctrl+C`.
 
-```powershell
-python main.py -gpu
-```
+В интерфейсе создайте или выберите профиль, нажмите «Тест MoCA», разрешите
+доступ к микрофону и пройдите проверку голоса. Нажмите «Начать тест»,
+слушайте инструкции и отвечайте, когда появляется индикатор записи.
+После 11 заданий приложение сформирует результат и сохранит его в истории.
+Разрешение на использование микрофона должно быть включено и в Windows,
+и в браузере.
 
-### Задать город для погоды:
-
-```powershell
-$env:NEURO_MIRROR_WEATHER_LOCATION = "Moscow"
-python main.py
-```
-
-### Сменить камеру (если несколько камер):
-
-```powershell
-$env:NEURO_MIRROR_CAMERA_INDEX = "1"
-python main.py
-```
-
-### Сменить голос TTS:
-
-```powershell
-$env:NEURO_MIRROR_TTS_VOICE = "ru-RU-DmitryNeural"
-python main.py
-```
-
-### Использовать другую модель Ollama:
-
-```powershell
-$env:NEURO_MIRROR_OLLAMA_MODEL = "llava"
-python main.py
-```
-
----
-
-## Все переменные окружения
-
-| Переменная | По умолчанию | Описание |
-|---|---|---|
-| `NEURO_MIRROR_DEVICE` | `auto` | `auto` / `cpu` / `cuda` |
-| `NEURO_MIRROR_AI_BACKEND` | `ollama` | Бэкенд ассистента |
-| `NEURO_MIRROR_OLLAMA_MODEL` | `gemma4:e2b` | Модель для чата |
-| `NEURO_MIRROR_OLLAMA_VISION_MODEL` | `llava` | Модель для анализа камеры |
-| `NEURO_MIRROR_OLLAMA_BASE_URL` | `http://127.0.0.1:11434` | Адрес Ollama |
-| `NEURO_MIRROR_WEATHER_LOCATION` | _(пусто)_ | Город для погоды |
-| `NEURO_MIRROR_CAMERA_INDEX` | `0` | Индекс камеры |
-| `NEURO_MIRROR_TTS_VOICE` | `ru-RU-SvetlanaNeural` | Голос озвучки |
-| `NEURO_MIRROR_TTS_RATE` | `+0%` | Скорость речи |
-| `NEURO_MIRROR_STT_MODEL` | `v3_rnnt` | Модель GigaAM для распознавания речи |
-| `NEURO_MIRROR_STT_LANGUAGE` | `ru` | Язык распознавания |
-| `NEURO_MIRROR_WEB_HOST` | `127.0.0.1` | Адрес Web UI |
-| `NEURO_MIRROR_WEB_PORT` | `8000` | Порт Web UI |
-| `NEURO_MIRROR_EMOTION_MODEL` | `enet_b2_7` | Модель анализа эмоций |
-| `NEURO_MIRROR_EMOTION_ENGINE` | `onnx` | Движок (`onnx` / `torch`) |
-
----
-
-## Структура проекта
-
-```
-neuro-mirror/
-├── main.py                    # Точка входа
-├── runtime/
-│   ├── vision_worker/
-│   │   ├── worker.py          # Воркер камеры и эмоций
-│   │   └── requirements.txt
-│   └── speech_worker/
-│       ├── worker.py          # Воркер распознавания речи
-│       └── requirements.txt
-├── neuro_mirror/
-│   ├── core/                  # Настройки, менеджер устройств
-│   ├── plugins/               # Ассистент, камера, STT, TTS, UI
-│   └── web/                   # FastAPI + WebSocket + статика
-└── external/
-    └── rppg-heart-rate-measurement/  # Измерение пульса по видео
-```
-
----
-
-## Возможные проблемы
-
-### Ошибка `No module named 'xxx'`
-
-```powershell
-python -m pip install xxx
-```
-
-### Ollama не отвечает
-
-Убедись, что Ollama запущена. Открой Task Manager и проверь процесс `ollama.exe`, или запусти вручную:
-
-```powershell
-ollama serve
-```
-
-### Камера не работает
-
-Попробуй другой индекс камеры:
-
-```powershell
-$env:NEURO_MIRROR_CAMERA_INDEX = "1"
-python main.py
-```
-
-### Голос не слышен / микрофон не работает
-
-Проверь, что микрофон разрешён в Windows: **Настройки → Конфиденциальность → Микрофон**.
-
-### Медленно работает без GPU
-
-GigaAM автоматически переключается на CPU, если CUDA недоступна. Режим
-можно задать явно:
-
-```powershell
-$env:NEURO_MIRROR_STT_DEVICE = "cpu"
-python main.py
-```
-
----
-
-## Что умеет система
-
-- Чат с ИИ-ассистентом (голосом и текстом)
-- TTS-озвучка ответов через `edge-tts` (русский голос)
-- Просмотр камеры в браузере в реальном времени
-- Анализ эмоций по лицу
-- Голосовой ввод через GigaAM (локально, без интернета)
-- Ответы на вопросы «Как я выгляжу?», «Что на камере?»
-- Погода и курсы валют
-- Измерение пульса по видео (rPPG)
-- Маскот AIRI Hiyori с анимированными состояниями
-- MoCA-тест когнитивных функций
+При последующих запусках откройте PowerShell в папке проекта и выполните
+ту же команду `.\.venv\Scripts\python.exe main.py`. Повторно устанавливать
+зависимости и скачивать веса не нужно, пока они не изменились.
