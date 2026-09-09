@@ -1472,6 +1472,7 @@ function setCheckItem(name, checkState, note) {
   const item = checkItemEl(name);
   if (item) {
     setHidden(item, false);
+    item.dataset.state = checkState;
     const icon = item.querySelector(".check-icon");
     if (icon) icon.dataset.state = checkState;
   }
@@ -1499,6 +1500,7 @@ async function openSessionCheck(scenario) {
     const item = checkItemEl(name);
     if (item) {
       setHidden(item, !req[name]);
+      item.dataset.state = "idle";
       const icon = item.querySelector(".check-icon");
       if (icon) icon.dataset.state = "idle";
     }
@@ -1683,7 +1685,34 @@ async function checkVoiceSample() {
     }
     return;
   }
-  setCheckItem("voice", "wait", "Скажите вслух: «раз, два, три»");
+  for (let seconds = 3; seconds >= 1; seconds -= 1) {
+    setCheckItem("voice", "wait", `Приготовьтесь. Начинайте говорить через ${seconds}…`);
+    setText(el.checkStatus, "После сигнала произнесите: «раз, два, три».");
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+
+  // A short cue clearly separates preparation from the actual measurement.
+  // Measurement starts after the cue has finished, so it is not counted as voice.
+  const audioCtx = sessionCheck.audioCtx;
+  if (audioCtx) {
+    try {
+      if (audioCtx.state === "suspended") await audioCtx.resume();
+      const oscillator = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      oscillator.frequency.value = 880;
+      gain.gain.value = 0.08;
+      oscillator.connect(gain);
+      gain.connect(audioCtx.destination);
+      oscillator.start();
+      oscillator.stop(audioCtx.currentTime + 0.16);
+      await new Promise((resolve) => setTimeout(resolve, 350));
+    } catch (_) {
+      // The large visual prompt remains sufficient if sound playback is blocked.
+    }
+  }
+
+  setCheckItem("voice", "wait", "ГОВОРИТЕ СЕЙЧАС: «раз, два, три» — у вас 4 секунды");
+  setText(el.checkStatus, "Идёт запись пробы голоса…");
   const voice = await measureRms(4000, "peak");
   const noise = (sessionCheck.results.mic || {}).noise || 0;
   sessionCheck.results.voice = { ...(sessionCheck.results.voice || {}), level: voice };

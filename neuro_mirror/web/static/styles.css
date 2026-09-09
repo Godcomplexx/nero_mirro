@@ -2540,6 +2540,18 @@ body {
   background: rgba(255, 255, 255, 0.06);
 }
 
+.check-item[data-state="wait"] {
+  border-color: rgba(112, 221, 255, 0.82);
+  background: rgba(85, 176, 255, 0.13);
+  box-shadow: 0 0 0 3px rgba(85, 176, 255, 0.08);
+}
+
+.check-item[data-check="voice"][data-state="wait"] .check-note {
+  color: #ffffff;
+  font-size: 16px;
+  font-weight: 650;
+}
+
 .check-item[hidden] {
   display: none;
 }
