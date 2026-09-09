@@ -232,8 +232,9 @@ def analyze_screening() -> dict[str, Any]:
         if frame is None:
             return {
                 "analysis_type": "screening",
-                "attention_score": 0.25,
-                "gaze_stability": 0.0,
+                "attention_score": None,
+                "gaze_stability": None,
+                "behavioral_markers_status": "unavailable",
                 "face_detected": False,
                 "face_count": 0,
                 "heart_rate_bpm": None,
@@ -268,8 +269,9 @@ def analyze_screening() -> dict[str, Any]:
 
         return {
             "analysis_type": "screening",
-            "attention_score": 0.78 if face_detected else 0.42,
-            "gaze_stability": 0.72 if face_detected else 0.0,
+            "attention_score": None,
+            "gaze_stability": None,
+            "behavioral_markers_status": "unavailable",
             "face_detected": face_detected,
             "face_count": len(face_boxes),
             "camera_index": frames_info["camera_index"],
