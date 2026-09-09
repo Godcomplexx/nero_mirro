@@ -3,6 +3,8 @@
 runtime/users.json
 runtime/avatars/
 runtime/screenings.jsonl
+runtime/appearance_memory.json
+runtime/device_selection.json
 
 # Виртуальные окружения
 .venv/
