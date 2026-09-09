@@ -59,7 +59,7 @@ ACTIVE_ATTEMPTS: list[str] = []
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 RPPG_REPO_PATH = Path(os.getenv(
     "NEURO_MIRROR_RPPG_REPO_PATH",
-    str(PROJECT_ROOT / "external" / "rppg-heart-rate-measurement"),
+    str(PROJECT_ROOT / "runtime" / "rppg"),
 )).resolve()
 RPPG_MODEL_PATH = Path(os.getenv(
     "NEURO_MIRROR_RPPG_MODEL_PATH",

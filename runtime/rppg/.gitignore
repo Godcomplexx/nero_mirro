@@ -1,0 +1,19 @@
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.pyd
+*.pyo
+.vscode/
+.idea/
+data/
+*.dat
+*.onnx
+*.pt
+*.pth
+*.log
+
+# MediaPipe models
+*.task
+/results

@@ -50,7 +50,7 @@ ffmpeg -version
 **Скачайте проект и создайте отдельное окружение:**
 
 ```powershell
-git clone --branch main --recurse-submodules https://github.com/Godcomplexx/nero_mirro.git
+git clone --branch main https://github.com/Godcomplexx/nero_mirro.git
 cd nero_mirro
 py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install --upgrade pip
