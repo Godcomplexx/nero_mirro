@@ -455,9 +455,9 @@ class AggregatorPlugin(ProcessorPlugin):
         if hr_bpm is not None:
             hr_line = f"Пульс: {hr_bpm} уд/мин ({hr_algo})."
         elif hr_status == "disabled":
-            hr_line = "Измерение пульса отключено."
+            hr_line = "Измерение пульса отключено, поэтому его не будет в результате."
         else:
-            hr_line = "Пульс не удалось измерить."
+            hr_line = "Пульс не удалось измерить, поэтому его не будет в результате."
 
         # Show heart rate result on screening screen before switching to HADS
         await self.bus.publish(
@@ -468,7 +468,7 @@ class AggregatorPlugin(ProcessorPlugin):
                     "screen": "screening",
                     "message": (
                         f"Видео-скрининг завершён. {hr_line} "
-                        "Через несколько секунд начнётся тест на тревожность."
+                        "Ничего нажимать не нужно: через 8 секунд начнётся тест на тревожность."
                     ),
                     "heart_rate_bpm": hr_bpm,
                     "heart_rate_status": hr_status,

@@ -88,7 +88,8 @@ def analyze_frame_conditions(jpeg_bytes: bytes) -> dict[str, Any]:
         result["brightness"] = round(float(gray.mean()), 1)
         result["brightness_ok"] = result["brightness"] >= BRIGHTNESS_DARK
         result["advice"].append(
-            "Автоматическая проверка лица недоступна; можно продолжить тест, если лицо видно в превью."
+            "Проверка лица не запустилась. Перезапустите приложение и нажмите «Проверить снова». "
+            "Если сообщение повторится, видео-скрининг на этом компьютере недоступен."
         )
         return result
 

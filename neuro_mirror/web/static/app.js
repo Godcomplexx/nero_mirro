@@ -254,9 +254,24 @@ function describeMediaError(error) {
 async function fetchJson(url, options) {
   const response = await fetch(url, options);
   if (!response.ok) {
-    throw new Error((await response.text()) || `${response.status}`);
+    throw new Error(await responseErrorMessage(response));
   }
   return response.json();
+}
+
+async function responseErrorMessage(response) {
+  const raw = (await response.text()).trim();
+  if (raw) {
+    try {
+      const payload = JSON.parse(raw);
+      if (typeof payload.detail === "string" && payload.detail.trim()) return payload.detail.trim();
+      if (typeof payload.message === "string" && payload.message.trim()) return payload.message.trim();
+    } catch (_) {
+      // The endpoint may return plain text.
+    }
+    return raw;
+  }
+  return `Сервер вернул ошибку ${response.status}. Повторите попытку.`;
 }
 
 function setButtonLoading(button, loading) {
@@ -266,15 +281,7 @@ function setButtonLoading(button, loading) {
 }
 
 function describeSttRun(payload, elapsedMs) {
-  const parts = [];
-  if (typeof elapsedMs === "number" && Number.isFinite(elapsedMs)) {
-    parts.push(`${elapsedMs} мс`);
-  }
-  if (payload && payload.stt_model) {
-    const device = payload.stt_device ? `/${payload.stt_device}` : "";
-    parts.push(`${payload.stt_model}${device}`);
-  }
-  return parts.length ? `Распознано за ${parts.join(" • ")}` : "Распознано";
+  return "Речь распознана";
 }
 
 function setMascotSpeech(text, options) {
@@ -610,24 +617,20 @@ function renderReport(report) {
   if (!el.reportValue) return;
 
   if (!report) {
-    el.reportValue.innerHTML = '<p class="placeholder-text">No report yet.</p>';
+    el.reportValue.innerHTML = '<p class="placeholder-text">Результат появится после завершения оценки.</p>';
     return;
   }
 
   if (report.report_type === "appearance") {
     const rows = [];
-    rows.push(reportRow("State", report.state || "-"));
-    if (report.compliment) rows.push(reportRow("Reply", report.compliment));
-    if (report.observed) rows.push(reportRow("Observed", report.observed));
-    if (report.suggestion) rows.push(reportRow("Suggestion", report.suggestion));
-    if (report.face_detected !== undefined) rows.push(reportRow("Face detected", report.face_detected ? "Yes" : "No"));
-    if (report.face_count != null) rows.push(reportRow("Faces", report.face_count));
-    if (report.confidence != null) rows.push(reportRow("Confidence", typeof report.confidence === "number" ? report.confidence.toFixed(2) : report.confidence));
-    if (report.emotion) rows.push(reportRow("Emotion", report.emotion));
-    if (report.appearance_description) rows.push(reportRow("Description", report.appearance_description));
-    if (report.emotiefflib_available !== undefined) rows.push(reportRow("EmotiEffLib", report.emotiefflib_available ? "Yes" : "No"));
-    if (report.source_backend) rows.push(reportRow("Source", report.source_backend));
-    if (report.notes) rows.push(reportRow("Notes", report.notes));
+    const resultState = report.state === "completed" ? "Получена" : "Получена частично";
+    rows.push(reportRow("Результат", resultState));
+    if (report.compliment) rows.push(reportRow("Комментарий", report.compliment));
+    if (report.observed) rows.push(reportRow("Что видно", report.observed));
+    if (report.suggestion) rows.push(reportRow("Что можно сделать", report.suggestion));
+    if (report.face_detected !== undefined) rows.push(reportRow("Лицо в кадре", report.face_detected ? "Да" : "Нет"));
+    if (report.emotion) rows.push(reportRow("Выражение лица", report.emotion));
+    if (report.appearance_description) rows.push(reportRow("Описание", report.appearance_description));
     el.reportValue.innerHTML = rows.join("");
     return;
   }
@@ -914,7 +917,11 @@ function renderSnapshot(snapshot) {
 
   setText(el.screenValue, SCREEN_LABELS[snapshot.screen] || snapshot.screen || "-");
   setText(el.sourceValue, snapshot.assistant_source || "-");
-  setText(el.messageValue, snapshot.message || "-");
+  const publicMessage = String(snapshot.message || "").trim();
+  const emptyMessage = ["assistant", "summary"].includes(snapshot.screen)
+    ? "Ответ не получен. Повторите действие."
+    : "";
+  setText(el.messageValue, publicMessage || emptyMessage);
   setText(el.transcriptValue, snapshot.transcript_text ? `Transcript: ${snapshot.transcript_text}` : "");
   setMascotSpeech(snapshot.message || "", { visible: shouldShowMascotSpeech(snapshot) });
 
@@ -1586,7 +1593,11 @@ async function checkCameraAndFace() {
       if (candidate.face_detected || candidate.detector_available === false) break;
       await new Promise((resolve) => setTimeout(resolve, 250));
     } catch (error) {
-      setCheckItem("face", "warn", "Автоматическая проверка лица недоступна. Убедитесь, что лицо видно в превью.");
+      setCheckItem(
+        "face",
+        "fail",
+        "Проверка лица не запустилась. Перезапустите приложение, затем нажмите «Проверить снова»."
+      );
       return;
     }
   }
@@ -1594,7 +1605,11 @@ async function checkCameraAndFace() {
 
   const advice = (data.advice || []).join(" ");
   if (data.detector_available === false) {
-    setCheckItem("face", "warn", advice || "Автоматическая проверка лица недоступна. Проверьте превью.");
+    setCheckItem(
+      "face",
+      "fail",
+      advice || "Проверка лица не запустилась. Перезапустите приложение, затем нажмите «Проверить снова»."
+    );
   } else if (data.face_detected && data.brightness_ok && data.face_close_enough) {
     setCheckItem("face", "ok", advice || "Лицо видно, света достаточно");
   } else if (data.face_detected && data.brightness_ok) {
@@ -1874,13 +1889,9 @@ async function handleMenuAction(item) {
       }
       case "about": {
         const config = state.config || {};
-        const scenarios = config.scenario_versions || {};
         const parts = [
           `«Нейро-зеркало» — версия ${config.app_version || "?"}.`,
-          scenarios.screening ? `Сценарий скрининга ${scenarios.screening},` : "",
-          scenarios.moca ? `MoCA ${scenarios.moca},` : "",
-          scenarios.hads ? `HADS ${scenarios.hads}.` : "",
-          config.assistant_backend_label ? `Ассистент: ${config.assistant_backend_label}.` : "",
+          "Локальное приложение для тестов MoCA и HADS, видеоанализа и общения с ассистентом.",
           "Результаты являются скрининговой информацией и не заменяют консультацию врача.",
         ].filter(Boolean);
         setText(el.messageValue, parts.join(" "));
@@ -2236,7 +2247,7 @@ async function toggleCamera() {
 
 async function analyzeAppearance() {
   if (!state.cameraActive || !el.cameraPreview) {
-    setCameraOverlay("Turn on the camera first");
+    setCameraOverlay("Сначала включите камеру");
     return;
   }
 
@@ -2245,8 +2256,8 @@ async function analyzeAppearance() {
   setMascotState("thinking");
   const pendingSnapshot = {
     screen: "assistant",
-    message: "Сейчас оцениваю внешний вид по кадру. Это может занять несколько секунд.",
-    assistant_source: "visual analysis",
+    message: "Проверяю, что лицо хорошо видно в кадре…",
+    assistant_source: "визуальный анализ",
     transcript_text: "",
     report: null,
     worker_statuses: {},
@@ -2261,15 +2272,37 @@ async function analyzeAppearance() {
 
     const context = canvas.getContext("2d");
     if (!context) {
-      throw new Error("2d canvas context is unavailable");
+      throw new Error("Браузер не смог получить кадр с камеры. Обновите страницу и повторите попытку.");
     }
     context.drawImage(el.cameraPreview, 0, 0, canvas.width, canvas.height);
 
     const blob = await new Promise((resolve, reject) => {
       canvas.toBlob((value) => {
         if (value) resolve(value);
-        else reject(new Error("failed to encode frame"));
+        else reject(new Error("Браузер не смог подготовить кадр. Обновите страницу и повторите попытку."));
       }, "image/jpeg", 0.92);
+    });
+
+    const frameDataUrl = canvas.toDataURL("image/jpeg", 0.85);
+    const frameCheck = await fetchJson("/api/session/check-face", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ image_base64: frameDataUrl }),
+    });
+    const advice = (frameCheck.advice || []).join(" ");
+    if (frameCheck.detector_available === false) {
+      throw new Error(advice || "Проверка лица недоступна. Перезапустите приложение и повторите попытку.");
+    }
+    if (!frameCheck.face_detected) {
+      throw new Error(advice || "Лицо не найдено. Посмотрите прямо в камеру и повторите оценку.");
+    }
+    if (!frameCheck.brightness_ok || !frameCheck.face_close_enough) {
+      throw new Error(advice || "Приблизьтесь к камере, добавьте света и повторите оценку.");
+    }
+
+    renderSnapshot({
+      ...pendingSnapshot,
+      message: "Лицо найдено. Выполняю оценку — это может занять несколько секунд.",
     });
 
     const formData = new FormData();
@@ -2281,14 +2314,14 @@ async function analyzeAppearance() {
     });
 
     if (!response.ok) {
-      throw new Error((await response.text()) || `${response.status}`);
+      throw new Error(await responseErrorMessage(response));
     }
 
     const payload = await response.json();
     const snapshot = {
       screen: "summary",
       message: payload.reply,
-      assistant_source: "visual analysis",
+      assistant_source: "визуальный анализ",
       transcript_text: "",
       report: payload.report,
       worker_statuses: {},
@@ -2297,7 +2330,7 @@ async function analyzeAppearance() {
     renderSnapshot(snapshot);
     await maybeSpeak(snapshot);
   } catch (error) {
-    setText(el.messageValue, `Appearance analysis failed: ${error.message || error}`);
+    setText(el.messageValue, `Оценка не выполнена. ${error.message || error}`);
     appendLogLine(`[client] appearance error: ${error.message || error}`);
   } finally {
     state.busy = false;
@@ -3107,8 +3140,10 @@ function setupVoiceRecorder() {
           const elapsedMs = Math.round(performance.now() - startedAt);
           if (payload.transcript && payload.accepted !== false) {
             const meta = describeSttRun(payload, elapsedMs);
-            const notes = payload.notes ? ` (${payload.notes})` : "";
-            setText(el.voiceStatus, `${meta}: ${payload.transcript}${notes}`);
+            setText(el.voiceStatus, `${meta}: «${payload.transcript}»`);
+            appendLogLine(
+              `[client] speech recognized in ${elapsedMs} ms, model=${payload.stt_model || "unknown"}, device=${payload.stt_device || "unknown"}`
+            );
             if (payload.command === "analyze_appearance") {
               setText(el.voiceStatus, "Запрос распознан, запускаю оценку внешнего вида...");
               await analyzeAppearance();
@@ -3117,9 +3152,9 @@ function setupVoiceRecorder() {
               await cameraVisionQuery(payload.transcript);
             }
           } else if (payload.transcript) {
-            setText(el.voiceStatus, payload.message || `Распознано неуверенно за ${elapsedMs} мс: ${payload.transcript}`);
+            setText(el.voiceStatus, payload.message || `Речь распознана неуверенно: «${payload.transcript}». Повторите команду.`);
           } else {
-            setText(el.voiceStatus, payload.message || `Речь не распознана за ${elapsedMs} мс.`);
+            setText(el.voiceStatus, payload.message || "Речь не распознана. Говорите ближе к микрофону и повторите команду.");
           }
         } catch (error) {
           setText(el.voiceStatus, `Ошибка обработки голоса: ${error.message || error}`);

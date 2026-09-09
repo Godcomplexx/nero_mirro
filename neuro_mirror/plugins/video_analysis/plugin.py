@@ -82,6 +82,18 @@ class VisionWorkerPlugin(ProcessorPlugin):
             return
 
         result = dict(response.result, source_backend="vision_worker:web")
+        if not result.get("face_detected"):
+            await self._send_reply(
+                request_id,
+                {
+                    "error": (
+                        "Лицо не найдено. Посмотрите прямо в камеру, убедитесь, что лицо полностью видно, "
+                        "добавьте света и повторите оценку."
+                    ),
+                    "error_code": "face_not_detected",
+                },
+            )
+            return
         # Keep frame_base64 in result so AppearanceResponseComposer can use
         # its full 3-stage pipeline (Vision EN → translate RU → polish)
         # instead of the simpler _call_ollama_vision_sync prompt.
@@ -102,12 +114,21 @@ class VisionWorkerPlugin(ProcessorPlugin):
             # Remove heavy field before publishing
             result.pop("frame_base64", None)
 
+        if not reply_text.strip() or not reply_text.strip(" .,-–—"):
+            reply_text = (
+                "Оценка не получена. Проверьте, что лицо полностью видно и Ollama запущена, "
+                "затем нажмите «Оценка вида» ещё раз."
+            )
+
         report_payload = {
             "report_type": "appearance",
-            "state": "completed",
+            "state": "completed" if result.get("appearance_description") else "limited",
             "compliment": reply_text,
             "observed": result.get("observed") or "",
-            "suggestion": "Если описание не появилось, проверь доступность Ollama и установленную vision-модель.",
+            "suggestion": (
+                "Если описание не появилось, убедитесь, что лицо полностью видно и Ollama запущена, "
+                "затем повторите оценку."
+            ),
             "face_detected": result.get("face_detected"),
             "face_count": result.get("face_count"),
             "confidence": result.get("confidence"),

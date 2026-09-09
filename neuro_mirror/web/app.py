@@ -442,7 +442,8 @@ def create_app() -> FastAPI:
                 "brightness_ok": False,
                 "detector_available": False,
                 "advice": [
-                    "Автоматическая проверка лица недоступна; можно продолжить тест, если лицо видно в превью."
+                    "Проверка лица не запустилась. Перезапустите приложение и нажмите «Проверить снова». "
+                    "Если сообщение повторится, видео-скрининг на этом компьютере недоступен."
                 ],
             }
         return JSONResponse(result)
@@ -562,7 +563,44 @@ def create_app() -> FastAPI:
         ctx: WebAppContext = app.state.context
         _require_consent("video")
 
-        # Notify UI that analysis is starting
+        image_bytes = await image.read()
+        if not image_bytes:
+            raise HTTPException(status_code=400, detail="Кадр с камеры не получен. Включите камеру и повторите попытку.")
+        if len(image_bytes) > 8 * 1024 * 1024:
+            raise HTTPException(status_code=400, detail="Кадр слишком большой. Уменьшите разрешение камеры и повторите попытку.")
+
+        from neuro_mirror.screening.session_check import analyze_frame_conditions
+
+        try:
+            frame_check = await asyncio.to_thread(analyze_frame_conditions, image_bytes)
+        except Exception:
+            _log.exception("Ошибка проверки лица перед оценкой внешнего вида")
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Проверка лица не запустилась. Перезапустите приложение и повторите попытку. "
+                    "Если сообщение повторится, видеооценка на этом компьютере недоступна."
+                ),
+            )
+
+        advice = " ".join(str(item).strip() for item in frame_check.get("advice", []) if str(item).strip())
+        if frame_check.get("detector_available") is False:
+            raise HTTPException(
+                status_code=503,
+                detail=advice or "Проверка лица недоступна. Перезапустите приложение и повторите попытку.",
+            )
+        if not frame_check.get("face_detected"):
+            raise HTTPException(
+                status_code=422,
+                detail=advice or "Лицо не найдено. Посмотрите в камеру и повторите оценку.",
+            )
+        if not frame_check.get("brightness_ok") or not frame_check.get("face_close_enough"):
+            raise HTTPException(
+                status_code=422,
+                detail=advice or "Приблизьтесь к камере, добавьте света и повторите оценку.",
+            )
+
+        # Notify UI only after the frame has passed the face check.
         await ctx.runtime.bus.publish(
             Event(
                 topic=Topics.UI_UPDATE,
@@ -580,7 +618,7 @@ def create_app() -> FastAPI:
         os.close(fd)
         try:
             with open(temp_path, "wb") as output_file:
-                output_file.write(await image.read())
+                output_file.write(image_bytes)
 
             result = await ctx.runtime.bus.request(
                 Event(
@@ -599,9 +637,16 @@ def create_app() -> FastAPI:
                 pass
 
         if result.get("error"):
-            raise HTTPException(status_code=500, detail=result["error"])
+            status_code = 422 if result.get("error_code") == "face_not_detected" else 503
+            raise HTTPException(status_code=status_code, detail=result["error"])
 
-        return JSONResponse({"reply": result.get("reply", ""), "report": result.get("report")})
+        reply = str(result.get("reply") or "").strip()
+        if not reply or not reply.strip(" .,-–—"):
+            reply = (
+                "Оценка не получена. Убедитесь, что лицо полностью видно, добавьте света "
+                "и нажмите «Оценка вида» ещё раз."
+            )
+        return JSONResponse({"reply": reply, "report": result.get("report")})
 
     @app.post("/api/camera/vision")
     async def camera_vision(payload: CameraVisionRequest) -> JSONResponse:
