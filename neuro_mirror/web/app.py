@@ -77,6 +77,17 @@ class SessionFrameIn(BaseModel):
     image_base64: str
 
 
+class ExecutiveLineIn(BaseModel):
+    x1: float
+    y1: float
+    x2: float
+    y2: float
+
+
+class ExecutiveHouseAnalysisIn(BaseModel):
+    lines: list[ExecutiveLineIn]
+
+
 # ---- Minimal application context ----
 
 @dataclass(slots=True)
@@ -489,6 +500,16 @@ def create_app() -> FastAPI:
             )
         )
         return JSONResponse({"accepted": True})
+
+    @app.post("/api/demo/executive/house-analysis")
+    async def executive_house_analysis(payload: ExecutiveHouseAnalysisIn) -> JSONResponse:
+        """Stateless preview of house features; does not persist the drawing."""
+        from neuro_mirror.screening.executive_scoring import analyze_house
+
+        if len(payload.lines) > 500:
+            raise HTTPException(status_code=422, detail="Слишком много линий в рисунке.")
+        lines = [line.model_dump() for line in payload.lines]
+        return JSONResponse(analyze_house(lines))
 
     @app.post("/api/actions/{action}")
     async def ui_action(action: str, request: Request) -> JSONResponse:

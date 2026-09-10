@@ -11,6 +11,7 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="/static/styles.css?v=20260715m" />
+    <link rel="stylesheet" href="/static/executive_demo.css?v=4" />
   </head>
   <body data-ui-state="idle">
     <div class="stage-shell">
@@ -291,6 +292,18 @@
               <strong>Сведения о ПО</strong>
               <span>Версия приложения</span>
             </button>
+            <button type="button" class="menu-item" data-executive-demo="house_copy">
+              <strong>Повторить дом по образцу</strong>
+              <span>Тестовый режим рисования мышью</span>
+            </button>
+            <button type="button" class="menu-item" data-executive-demo="house_recall">
+              <strong>Нарисовать дом по памяти</strong>
+              <span>Чистое поле без образца</span>
+            </button>
+            <button type="button" class="menu-item" data-executive-demo="trail">
+              <strong>Последовательность</strong>
+              <span>1 — А — 2 — Б — 3 — В — 4 — Г — 5 — Д</span>
+            </button>
           </div>
 
           <details class="menu-devices">
@@ -359,6 +372,32 @@
             <button type="button" class="icon-btn primary-btn" id="check-start" disabled><span>Начать тест</span></button>
             <button type="button" class="icon-btn" id="check-retry" hidden><span>Проверить снова</span></button>
             <button type="button" class="icon-btn" id="check-cancel"><span>Отмена</span></button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Исполнительные навыки: ввод только мышью -->
+      <div class="executive-panel" id="executive-panel" hidden>
+        <div class="executive-inner">
+          <div class="executive-kicker mono">Тестовый режим · результат не сохраняется</div>
+          <h2 id="executive-title">Исполнительные навыки</h2>
+          <p id="executive-instruction"></p>
+          <div class="executive-workspace">
+            <svg id="executive-sample" class="executive-sample" viewBox="0 0 430 560" preserveAspectRatio="xMidYMid meet" aria-label="Образец дома">
+              <path d="M25 218 L184 48 L344 218 Z M25 218 V516 H344 V218 M252 120 V24 H300 V169 M344 357 H408 V516 H344 M120 303 H256 V406 H120 Z M188 303 V406 M188 352 H256" />
+            </svg>
+            <div class="executive-canvas-wrap">
+              <canvas id="executive-canvas" width="700" height="520"></canvas>
+              <div id="executive-trail" class="executive-trail" hidden></div>
+              <aside class="executive-analysis" id="executive-analysis" hidden></aside>
+            </div>
+          </div>
+          <div class="executive-actions">
+            <button type="button" class="icon-btn" id="executive-new-line"><span>Новая линия</span></button>
+            <button type="button" class="icon-btn" id="executive-undo"><span>Отмена</span></button>
+            <button type="button" class="icon-btn" id="executive-clear"><span>Очистить</span></button>
+            <button type="button" class="icon-btn primary-btn" id="executive-done"><span>Проверить</span></button>
+            <button type="button" class="icon-btn" id="executive-close"><span>Вернуться в меню</span></button>
           </div>
         </div>
       </div>
@@ -446,5 +485,6 @@
     </div>
 
     <script src="/static/app.js?v=20260909-actionable-feedback" defer></script>
+    <script src="/static/executive_demo.js?v=7" defer></script>
   </body>
 </html>

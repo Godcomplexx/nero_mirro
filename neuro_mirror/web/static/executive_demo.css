@@ -1,0 +1,32 @@
+.executive-panel { position: fixed; inset: 0; z-index: 10020; overflow: hidden; box-sizing: border-box; background: rgba(8,10,14,.97); color: #fff; padding: clamp(10px,1.5vh,18px) clamp(12px,1.8vw,30px); }
+.executive-panel[hidden], .executive-panel [hidden] { display: none !important; }
+.executive-inner { width: 100%; height: 100%; margin: auto; text-align: center; display: grid; grid-template-rows: auto auto auto minmax(0,1fr) auto; }
+.executive-kicker { color: #86dff7; letter-spacing: .18em; font-size: clamp(10px,1.1vw,12px); }
+.executive-inner h2 { margin: clamp(6px,1vh,12px) 0 0; font-size: clamp(20px,2.2vh,30px); }
+.executive-inner > p { margin: clamp(5px,.8vh,10px) 0; font-size: clamp(13px,1.5vh,17px); }
+.executive-workspace { display: grid; grid-template-columns: minmax(260px,31vw) minmax(0,1fr); gap: clamp(10px,1.2vw,20px); align-items: stretch; min-height: 0; margin: clamp(6px,1vh,12px) 0; }
+.executive-panel[data-mode="trail"] .executive-workspace, .executive-panel[data-mode="house_recall"] .executive-workspace { grid-template-columns: minmax(0,1fr); }
+.executive-sample, .executive-canvas-wrap { width: 100%; height: 100%; min-height: 0; box-sizing: border-box; border: 1px solid rgba(255,255,255,.24); border-radius: 16px; background: #f8faf9; }
+.executive-sample { display: block; padding: clamp(8px,1.2vw,18px); }
+.executive-sample path { fill: none; stroke: #c52931; stroke-width: 5; stroke-linejoin: round; stroke-linecap: square; }
+.executive-canvas-wrap { position: relative; overflow: hidden; }
+#executive-canvas { display: block; width: 100%; height: 100%; min-height: 0; cursor: crosshair; }
+.executive-trail { position: absolute; inset: 0; }
+.executive-trail button, .executive-trail button:hover:not(:disabled), .executive-trail button:active:not(:disabled) { position: absolute; transform: translate(-50%,-50%) !important; width: clamp(42px,3vw,54px); height: clamp(42px,3vw,54px); padding: 0; border-radius: 50%; border: 2px solid #243447; background: #fff; color: #111; font-weight: 700; cursor: pointer; z-index: 2; transition: border-color .15s ease, box-shadow .15s ease, background .15s ease; animation: none !important; }
+.executive-trail button:hover, .executive-trail button.is-next { border-color: #0891b2; box-shadow: 0 0 0 5px rgba(8,145,178,.18); }
+.executive-trail button.selected { background: #a7f3d0; }
+.executive-trail-label { position: absolute; transform: translateX(-50%); color: #334155; font: 600 clamp(11px,1vw,13px) Manrope,sans-serif; z-index: 2; }
+.executive-analysis { position: absolute; top: 14px; right: 14px; z-index: 5; width: min(360px,calc(100% - 28px)); max-height: calc(100% - 28px); overflow: auto; box-sizing: border-box; border: 1px solid rgba(134,223,247,.55); border-radius: 14px; padding: 14px; background: rgba(13,19,25,.94); color: #eef7fa; text-align: left; box-shadow: 0 16px 42px rgba(0,0,0,.35); }
+.executive-analysis h3 { margin: 0 0 10px; font-size: 16px; }
+.executive-analysis-list { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.executive-analysis-row { display: flex; justify-content: space-between; gap: 12px; padding-bottom: 5px; border-bottom: 1px solid rgba(255,255,255,.09); }
+.executive-analysis-ok { color: #86efac; }
+.executive-analysis-missing { color: #fca5a5; }
+.executive-analysis-note { margin: 10px 0 0; color: #b9c4cc; font-size: 12px; line-height: 1.4; }
+.executive-actions { display: flex; flex-wrap: nowrap; justify-content: center; gap: clamp(6px,.8vw,10px); padding-top: clamp(4px,.7vh,9px); }
+.executive-actions .icon-btn { min-height: 38px; padding: 8px clamp(10px,1.1vw,18px); white-space: nowrap; }
+@media (max-width: 820px) { .executive-workspace { grid-template-columns: minmax(190px,36vw) minmax(0,1fr); } .executive-actions .icon-btn { font-size: 11px; } }
+@media (max-height: 650px) { .executive-panel { padding-top: 7px; padding-bottom: 7px; } .executive-kicker { display: none; } .executive-inner h2 { margin-top: 2px; } .executive-actions { padding-top: 2px; } }
+.executive-analysis h3 { margin: 0 0 10px; font-size: 17px; }
+.executive-analysis-list { display: grid; gap: 7px; margin: 0; padding: 0; list-style: none; }
+.executive-analysis-row { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; }
