@@ -18,9 +18,20 @@ CONSENT_TEXTS: dict[str, str] = {
     "personal": "Я даю согласие на обработку персональных данных.",
     "audio": "Я даю согласие на запись и временную обработку аудиоданных.",
     "video": "Я даю согласие на запись и временную обработку видеоданных.",
+    "dataset": (
+        "Я даю согласие на сохранение аудио- и видеозаписей моего прохождения "
+        "тестов для формирования исследовательского набора данных."
+    ),
 }
-# Backward-compatible combined text used by older clients.
-CONSENT_TEXT = " ".join(CONSENT_TEXTS.values())
+# Consents that permit *retention* rather than temporary processing. They are
+# always opt-in: never granted by default and never inherited from the older
+# combined consent, which promised temporary processing only.
+RETENTION_CONSENTS = frozenset({"dataset"})
+# Backward-compatible combined text used by older clients. Retention consents
+# stay out of it — they were not part of what those clients displayed.
+CONSENT_TEXT = " ".join(
+    text for key, text in CONSENT_TEXTS.items() if key not in RETENTION_CONSENTS
+)
 
 # Preset avatars shipped with the web UI (web/static/assets/avatars/<id>.svg)
 PRESET_AVATARS = ("a01", "a02", "a03", "a04", "a05", "a06")
@@ -98,6 +109,7 @@ class UserProfileStore:
         personal_data_consent: bool | None = None,
         audio_data_consent: bool | None = None,
         video_data_consent: bool | None = None,
+        dataset_consent: bool = False,
         avatar_preset: str = "",
         photo_base64: str = "",
     ) -> dict[str, Any]:
@@ -107,10 +119,17 @@ class UserProfileStore:
         personal_allowed = consent if personal_data_consent is None else personal_data_consent
         audio_allowed = consent if audio_data_consent is None else audio_data_consent
         video_allowed = consent if video_data_consent is None else video_data_consent
+        # Retention is opt-in only: the combined ``consent`` flag never grants it.
+        dataset_allowed = bool(dataset_consent)
         if not personal_allowed:
             raise ValueError("Без согласия на обработку данных создать профиль нельзя.")
         if photo_base64 and not video_allowed:
             raise ValueError("Для фото-аватара требуется согласие на обработку видеоданных.")
+        if dataset_allowed and not (audio_allowed and video_allowed):
+            raise ValueError(
+                "Для сохранения записей в набор данных нужны согласия "
+                "на обработку аудио- и видеоданных."
+            )
 
         user_id = self._next_id()
         avatar: dict[str, str]
@@ -147,6 +166,11 @@ class UserProfileStore:
                     "text": CONSENT_TEXTS["video"],
                     "timestamp": consent_timestamp if video_allowed else None,
                 },
+                "dataset": {
+                    "given": dataset_allowed,
+                    "text": CONSENT_TEXTS["dataset"],
+                    "timestamp": consent_timestamp if dataset_allowed else None,
+                },
             },
             "created_at": datetime.now(timezone.utc).isoformat(),
             "progress": dict(DEFAULT_PROGRESS),
@@ -161,6 +185,51 @@ class UserProfileStore:
             raise KeyError(user_id)
         self.active_user_id = user_id
         return user
+
+    def set_consent(self, user_id: str, consent_type: str, given: bool) -> dict[str, Any]:
+        """Grant or withdraw one consent for an existing profile.
+
+        Retention consents can be toggled here so an existing user can opt into
+        the dataset without recreating the profile; the exact text and the time
+        of the decision are stored alongside the flag.
+        """
+        if consent_type not in CONSENT_TEXTS:
+            raise KeyError(consent_type)
+        user = next((item for item in self._users if item.get("id") == user_id), None)
+        if user is None:
+            raise KeyError(user_id)
+        if consent_type == "personal" and not given:
+            raise ValueError("Согласие на обработку персональных данных обязательно.")
+
+        consents = user.setdefault("consents", {})
+        if given and consent_type in RETENTION_CONSENTS:
+            missing = [
+                required for required in ("audio", "video")
+                if not bool((consents.get(required) or {}).get("given"))
+            ]
+            if missing:
+                raise ValueError(
+                    "Для сохранения записей в набор данных нужны согласия "
+                    "на обработку аудио- и видеоданных."
+                )
+
+        consents[consent_type] = {
+            "given": bool(given),
+            "text": CONSENT_TEXTS[consent_type],
+            "timestamp": datetime.now(timezone.utc).isoformat() if given else None,
+        }
+        if not given and consent_type in {"audio", "video"}:
+            # Retention cannot outlive permission to record in the first place.
+            for retention_type in RETENTION_CONSENTS:
+                entry = consents.get(retention_type)
+                if isinstance(entry, dict) and entry.get("given"):
+                    consents[retention_type] = {
+                        "given": False,
+                        "text": CONSENT_TEXTS[retention_type],
+                        "timestamp": None,
+                    }
+        self._save_users()
+        return dict(user)
 
     def update_progress(self, user_id: str, **flags: Any) -> dict[str, Any] | None:
         """Merge ``flags`` into the user's progress and persist."""
@@ -229,7 +298,10 @@ class UserProfileStore:
             if not isinstance(entry, dict):
                 entry = {}
                 consents[consent_type] = entry
-            entry.setdefault("given", legacy_given)
+            # A retention consent must be given explicitly: profiles created
+            # before it existed never agreed to their recordings being kept.
+            inherited = False if consent_type in RETENTION_CONSENTS else legacy_given
+            entry.setdefault("given", inherited)
             entry.setdefault("text", text)
             entry.setdefault("timestamp", legacy_timestamp if entry.get("given") else None)
 

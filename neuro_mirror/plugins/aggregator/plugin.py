@@ -5,6 +5,7 @@ from enum import Enum
 from typing import Any
 
 from neuro_mirror.interfaces.processor import ProcessorPlugin
+from neuro_mirror.core.dataset_store import DatasetStore
 from neuro_mirror.core.session_store import SessionStore
 from neuro_mirror.core.settings import Settings
 from neuro_mirror.models.events import Event, Topics
@@ -48,9 +49,11 @@ class AggregatorPlugin(ProcessorPlugin):
         appearance_composer: AppearanceResponseComposer,
         session_store: SessionStore | None = None,
         settings: Settings | None = None,
+        dataset_store: DatasetStore | None = None,
     ) -> None:
         super().__init__(bus)
         self.appearance_composer = appearance_composer
+        self.dataset_store = dataset_store
         self.state = SessionState.IDLE
         self.history_count = 0
         self._latest_results: dict[str, dict[str, Any]] = {}
@@ -602,6 +605,39 @@ class AggregatorPlugin(ProcessorPlugin):
             },
         )
         self._active_session_id = str(record.get("session_id") or "")
+        self._open_dataset_capture(scenario, payload, record)
+
+    def _open_dataset_capture(
+        self,
+        scenario: str,
+        payload: dict[str, Any],
+        record: dict[str, Any],
+    ) -> None:
+        """Start retaining raw media, but only with the explicit dataset consent."""
+        if self.dataset_store is None or not self._active_session_id:
+            return
+        if not bool(payload.get("dataset_allowed")):
+            return
+        try:
+            self.dataset_store.open_session(
+                self._active_session_id,
+                user_id=self._active_user_id,
+                scenario=scenario,
+                versions=dict(record.get("versions") or {}),
+                consent=dict(payload.get("dataset_consent") or {"given": True}),
+            )
+        except Exception as exc:  # noqa: BLE001 — capture must not break a session
+            logger.warning("aggregator: не удалось открыть запись датасета: %s", exc)
+
+    def _close_dataset_capture(self, status: str, result: dict[str, Any] | None = None) -> None:
+        if self.dataset_store is None or not self._active_session_id:
+            return
+        try:
+            self.dataset_store.close_session(
+                self._active_session_id, status=status, result=result
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("aggregator: не удалось закрыть запись датасета: %s", exc)
 
     async def _publish_consent_required(self, data_type: str) -> None:
         await self.bus.publish(
@@ -618,11 +654,13 @@ class AggregatorPlugin(ProcessorPlugin):
     def _interrupt_session(self, reason: str) -> None:
         if self.session_store is not None and self._active_session_id:
             self.session_store.interrupt(self._active_session_id, reason)
+        self._close_dataset_capture("interrupted")
         self._active_session_id = ""
 
     def _fail_session(self, reason: str) -> None:
         if self.session_store is not None and self._active_session_id:
             self.session_store.fail(self._active_session_id, reason)
+        self._close_dataset_capture("error")
         self._active_session_id = ""
 
     def _complete_report(self, report: dict[str, Any]) -> dict[str, Any]:
@@ -636,6 +674,8 @@ class AggregatorPlugin(ProcessorPlugin):
         completed = self.session_store.complete(self._active_session_id, report) or {}
         report["session_status"] = completed.get("status", "completed")
         report["session_finished_at"] = completed.get("finished_at")
+        # Scores land in the dataset manifest so recordings carry their labels.
+        self._close_dataset_capture("completed", report)
         self._active_session_id = ""
         return report
 
@@ -686,6 +726,12 @@ class AggregatorPlugin(ProcessorPlugin):
         self._active_session_id = session_id
         self._session_conditions = dict(record.get("technical_params") or {})
         self._session_permissions = dict(record.get("permissions") or {})
+        # Continue (or start) capture for the resumed session under the same
+        # consent rules; already stored answers keep their numbering.
+        if self.dataset_store is not None and not self.dataset_store.is_open(session_id):
+            self._open_dataset_capture(
+                str(record.get("scenario") or ""), payload or {}, record
+            )
         checkpoint = dict(record.get("checkpoint") or {})
         scenario = str(record.get("scenario") or "")
         self._latest_results.clear()

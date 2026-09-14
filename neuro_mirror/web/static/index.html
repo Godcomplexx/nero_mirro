@@ -13,6 +13,11 @@
     <link rel="stylesheet" href="/static/styles.css?v=20260715m" />
   </head>
   <body data-ui-state="idle">
+    <!-- Запись для набора данных: видна всё время, пока камера активна -->
+    <div class="dataset-recording" id="dataset-recording" role="status" hidden>
+      <span class="dataset-recording-dot" aria-hidden="true"></span>
+      <span>Идёт запись для набора данных</span>
+    </div>
     <div class="stage-shell">
       <div class="camera-fullscreen" id="camera-fullscreen">
         <video id="camera-preview" autoplay playsinline muted></video>
@@ -431,6 +436,11 @@
               <label class="consent-row" for="user-consent-video">
                 <input type="checkbox" id="user-consent-video" />
                 <span id="consent-text-video">Я даю согласие на запись и временную обработку видеоданных.</span>
+              </label>
+              <!-- Хранение записей: отдельное согласие, по умолчанию выключено -->
+              <label class="consent-row" for="user-consent-dataset">
+                <input type="checkbox" id="user-consent-dataset" />
+                <span id="consent-text-dataset">Я даю согласие на сохранение аудио- и видеозаписей моего прохождения тестов для формирования исследовательского набора данных.</span>
               </label>
 
               <p class="user-create-error" id="user-create-error" hidden></p>

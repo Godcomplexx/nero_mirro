@@ -26,3 +26,4 @@ moca_recall_split_experiment/
 runtime/models/gigaam/*.ckpt
 runtime/models/gigaam/*.model
 runtime/deidentified/
+runtime/dataset/

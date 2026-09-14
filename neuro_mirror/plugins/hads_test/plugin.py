@@ -17,6 +17,7 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
+from neuro_mirror.core.dataset_store import DatasetStore
 from neuro_mirror.core.settings import Settings
 from neuro_mirror.interfaces.processor import ProcessorPlugin
 from neuro_mirror.models.events import Event, Topics
@@ -41,9 +42,16 @@ class HadsTestPlugin(ProcessorPlugin):
 
     plugin_name = "hads_test"
 
-    def __init__(self, bus, *, settings: Settings) -> None:
+    def __init__(
+        self,
+        bus,
+        *,
+        settings: Settings,
+        dataset_store: DatasetStore | None = None,
+    ) -> None:
         super().__init__(bus)
         self.settings = settings
+        self.dataset_store = dataset_store
         self._running = False
         self._stop_requested = False
         self._test_task: asyncio.Task[None] | None = None
@@ -54,6 +62,8 @@ class HadsTestPlugin(ProcessorPlugin):
         self._audio_allowed = True
         self._resume_checkpoint: dict[str, Any] = {}
         self._session_id = ""
+        self._answer_started_at = ""
+        self._answer_finished_at = ""
 
     def subscribed_topics(self) -> tuple[str, ...]:
         return (Topics.HADS_START, Topics.HADS_STOP, Topics.UI_ACTION)
@@ -359,6 +369,10 @@ class HadsTestPlugin(ProcessorPlugin):
 
         try:
             audio_path = recorder.start()
+            # Server-clock bounds of this answer; the dataset aligns them with
+            # the browser video through the shared reference in the manifest.
+            self._answer_started_at = datetime.now(UTC).isoformat()
+            self._answer_finished_at = ""
         except Exception:
             logger.exception("hads_test: ошибка старта записи")
             return ""
@@ -385,6 +399,7 @@ class HadsTestPlugin(ProcessorPlugin):
                 if waiter.done() or self._stop_requested:
                     break
             audio_path = recorder.stop() or audio_path
+            self._answer_finished_at = datetime.now(UTC).isoformat()
         except asyncio.CancelledError:
             try:
                 recorder.stop()
@@ -413,7 +428,7 @@ class HadsTestPlugin(ProcessorPlugin):
                 "message": "Распознаю ответ...",
             },
         ))
-        return await self._transcribe(audio_path)
+        return await self._transcribe(audio_path, question=question)
 
     def _handle_click_answer(self, payload: dict[str, Any]) -> None:
         if not self._running:
@@ -578,7 +593,13 @@ class HadsTestPlugin(ProcessorPlugin):
                 waiter.set_result(result)
         self._tts_waiters.clear()
 
-    async def _transcribe(self, audio_path: str) -> str:
+    async def _transcribe(
+        self,
+        audio_path: str,
+        *,
+        question: HadsQuestion | None = None,
+    ) -> str:
+        transcript = ""
         try:
             reply = await self.bus.request(
                 Event(
@@ -588,9 +609,42 @@ class HadsTestPlugin(ProcessorPlugin):
                 ),
                 timeout=120.0,
             )
-            return str(reply.get("transcript") or "")
+            transcript = str(reply.get("transcript") or "")
+            return transcript
         except Exception as exc:
             logger.warning("hads_test: transcribe error: %s", exc)
             return ""
         finally:
+            # Copy into the dataset while the file still exists; capture must
+            # never interfere with the test, so failures are swallowed.
+            self._store_dataset_audio(audio_path, question=question, transcript=transcript)
             delete_temp_audio(audio_path)
+
+    def _store_dataset_audio(
+        self,
+        audio_path: str,
+        *,
+        question: HadsQuestion | None,
+        transcript: str,
+    ) -> None:
+        if self.dataset_store is None or not self._session_id:
+            return
+        try:
+            self.dataset_store.store_answer_audio(
+                self._session_id,
+                source_path=audio_path,
+                task_id=question.question_id if question else "answer",
+                labels={
+                    "scenario": "hads",
+                    "part": question.part if question else "",
+                    "question": question.text if question else "",
+                    "options": [option.text for option in question.options] if question else [],
+                    "transcript": transcript,
+                    "started_at": self._answer_started_at,
+                    "finished_at": self._answer_finished_at,
+                    "sample_rate": self.settings.voice_sample_rate,
+                    "channels": self.settings.voice_channels,
+                },
+            )
+        except Exception as exc:  # noqa: BLE001 — capture is best-effort
+            logger.warning("hads_test: не удалось сохранить аудио в датасет: %s", exc)
