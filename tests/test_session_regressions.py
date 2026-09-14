@@ -288,3 +288,50 @@ def test_face_check_gracefully_reports_missing_detector(monkeypatch):
     assert result['frame_ok'] is True
     assert result['detector_available'] is False
     assert result['advice']
+
+
+def test_unavailable_microphone_stops_the_test_instead_of_skipping_tasks():
+    """A mic fault must not look like a silent patient.
+
+    Recognition failures score zero and the test continues. If recording is
+    impossible, every task would otherwise be skipped instantly — no "Говорите"
+    prompt, a 0/15 result and no indication that anything went wrong.
+    """
+    async def run():
+        from neuro_mirror.plugins.moca_test.plugin import RecordingUnavailableError
+
+        plugin = MocaTestPlugin(EventBus(), settings=Settings())
+        recorder = Mock(available=False)
+        with patch('neuro_mirror.plugins.moca_test.plugin.VoiceRecorder', return_value=recorder):
+            with pytest.raises(RecordingUnavailableError):
+                await plugin._record_and_transcribe(MOCA_TASKS[0])
+    asyncio.run(run())
+
+
+def test_failed_recorder_start_is_reported_as_a_technical_fault():
+    async def run():
+        from neuro_mirror.plugins.moca_test.plugin import RecordingUnavailableError
+
+        plugin = MocaTestPlugin(EventBus(), settings=Settings())
+        recorder = Mock(available=True)
+        recorder.start.side_effect = OSError('device busy')
+        with patch('neuro_mirror.plugins.moca_test.plugin.VoiceRecorder', return_value=recorder):
+            with pytest.raises(RecordingUnavailableError):
+                await plugin._record_and_transcribe(MOCA_TASKS[0])
+    asyncio.run(run())
+
+
+def test_recording_fault_reaches_the_user_as_a_session_error():
+    async def run():
+        from neuro_mirror.plugins.moca_test.plugin import RecordingUnavailableError
+
+        bus = EventBus()
+        errors = bus.subscribe(Topics.SESSION_ERROR)
+        plugin = MocaTestPlugin(bus, settings=Settings())
+        plugin._run_test = AsyncMock(side_effect=RecordingUnavailableError('Микрофон недоступен.'))
+
+        await plugin._run_test_guarded()
+
+        event = await asyncio.wait_for(errors.queue.get(), timeout=1)
+        assert event.payload['reason'] == 'Микрофон недоступен.'
+    asyncio.run(run())

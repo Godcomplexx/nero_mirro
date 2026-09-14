@@ -1945,19 +1945,33 @@ async function checkVoiceSample() {
     }
   }
 
+  // The browser meter only proves that getUserMedia works. Answers are
+  // recorded by the server through its own device handle, so the probe must
+  // go through that path — otherwise the check passes while the test cannot
+  // record a thing. Release the browser stream first: two readers of the same
+  // microphone is exactly the situation being tested for.
+  stopCheckAudio();
+  await new Promise((resolve) => setTimeout(resolve, 150));
+
   setCheckItem("voice", "wait", "ГОВОРИТЕ СЕЙЧАС: «раз, два, три» — у вас 4 секунды");
   setText(el.checkStatus, "Идёт запись пробы голоса…");
-  const voice = await measureRms(4000, "peak");
-  const noise = (sessionCheck.results.mic || {}).noise || 0;
-  sessionCheck.results.voice = { ...(sessionCheck.results.voice || {}), level: voice };
 
-  // Compare with the measured room noise. Laptop/browser gain control often
-  // keeps speech below the old fixed 0.04 threshold even when it is clear.
-  if (voice > Math.max(0.012, noise * 1.6 + 0.004)) {
-    setCheckItem("voice", "ok", "Голос слышно хорошо");
-  } else {
-    setCheckItem("voice", "fail", "Голос слишком тихий — сядьте ближе, говорите громче и проверьте снова.");
+  let probe;
+  try {
+    probe = await fetchJson("/api/session/check-voice", { method: "POST" });
+  } catch (error) {
+    setCheckItem("voice", "fail", `Проба голоса не выполнена: ${error.message || error}`);
+    return;
   }
+
+  setText(el.checkStatus, "Проверяю запись…");
+  sessionCheck.results.voice = {
+    ...(sessionCheck.results.voice || {}),
+    level: probe.peak_level,
+    transcript: probe.transcript || "",
+    reason: probe.reason || "",
+  };
+  setCheckItem("voice", probe.state || (probe.ok ? "ok" : "fail"), probe.message || "");
 }
 
 function finalizeSessionCheck() {
