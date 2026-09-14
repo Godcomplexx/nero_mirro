@@ -126,9 +126,12 @@ const el = {
   userConsentPersonal: $("user-consent-personal"),
   userConsentAudio: $("user-consent-audio"),
   userConsentVideo: $("user-consent-video"),
+  userConsentDataset: $("user-consent-dataset"),
+  datasetRecording: $("dataset-recording"),
   consentTextPersonal: $("consent-text-personal"),
   consentTextAudio: $("consent-text-audio"),
   consentTextVideo: $("consent-text-video"),
+  consentTextDataset: $("consent-text-dataset"),
   userCreateError: $("user-create-error"),
   userCreateSubmit: $("user-create-submit"),
   userCreateBack: $("user-create-back"),
@@ -894,6 +897,9 @@ function updateHrWidget(bpm, algo, status) {
 }
 
 function renderSnapshot(snapshot) {
+  // Start/stop dataset recording on screen transitions (no-op without consent)
+  syncDatasetCapture(snapshot.screen);
+
   // During MoCA test — only update the MoCA panel, suppress all other UI output
   if (snapshot.screen === "moca") {
     // Tests speak through their own TTS channel — cut any assistant speech
@@ -1116,6 +1122,184 @@ async function _mocaPlayTts(text, ttsId) {
     await _mocaNotifyTtsFinished(ttsId);
   }
 }
+
+// ---- Dataset capture: raw session video for the research dataset ----
+//
+// Only runs when the profile granted the separate "dataset" consent, which the
+// server confirms via /api/dataset/status. Recording is deliberately limited to
+// the MoCA and HADS screens: during "screening" the vision worker owns the
+// camera exclusively (MSMF fails if a second handle is open), so the browser
+// must not hold a stream at that time.
+
+const DATASET_CAPTURE_SCREENS = new Set(["moca", "hads"]);
+const DATASET_CHUNK_MS = 5000;
+
+const datasetCapture = {
+  recorder: null,
+  stream: null,
+  sessionId: "",
+  sequence: 0,
+  screen: null,
+  busy: false,
+  // Monotonic base for chunk offsets: wall clock can jump, performance.now cannot
+  startedAt: 0,
+};
+
+async function syncDatasetCapture(screen) {
+  const next = String(screen || "");
+  if (datasetCapture.screen === next) return;
+  datasetCapture.screen = next;
+  if (DATASET_CAPTURE_SCREENS.has(next)) {
+    await startDatasetCapture(next);
+  } else {
+    stopDatasetCapture();
+  }
+}
+
+async function startDatasetCapture(screen) {
+  if (datasetCapture.busy || datasetCapture.recorder) return;
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return;
+  if (typeof MediaRecorder === "undefined") return;
+
+  datasetCapture.busy = true;
+  try {
+    const status = await fetchJson("/api/dataset/status");
+    if (!status.capture || !status.session_id) return;
+
+    // The vision worker may still hold the camera after a screening run.
+    try {
+      await fetchJson("/api/actions/release_camera", { method: "POST" });
+      await new Promise((resolve) => setTimeout(resolve, 120));
+    } catch (_) {
+      // Independent of the browser stream — let getUserMedia report real problems.
+    }
+
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } },
+      audio: true,
+    });
+
+    const mimeType = typeof MediaRecorder.isTypeSupported === "function"
+      && MediaRecorder.isTypeSupported("video/webm;codecs=vp9,opus")
+      ? "video/webm;codecs=vp9,opus"
+      : "video/webm";
+    const recorder = new MediaRecorder(stream, { mimeType });
+
+    datasetCapture.stream = stream;
+    datasetCapture.recorder = recorder;
+    datasetCapture.sessionId = status.session_id;
+    datasetCapture.sequence = 0;
+
+    recorder.ondataavailable = (event) => {
+      if (event.data && event.data.size > 0) {
+        uploadDatasetChunk(event.data, performance.now() - datasetCapture.startedAt);
+      }
+    };
+    recorder.onerror = (event) => {
+      appendLogLine(`[dataset] recorder error: ${event.error?.name || "unknown"}`);
+      stopDatasetCapture();
+    };
+    datasetCapture.startedAt = performance.now();
+    recorder.start(DATASET_CHUNK_MS);
+    // Pin the video timeline to the server clock before any chunk arrives
+    await registerDatasetVideoStart(mimeType);
+    setDatasetRecordingIndicator(true);
+    appendLogLine(`[dataset] запись начата (${status.scenario || screen})`);
+    postDatasetTimeline(screen, "capture_started");
+  } catch (error) {
+    appendLogLine(`[dataset] не удалось начать запись: ${error.message || error}`);
+    releaseDatasetStream();
+  } finally {
+    datasetCapture.busy = false;
+  }
+}
+
+function stopDatasetCapture() {
+  const recorder = datasetCapture.recorder;
+  if (recorder) {
+    postDatasetTimeline(datasetCapture.screen, "capture_stopped");
+    try {
+      // requestData() flushes the tail so the last seconds are not lost
+      if (recorder.state === "recording") recorder.requestData();
+      if (recorder.state !== "inactive") recorder.stop();
+    } catch (_) {
+      // already stopped
+    }
+  }
+  releaseDatasetStream();
+}
+
+function setDatasetRecordingIndicator(active) {
+  // The patient must be able to see that recording is happening, at all times
+  if (el.datasetRecording) setHidden(el.datasetRecording, !active);
+}
+
+function releaseDatasetStream() {
+  setDatasetRecordingIndicator(false);
+  if (datasetCapture.stream) {
+    for (const track of datasetCapture.stream.getTracks()) {
+      try {
+        track.stop();
+      } catch (_) {
+        // ignore
+      }
+    }
+  }
+  datasetCapture.stream = null;
+  datasetCapture.recorder = null;
+  datasetCapture.sessionId = "";
+}
+
+async function registerDatasetVideoStart(mimeType) {
+  const sessionId = datasetCapture.sessionId;
+  if (!sessionId) return;
+  try {
+    await fetch("/api/dataset/video-start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        session_id: sessionId,
+        client_started_at: new Date().toISOString(),
+        mime_type: mimeType || "",
+      }),
+    });
+  } catch (error) {
+    appendLogLine(`[dataset] не удалось записать точку отсчёта: ${error.message || error}`);
+  }
+}
+
+async function uploadDatasetChunk(blob, offsetMs) {
+  const sessionId = datasetCapture.sessionId;
+  if (!sessionId) return;
+  const sequence = datasetCapture.sequence++;
+  const body = new FormData();
+  body.append("session_id", sessionId);
+  body.append("sequence", String(sequence));
+  if (Number.isFinite(offsetMs)) body.append("offset_ms", String(Math.round(offsetMs)));
+  body.append("chunk", blob, `${String(sequence).padStart(6, "0")}.webm`);
+  try {
+    const response = await fetch("/api/dataset/video-chunk", { method: "POST", body });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  } catch (error) {
+    appendLogLine(`[dataset] фрагмент ${sequence} не сохранён: ${error.message || error}`);
+  }
+}
+
+async function postDatasetTimeline(screen, stage, details = {}) {
+  const sessionId = datasetCapture.sessionId;
+  if (!sessionId) return;
+  try {
+    await fetch("/api/dataset/timeline", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: sessionId, screen: screen || "", stage, details }),
+    });
+  } catch (_) {
+    // timeline is auxiliary — never interrupt the test for it
+  }
+}
+
+window.addEventListener("pagehide", stopDatasetCapture);
 
 // ---- HADS anxiety test UI ----
 
@@ -3304,6 +3488,7 @@ async function openUserGate() {
   if (el.consentTextPersonal && consentTexts.personal) setText(el.consentTextPersonal, consentTexts.personal);
   if (el.consentTextAudio && consentTexts.audio) setText(el.consentTextAudio, consentTexts.audio);
   if (el.consentTextVideo && consentTexts.video) setText(el.consentTextVideo, consentTexts.video);
+  if (el.consentTextDataset && consentTexts.dataset) setText(el.consentTextDataset, consentTexts.dataset);
   renderUserGrid(data.users || []);
   renderAvatarPicker();
   resetUserCreateForm();
@@ -3406,6 +3591,7 @@ async function submitUserCreate(event) {
         personal_data_consent: Boolean(el.userConsentPersonal && el.userConsentPersonal.checked),
         audio_data_consent: Boolean(el.userConsentAudio && el.userConsentAudio.checked),
         video_data_consent: Boolean(el.userConsentVideo && el.userConsentVideo.checked),
+        dataset_consent: Boolean(el.userConsentDataset && el.userConsentDataset.checked),
         avatar_preset: state.userPhotoDataUrl ? "" : state.userSelectedPreset,
         photo_base64: state.userPhotoDataUrl,
       }),

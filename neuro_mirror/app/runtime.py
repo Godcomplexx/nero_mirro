@@ -4,6 +4,7 @@ import asyncio
 from dataclasses import dataclass
 from pathlib import Path
 
+from neuro_mirror.core.dataset_store import DatasetStore
 from neuro_mirror.core.event_bus import EventBus
 from neuro_mirror.core.device_manager import DeviceManager
 from neuro_mirror.core.plugin_manager import PluginManager
@@ -35,6 +36,7 @@ class RuntimeHandle:
     assistant_backend_label: str
     weather_source_label: str
     session_store: SessionStore
+    dataset_store: DatasetStore
 
     async def start(self) -> None:
         await self.plugin_manager.start_all()
@@ -103,6 +105,7 @@ def create_runtime(
         ),
     )
     session_store = SessionStore()
+    dataset_store = DatasetStore()
 
     plugin_manager.register(DeviceManager(bus, settings=settings))
     plugin_manager.register(StoragePlugin(bus))
@@ -113,14 +116,15 @@ def create_runtime(
     )
     plugin_manager.register(SpeechWorkerPlugin(bus, settings=settings))
     plugin_manager.register(VoiceTestPlugin(bus, settings=settings))
-    plugin_manager.register(MocaTestPlugin(bus, settings=settings))
-    plugin_manager.register(HadsTestPlugin(bus, settings=settings))
+    plugin_manager.register(MocaTestPlugin(bus, settings=settings, dataset_store=dataset_store))
+    plugin_manager.register(HadsTestPlugin(bus, settings=settings, dataset_store=dataset_store))
     plugin_manager.register(
         AggregatorPlugin(
             bus,
             appearance_composer=appearance_composer,
             session_store=session_store,
             settings=settings,
+            dataset_store=dataset_store,
         )
     )
 
@@ -145,4 +149,5 @@ def create_runtime(
         assistant_backend_label=assistant_backend_label,
         weather_source_label=weather_source_label,
         session_store=session_store,
+        dataset_store=dataset_store,
     )

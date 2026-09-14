@@ -17,12 +17,15 @@ from pathlib import Path
 from typing import Any
 
 import edge_tts
-from fastapi import FastAPI, File, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import (
+    FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect,
+)
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from neuro_mirror.app.runtime import RuntimeHandle, create_runtime
+from neuro_mirror.core.dataset_store import DatasetCaptureError
 from neuro_mirror.core.settings import Settings
 from neuro_mirror.core.user_profiles import (
     CONSENT_TEXT,
@@ -64,8 +67,28 @@ class UserCreateIn(BaseModel):
     personal_data_consent: bool | None = None
     audio_data_consent: bool | None = None
     video_data_consent: bool | None = None
+    # Retention consent is opt-in and never inherited from ``consent``.
+    dataset_consent: bool = False
     avatar_preset: str = ""
     photo_base64: str = ""
+
+
+class ConsentUpdateIn(BaseModel):
+    consent_type: str
+    given: bool
+
+
+class DatasetVideoStartIn(BaseModel):
+    session_id: str
+    client_started_at: str
+    mime_type: str = ""
+
+
+class DatasetTimelineIn(BaseModel):
+    session_id: str
+    stage: str = ""
+    screen: str = ""
+    details: dict[str, Any] = Field(default_factory=dict)
 
 
 class ClientLogIn(BaseModel):
@@ -176,11 +199,32 @@ def create_app() -> FastAPI:
                 "audio": "аудиоданных",
                 "video": "видеоданных",
             }
+            if consent_type == "dataset":
+                raise HTTPException(
+                    status_code=403,
+                    detail="Нет согласия на сохранение записей в набор данных.",
+                )
             raise HTTPException(
                 status_code=403,
                 detail=f"Нет согласия на обработку {labels.get(consent_type, consent_type)}.",
             )
         return user
+
+    def _dataset_capture_payload() -> dict[str, Any]:
+        """Tell the aggregator whether raw media may be retained this session."""
+        ctx: WebAppContext = app.state.context
+        user = ctx.user_store.get_active_user()
+        if user is None or not ctx.user_store.active_has_consent("dataset"):
+            return {"dataset_allowed": False}
+        entry = (user.get("consents") or {}).get("dataset") or {}
+        return {
+            "dataset_allowed": True,
+            "dataset_consent": {
+                "given": True,
+                "text": entry.get("text", CONSENT_TEXTS.get("dataset", "")),
+                "timestamp": entry.get("timestamp"),
+            },
+        }
 
     # ---- Read-only endpoints ----
 
@@ -283,6 +327,7 @@ def create_app() -> FastAPI:
                 personal_data_consent=payload.personal_data_consent,
                 audio_data_consent=payload.audio_data_consent,
                 video_data_consent=payload.video_data_consent,
+                dataset_consent=payload.dataset_consent,
                 avatar_preset=payload.avatar_preset.strip(),
                 photo_base64=payload.photo_base64,
             )
@@ -404,6 +449,7 @@ def create_app() -> FastAPI:
                     "session_id": session_id,
                     "audio_allowed": ctx.user_store.active_has_consent("audio"),
                     "video_allowed": ctx.user_store.active_has_consent("video"),
+                    **_dataset_capture_payload(),
                 },
             )
         )
@@ -465,6 +511,96 @@ def create_app() -> FastAPI:
                 _client_log.info("[browser] %s", message)
         return JSONResponse({"accepted": True})
 
+    @app.post("/api/users/{user_id}/consents")
+    async def update_consent(user_id: str, payload: ConsentUpdateIn) -> JSONResponse:
+        """Grant or withdraw one consent for an existing profile."""
+        ctx: WebAppContext = app.state.context
+        try:
+            user = ctx.user_store.set_consent(user_id, payload.consent_type, payload.given)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="Пользователь или тип согласия не найден.")
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        return JSONResponse({"user": _serialize_user(user)})
+
+    # ---- Dataset capture (requires the separate retention consent) ----
+
+    @app.get("/api/dataset/status")
+    async def dataset_status() -> JSONResponse:
+        """Tell the browser whether it should be recording, and for which session."""
+        ctx: WebAppContext = app.state.context
+        active = ctx.user_store.get_active_user()
+        if active is None or not ctx.user_store.active_has_consent("dataset"):
+            return JSONResponse({"capture": False, "session_id": ""})
+        sessions = ctx.runtime.session_store.list_for_user(str(active.get("id") or ""))
+        for session in sessions:
+            session_id = str(session.get("session_id") or "")
+            if session.get("status") == "in_progress" and ctx.runtime.dataset_store.is_open(session_id):
+                return JSONResponse({
+                    "capture": True,
+                    "session_id": session_id,
+                    "scenario": session.get("scenario", ""),
+                })
+        return JSONResponse({"capture": False, "session_id": ""})
+
+    @app.post("/api/dataset/video-start")
+    async def dataset_video_start(payload: DatasetVideoStartIn) -> JSONResponse:
+        """Pin the browser video clock to the server clock for this session."""
+        ctx: WebAppContext = app.state.context
+        _require_consent("dataset")
+        store = ctx.runtime.dataset_store
+        if not store.is_open(payload.session_id):
+            raise HTTPException(status_code=409, detail="Запись для этой сессии не открыта.")
+        try:
+            capture = store.register_video_start(
+                payload.session_id,
+                client_started_at=payload.client_started_at,
+                mime_type=payload.mime_type,
+            )
+        except DatasetCaptureError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        return JSONResponse({"accepted": True, **capture})
+
+    @app.post("/api/dataset/video-chunk")
+    async def dataset_video_chunk(
+        session_id: str = Form(...),
+        sequence: int = Form(...),
+        offset_ms: float | None = Form(None),
+        chunk: UploadFile = File(...),
+    ) -> JSONResponse:
+        """Store one browser-recorded media chunk for the running session."""
+        ctx: WebAppContext = app.state.context
+        _require_consent("dataset")
+        store = ctx.runtime.dataset_store
+        if not store.is_open(session_id):
+            raise HTTPException(status_code=409, detail="Запись для этой сессии не открыта.")
+        data = await chunk.read()
+        try:
+            record = store.append_video_chunk(
+                session_id,
+                data=data,
+                sequence=sequence,
+                mime_type=chunk.content_type or "video/webm",
+                offset_ms=offset_ms,
+            )
+        except DatasetCaptureError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        return JSONResponse({"accepted": True, **record})
+
+    @app.post("/api/dataset/timeline")
+    async def dataset_timeline(payload: DatasetTimelineIn) -> JSONResponse:
+        """Record which stage was on screen, so media can be aligned later."""
+        ctx: WebAppContext = app.state.context
+        _require_consent("dataset")
+        store = ctx.runtime.dataset_store
+        if not store.is_open(payload.session_id):
+            raise HTTPException(status_code=409, detail="Запись для этой сессии не открыта.")
+        store.append_timeline(
+            payload.session_id,
+            {"stage": payload.stage, "screen": payload.screen, "details": payload.details},
+        )
+        return JSONResponse({"accepted": True})
+
     @app.get("/api/users/{user_id}/avatar")
     async def user_avatar(user_id: str) -> FileResponse:
         ctx: WebAppContext = app.state.context
@@ -515,6 +651,8 @@ def create_app() -> FastAPI:
             event_payload["audio_allowed"] = ctx.user_store.active_has_consent("audio")
         if action == "start_screening":
             event_payload["video_allowed"] = True
+        if action in {"start_screening", "start_moca", "start_hads"}:
+            event_payload.update(_dataset_capture_payload())
         await ctx.runtime.bus.publish(
             Event(topic=Topics.UI_ACTION, source="web.action", payload=event_payload)
         )

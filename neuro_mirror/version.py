@@ -7,7 +7,7 @@ SCENARIO_VERSIONS — версии сценариев тестов: меняйт
 """
 from __future__ import annotations
 
-APP_VERSION = "0.6.0"
+APP_VERSION = "0.7.0"
 
 SCENARIO_VERSIONS: dict[str, str] = {
     "screening": "1.0.0",  # базовый скрининг: видео-анализ + HADS
@@ -15,7 +15,7 @@ SCENARIO_VERSIONS: dict[str, str] = {
     "moca": "1.1.0",       # аудио-MoCA, 11 заданий
 }
 
-INTERFACE_VERSION = "1.1.0"
+INTERFACE_VERSION = "1.2.0"
 
 ALGORITHM_VERSIONS: dict[str, str] = {
     "session_conditions": "1.0.0",

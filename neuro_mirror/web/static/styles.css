@@ -2725,3 +2725,39 @@ body {
   flex-direction: column;
   gap: 12px;
 }
+
+/* ---- Запись для набора данных ---- */
+.dataset-recording {
+  position: fixed;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10050;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 15px;
+  border-radius: 999px;
+  border: 1px solid rgba(220, 38, 38, .55);
+  background: rgba(24, 10, 12, .92);
+  color: #fee2e2;
+  font: 600 13px/1.2 Manrope, sans-serif;
+  letter-spacing: .01em;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, .38);
+  pointer-events: none;
+}
+.dataset-recording[hidden] { display: none !important; }
+.dataset-recording-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #ef4444;
+  animation: dataset-recording-pulse 1.6s ease-in-out infinite;
+}
+@keyframes dataset-recording-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .35; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dataset-recording-dot { animation: none; }
+}
