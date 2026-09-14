@@ -457,6 +457,75 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=409, detail="Не удалось продолжить сессию. Завершите текущий тест и обновите список.")
         return JSONResponse({"accepted": True, "session_id": session_id})
 
+    @app.post("/api/session/check-voice")
+    async def session_check_voice() -> JSONResponse:
+        """Probe the microphone the test itself records with.
+
+        The browser-side level meter only proves that ``getUserMedia`` works.
+        Answers are captured by ``VoiceRecorder`` in this process, so the probe
+        has to go through the same path — device, recorder and speech model —
+        before the test starts.
+        """
+        ctx: WebAppContext = app.state.context
+        _require_consent("audio")
+
+        from neuro_mirror.screening.voice_probe import (
+            PROBE_SECONDS,
+            evaluate_probe,
+            is_silent,
+            measure_peak_level,
+        )
+        from neuro_mirror.utils.audio import VoiceRecorder, delete_temp_audio
+
+        recorder = VoiceRecorder(
+            sample_rate=ctx.settings.voice_sample_rate,
+            channels=ctx.settings.voice_channels,
+            max_seconds=PROBE_SECONDS,
+            stop_on_silence=False,
+        )
+        if not recorder.available:
+            result = evaluate_probe(
+                recorded=False, peak_level=None, transcript="", failure_reason="no_device",
+            )
+            return JSONResponse(result.__dict__)
+
+        try:
+            audio_path = await asyncio.to_thread(recorder.start)
+        except Exception as exc:  # noqa: BLE001 — the cause is reported, not raised
+            _log.warning("check-voice: не удалось начать запись: %s", exc)
+            result = evaluate_probe(
+                recorded=False, peak_level=None, transcript="", failure_reason="busy",
+            )
+            return JSONResponse(result.__dict__)
+
+        transcript = ""
+        peak_level: float | None = None
+        try:
+            await asyncio.sleep(PROBE_SECONDS + 0.3)
+            audio_path = await asyncio.to_thread(recorder.stop) or audio_path
+            peak_level = await asyncio.to_thread(measure_peak_level, audio_path)
+            # Transcribing silence only wastes time on the speech model
+            if not is_silent(peak_level):
+                try:
+                    reply = await ctx.runtime.bus.request(
+                        Event(
+                            topic=Topics.REQ_SPEECH_TRANSCRIBE,
+                            source="web.check_voice",
+                            payload={"audio_path": audio_path, "suppress_ui": True},
+                        ),
+                        timeout=120.0,
+                    )
+                    transcript = str(reply.get("transcript") or "")
+                except Exception as exc:  # noqa: BLE001
+                    _log.warning("check-voice: распознавание не удалось: %s", exc)
+        finally:
+            delete_temp_audio(audio_path)
+
+        result = evaluate_probe(
+            recorded=True, peak_level=peak_level, transcript=transcript,
+        )
+        return JSONResponse(result.__dict__)
+
     # ---- Session conditions check (ТЗ 6.3.2): face / lighting / distance ----
 
     @app.post("/api/session/check-face")

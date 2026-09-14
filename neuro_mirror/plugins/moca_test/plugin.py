@@ -42,6 +42,15 @@ from neuro_mirror.utils.audio import VoiceRecorder, delete_temp_audio
 
 logger = logging.getLogger(__name__)
 
+
+class RecordingUnavailableError(RuntimeError):
+    """The answer could not be recorded at all — a technical fault, not a result.
+
+    Distinct from an unrecognised answer, which scores zero and lets the test
+    continue.
+    """
+
+
 # ── Task definitions ───────────────────────────────────────────────────────────
 
 @dataclass
@@ -262,6 +271,18 @@ class MocaTestPlugin(ProcessorPlugin):
             await self._run_test()
         except asyncio.CancelledError:
             raise
+        except RecordingUnavailableError as exc:
+            # Technical fault: report it as-is, without the "Ошибка MoCA"
+            # prefix, so the patient reads what to actually do about it.
+            logger.error("moca_test: запись невозможна: %s", exc)
+            await self.bus.publish(
+                Event(
+                    topic=Topics.SESSION_ERROR,
+                    source=self.name,
+                    payload={"scenario": "moca", "session_id": self._session_id,
+                             "reason": str(exc)},
+                )
+            )
         except Exception as exc:
             logger.exception("moca_test: ошибка выполнения теста")
             await self.bus.publish(
@@ -509,9 +530,15 @@ class MocaTestPlugin(ProcessorPlugin):
             stop_on_silence=task.task_id != "language_fluency",
         )
 
+        # A silent or unrecognised answer is a result — it scores zero and the
+        # test goes on. Being unable to record at all is not a result: without
+        # this distinction every task would be skipped instantly and the
+        # patient would get 0/15 without ever seeing the "Говорите" prompt.
         if not recorder.available:
-            logger.warning("moca_test: микрофон недоступен")
-            return ""
+            raise RecordingUnavailableError(
+                "Микрофон недоступен. Проверьте, что он подключён и не занят "
+                "другой программой."
+            )
 
         try:
             audio_path = recorder.start()
@@ -521,7 +548,10 @@ class MocaTestPlugin(ProcessorPlugin):
             self._answer_finished_at = ""
         except Exception as exc:
             logger.exception("moca_test: ошибка старта записи для %s", task.task_id)
-            return ""
+            raise RecordingUnavailableError(
+                "Не удалось начать запись ответа. Проверьте, что микрофон "
+                "не занят другой программой."
+            ) from exc
 
         # Signal UI: recording started — show mic indicator NOW
         await self.bus.publish(Event(
