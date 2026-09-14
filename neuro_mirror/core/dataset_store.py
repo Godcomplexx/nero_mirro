@@ -13,8 +13,8 @@ Layout::
         timeline.jsonl       stage changes, one JSON object per line
         audio/0001_<task>.wav
         audio/0001_<task>.json   labels: task, transcript, score, timings
-        video/000000.webm        chunks as produced by the browser
-        video/index.jsonl        one record per stored chunk
+        video/session.webm       one playable file for the whole session
+        video/index.jsonl        one record per chunk, with its offset
 
 Metadata is redacted the same way session records are; the media itself cannot
 be de-identified and is the whole point of the dataset.
@@ -43,6 +43,18 @@ TASK_ID_RE = re.compile(r"[^A-Za-z0-9_-]+")
 MAX_VIDEO_CHUNK_BYTES = 16 * 1024 * 1024
 MAX_SESSION_VIDEO_BYTES = 2 * 1024 * 1024 * 1024
 MAX_VIDEO_CHUNKS = 100_000
+
+# MediaRecorder emits one WebM stream split into timeslices: only the first
+# carries the header, the rest are continuation clusters. Appending them in
+# order yields a single playable file, so that is what gets stored — separate
+# chunk files would each be unplayable on their own.
+VIDEO_FILE_NAME = "session.webm"
+# Relative path stored in the manifest. Kept POSIX-style on every platform so
+# the dataset can be read where it was not recorded.
+VIDEO_FILE_RELATIVE = f"video/{VIDEO_FILE_NAME}"
+# A chunk that arrives before its predecessor waits here instead of corrupting
+# the stream; normally empty, because the browser uploads sequentially.
+PENDING_DIR_NAME = "pending"
 
 
 def _utc_now() -> str:
@@ -78,6 +90,7 @@ class DatasetStore:
     def __init__(self, root: str | Path = "runtime/dataset") -> None:
         self.root = Path(root)
         self._video_bytes: dict[str, int] = {}
+        self._video_next: dict[str, int] = {}
 
     # ---- Session lifecycle ----
 
@@ -93,21 +106,30 @@ class DatasetStore:
         """Create the session folder and record why capture is allowed."""
         directory = self._session_dir(session_id)
         (directory / "audio").mkdir(parents=True, exist_ok=True)
-        (directory / "video").mkdir(parents=True, exist_ok=True)
+        video_dir = directory / "video"
+        video_dir.mkdir(parents=True, exist_ok=True)
+        # A resumed session reopens a folder that already holds media. Its
+        # video counter must survive: restarting numbering at zero would splice
+        # a second WebM header into the middle of the existing stream.
+        previous = self._read_json(directory / "manifest.json")
         manifest = {
             "session_id": session_id,
             "user_id": user_id,
             "scenario": scenario,
-            "started_at": _utc_now(),
+            "started_at": previous.get("started_at") or _utc_now(),
             "finished_at": None,
             "status": "in_progress",
             "versions": redact_test_data(versions or {}),
             "consent": redact_test_data(consent or {}),
-            "audio_count": 0,
-            "video_chunk_count": 0,
+            "audio_count": len(list((directory / "audio").glob("*.wav"))),
+            "video_chunk_count": previous.get("video_chunk_count") or 0,
         }
+        for carried in ("video_capture", "video_file", "video_pending_chunks"):
+            if carried in previous:
+                manifest[carried] = previous[carried]
         self._write_json(directory / "manifest.json", manifest)
-        self._video_bytes[session_id] = 0
+        self._video_bytes[session_id] = self._stored_video_bytes(video_dir)
+        self._video_next.pop(session_id, None)
         logger.info("dataset: сессия %s открыта для записи (%s)", session_id, scenario)
         return directory
 
@@ -126,15 +148,24 @@ class DatasetStore:
         manifest["status"] = status
         manifest["finished_at"] = _utc_now()
         manifest["audio_count"] = len(list((directory / "audio").glob("*.wav")))
-        manifest["video_chunk_count"] = len(list((directory / "video").glob("*.webm")))
+        manifest["video_chunk_count"] = self.next_video_sequence(session_id)
+        pending = self._pending_sequences(directory / "video" / PENDING_DIR_NAME)
+        manifest["video_pending_chunks"] = pending
         if result is not None:
             manifest["result"] = redact_test_data(result)
         self._write_json(manifest_path, manifest)
         self._video_bytes.pop(session_id, None)
+        self._video_next.pop(session_id, None)
         logger.info(
             "dataset: сессия %s закрыта (%s): %d аудио, %d видеофрагментов",
             session_id, status, manifest["audio_count"], manifest["video_chunk_count"],
         )
+        if pending:
+            logger.warning(
+                "dataset: сессия %s — видеофрагменты %s не встали в поток, "
+                "видеозапись обрывается раньше конца сессии",
+                session_id, pending,
+            )
 
     def is_open(self, session_id: str) -> bool:
         if not session_id or not SESSION_ID_RE.match(session_id):
@@ -143,6 +174,41 @@ class DatasetStore:
         if not manifest_path.exists():
             return False
         return self._read_json(manifest_path).get("status") == "in_progress"
+
+    def session_exists(self, session_id: str) -> bool:
+        """Return whether a validated dataset session has already been created."""
+        if not session_id or not SESSION_ID_RE.match(session_id):
+            return False
+        return (self.root / session_id / "manifest.json").is_file()
+
+    def next_video_sequence(self, session_id: str) -> int:
+        """Return the chunk number the stream expects next.
+
+        Chunks are appended to one file, so the count of already appended
+        chunks *is* the next expected sequence. A browser that reconnects to a
+        resumed session continues its numbering from here.
+        """
+        if not self.session_exists(session_id):
+            return 0
+        cached = self._video_next.get(session_id)
+        if cached is not None:
+            return cached
+        manifest = self._read_json(self.root / session_id / "manifest.json")
+        try:
+            restored = int(manifest.get("video_chunk_count") or 0)
+        except (TypeError, ValueError):
+            restored = 0
+        restored = max(0, restored)
+        self._video_next[session_id] = restored
+        return restored
+
+    @staticmethod
+    def _pending_sequences(pending_dir: Path) -> list[int]:
+        if not pending_dir.is_dir():
+            return []
+        return sorted(
+            int(item.stem) for item in pending_dir.glob("*.part") if item.stem.isdigit()
+        )
 
     # ---- Answers ----
 
@@ -254,25 +320,63 @@ class DatasetStore:
 
         written = self._video_bytes.get(session_id)
         if written is None:
-            written = sum(item.stat().st_size for item in video_dir.glob("*.webm"))
+            written = self._stored_video_bytes(video_dir)
         if written + len(data) > MAX_SESSION_VIDEO_BYTES:
             raise DatasetCaptureError("Достигнут предел объёма видео для сессии.")
 
-        suffix = ".webm" if "webm" in mime_type else ".bin"
-        target = video_dir / f"{sequence:06d}{suffix}"
-        target.write_bytes(data)
+        expected = self.next_video_sequence(session_id)
+        if sequence < expected:
+            # A retried upload of a chunk already in the stream: appending it
+            # again would duplicate video, so acknowledge without writing.
+            return {
+                "sequence": sequence,
+                "file": VIDEO_FILE_RELATIVE,
+                "bytes": 0,
+                "mime_type": mime_type,
+                "offset_ms": round(offset_ms, 1) if offset_ms is not None else None,
+                "received_at": _utc_now(),
+                "stored": "duplicate",
+            }
+
+        complete_path = video_dir / VIDEO_FILE_NAME
+        pending_dir = video_dir / PENDING_DIR_NAME
+        if sequence == expected:
+            with complete_path.open("ab") as stream:
+                stream.write(data)
+            expected += 1
+            expected = self._flush_pending(pending_dir, complete_path, expected)
+            stored = "appended"
+        else:
+            # Out of order: hold it back rather than splice it into the wrong
+            # place. The browser uploads sequentially, so this means an earlier
+            # upload failed and is being retried.
+            pending_dir.mkdir(parents=True, exist_ok=True)
+            (pending_dir / f"{sequence:06d}.part").write_bytes(data)
+            stored = "pending"
+
+        self._video_next[session_id] = expected
         self._video_bytes[session_id] = written + len(data)
 
         record = {
             "sequence": sequence,
-            "file": target.name,
+            "file": VIDEO_FILE_RELATIVE,
             "bytes": len(data),
             "mime_type": mime_type,
             # Milliseconds from video_started_at to the end of this chunk.
             "offset_ms": round(offset_ms, 1) if offset_ms is not None else None,
             "received_at": _utc_now(),
+            "stored": stored,
         }
         self._append_line(video_dir / "index.jsonl", record)
+
+        # A final browser chunk may arrive after close_session(). Keep the
+        # closed manifest accurate without reopening the session.
+        manifest_path = directory / "manifest.json"
+        manifest = self._read_json(manifest_path)
+        manifest["video_chunk_count"] = expected
+        manifest["video_file"] = VIDEO_FILE_RELATIVE
+        manifest["video_pending_chunks"] = self._pending_sequences(pending_dir)
+        self._write_json(manifest_path, manifest)
         return record
 
     # ---- Timeline ----
@@ -286,6 +390,34 @@ class DatasetStore:
         self._append_line(directory / "timeline.jsonl", record)
 
     # ---- Internals ----
+
+    @staticmethod
+    def _stored_video_bytes(video_dir: Path) -> int:
+        total = 0
+        complete_path = video_dir / VIDEO_FILE_NAME
+        if complete_path.is_file():
+            total += complete_path.stat().st_size
+        pending_dir = video_dir / PENDING_DIR_NAME
+        if pending_dir.is_dir():
+            total += sum(item.stat().st_size for item in pending_dir.glob("*.part"))
+        return total
+
+    @classmethod
+    def _flush_pending(cls, pending_dir: Path, complete_path: Path, expected: int) -> int:
+        """Append held-back chunks that have become contiguous again."""
+        if not pending_dir.is_dir():
+            return expected
+        while True:
+            candidate = pending_dir / f"{expected:06d}.part"
+            if not candidate.is_file():
+                break
+            with complete_path.open("ab") as stream:
+                stream.write(candidate.read_bytes())
+            candidate.unlink(missing_ok=True)
+            expected += 1
+        with contextlib.suppress(OSError):
+            pending_dir.rmdir()  # only succeeds once nothing is held back
+        return expected
 
     def _session_dir(self, session_id: str, *, create: bool = True) -> Path:
         if not session_id or not SESSION_ID_RE.match(session_id):

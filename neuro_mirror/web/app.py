@@ -540,6 +540,7 @@ def create_app() -> FastAPI:
                     "capture": True,
                     "session_id": session_id,
                     "scenario": session.get("scenario", ""),
+                    "next_video_sequence": ctx.runtime.dataset_store.next_video_sequence(session_id),
                 })
         return JSONResponse({"capture": False, "session_id": ""})
 
@@ -572,7 +573,9 @@ def create_app() -> FastAPI:
         ctx: WebAppContext = app.state.context
         _require_consent("dataset")
         store = ctx.runtime.dataset_store
-        if not store.is_open(session_id):
+        # MediaRecorder can deliver its final chunk just after the test result
+        # closes the dataset session. Preserve that already-consented tail.
+        if not store.session_exists(session_id):
             raise HTTPException(status_code=409, detail="Запись для этой сессии не открыта.")
         data = await chunk.read()
         try:
@@ -593,7 +596,9 @@ def create_app() -> FastAPI:
         ctx: WebAppContext = app.state.context
         _require_consent("dataset")
         store = ctx.runtime.dataset_store
-        if not store.is_open(payload.session_id):
+        # Allow the browser's final capture_stopped marker to arrive just
+        # after the result closes the session.
+        if not store.session_exists(payload.session_id):
             raise HTTPException(status_code=409, detail="Запись для этой сессии не открыта.")
         store.append_timeline(
             payload.session_id,

@@ -137,16 +137,60 @@ def test_missing_source_file_is_ignored(store):
     assert store.store_answer_audio("abc123", source_path="nope.wav", task_id="x") == ""
 
 
-def test_video_chunks_are_stored_in_sequence(store):
+def test_video_is_stored_as_one_playable_file(store):
     store.open_session("abc123", user_id="u0001", scenario="hads")
     store.append_video_chunk("abc123", data=b"first", sequence=0)
     store.append_video_chunk("abc123", data=b"second", sequence=1)
 
     video_dir = store.root / "abc123" / "video"
-    assert (video_dir / "000000.webm").read_bytes() == b"first"
-    assert (video_dir / "000001.webm").read_bytes() == b"second"
+    assert (video_dir / "session.webm").read_bytes() == b"firstsecond"
+    # Per-chunk files would each be unplayable — only the stream is kept
+    assert sorted(item.name for item in video_dir.glob("*.webm")) == ["session.webm"]
     index = [json.loads(line) for line in (video_dir / "index.jsonl").read_text("utf-8").splitlines()]
     assert [item["sequence"] for item in index] == [0, 1]
+    assert [item["stored"] for item in index] == ["appended", "appended"]
+    assert store.next_video_sequence("abc123") == 2
+
+
+def test_out_of_order_chunk_waits_for_its_predecessor(store):
+    store.open_session("abc123", user_id="u0001", scenario="hads")
+    store.append_video_chunk("abc123", data=b"first", sequence=0)
+    store.append_video_chunk("abc123", data=b"third", sequence=2)
+
+    video_dir = store.root / "abc123" / "video"
+    # The gap must not be spliced over: the stream stops at the last contiguous chunk
+    assert (video_dir / "session.webm").read_bytes() == b"first"
+    assert store.next_video_sequence("abc123") == 1
+
+    store.append_video_chunk("abc123", data=b"second", sequence=1)
+
+    assert (video_dir / "session.webm").read_bytes() == b"firstsecondthird"
+    assert store.next_video_sequence("abc123") == 3
+    assert not (video_dir / "pending").exists()
+
+
+def test_retried_chunk_is_not_appended_twice(store):
+    store.open_session("abc123", user_id="u0001", scenario="hads")
+    store.append_video_chunk("abc123", data=b"first", sequence=0)
+
+    record = store.append_video_chunk("abc123", data=b"first", sequence=0)
+
+    assert record["stored"] == "duplicate"
+    assert (store.root / "abc123" / "video" / "session.webm").read_bytes() == b"first"
+
+
+def test_resumed_session_keeps_appending_to_the_same_file(store):
+    store.open_session("abc123", user_id="u0001", scenario="moca")
+    store.append_video_chunk("abc123", data=b"first", sequence=0)
+    store.close_session("abc123", status="interrupted")
+
+    # Reopening must not restart numbering: that would put a second WebM
+    # header in the middle of the stream and break playback.
+    store.open_session("abc123", user_id="u0001", scenario="moca")
+    assert store.next_video_sequence("abc123") == 1
+
+    store.append_video_chunk("abc123", data=b"second", sequence=1)
+    assert (store.root / "abc123" / "video" / "session.webm").read_bytes() == b"firstsecond"
 
 
 def test_audio_sidecar_carries_duration_and_server_clock_bounds(store, tmp_path):
@@ -241,6 +285,8 @@ def test_manifest_records_result_on_close(store, tmp_path):
     assert manifest["status"] == "completed"
     assert manifest["audio_count"] == 1
     assert manifest["video_chunk_count"] == 1
+    # POSIX-style on every platform so the dataset reads where it was not recorded
+    assert manifest["video_file"] == "video/session.webm"
     assert manifest["result"]["moca_score"] == 12
     assert manifest["versions"] == {"app": "0.7.0"}
     assert store.is_open("abc123") is False
@@ -316,7 +362,7 @@ def test_video_chunk_is_stored_for_an_open_session(tmp_path):
     )
 
     assert response.status_code == 200
-    assert (store.root / "abc123" / "video" / "000000.webm").read_bytes() == b"payload"
+    assert (store.root / "abc123" / "video" / "session.webm").read_bytes() == b"payload"
     client.close()
 
 

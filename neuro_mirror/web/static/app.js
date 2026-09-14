@@ -1013,6 +1013,7 @@ function renderMoca(snapshot) {
     const panel = document.getElementById("moca-panel");
     if (panel) panel.style.display = "none";
     stopMocaAudio();
+    window._mocaRecordingActive = false;
     return;
   }
 
@@ -1033,6 +1034,8 @@ function renderMoca(snapshot) {
 
   const taskId = snapshot.moca_task_id || "";
   const isRecording = !!snapshot.moca_recording;
+  if (isRecording && !window._mocaRecordingActive) playMocaRecordingCue();
+  window._mocaRecordingActive = isRecording;
   // Hide hint for ALL tasks while recording — patient must answer from memory
   const hideHint = isRecording;
 
@@ -1061,6 +1064,27 @@ function renderMoca(snapshot) {
       window._lastMocaTts = ttsKey;
       _mocaPlayTts(snapshot.moca_tts_text, snapshot.moca_tts_id || "");
     }
+  }
+}
+
+function playMocaRecordingCue() {
+  const AudioCtor = window.AudioContext || window.webkitAudioContext;
+  if (!AudioCtor) return;
+  try {
+    if (!state.sharedAudioCtx) state.sharedAudioCtx = new AudioCtor();
+    const context = state.sharedAudioCtx;
+    if (context.state === "suspended") context.resume().catch(() => {});
+    const oscillator = context.createOscillator();
+    const gain = context.createGain();
+    oscillator.frequency.value = 880;
+    gain.gain.setValueAtTime(0.08, context.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, context.currentTime + 0.16);
+    oscillator.connect(gain);
+    gain.connect(context.destination);
+    oscillator.start();
+    oscillator.stop(context.currentTime + 0.16);
+  } catch (_) {
+    // The visible microphone indicator remains available if audio is blocked.
   }
 }
 
@@ -1141,6 +1165,7 @@ const datasetCapture = {
   sequence: 0,
   screen: null,
   busy: false,
+  uploadChain: Promise.resolve(),
   // Monotonic base for chunk offsets: wall clock can jump, performance.now cannot
   startedAt: 0,
 };
@@ -1188,11 +1213,23 @@ async function startDatasetCapture(screen) {
     datasetCapture.stream = stream;
     datasetCapture.recorder = recorder;
     datasetCapture.sessionId = status.session_id;
-    datasetCapture.sequence = 0;
+    datasetCapture.sequence = Number.isInteger(status.next_video_sequence)
+      ? status.next_video_sequence
+      : 0;
+    datasetCapture.uploadChain = Promise.resolve();
+    recorder._datasetSessionId = status.session_id;
+    recorder._datasetSequence = datasetCapture.sequence;
+    recorder._datasetStartedAt = performance.now();
 
     recorder.ondataavailable = (event) => {
       if (event.data && event.data.size > 0) {
-        uploadDatasetChunk(event.data, performance.now() - datasetCapture.startedAt);
+        const sessionId = recorder._datasetSessionId;
+        const sequence = recorder._datasetSequence++;
+        datasetCapture.sequence = recorder._datasetSequence;
+        const offsetMs = performance.now() - recorder._datasetStartedAt;
+        datasetCapture.uploadChain = datasetCapture.uploadChain.then(
+          () => uploadDatasetChunk(event.data, offsetMs, sessionId, sequence)
+        );
       }
     };
     recorder.onerror = (event) => {
@@ -1268,10 +1305,8 @@ async function registerDatasetVideoStart(mimeType) {
   }
 }
 
-async function uploadDatasetChunk(blob, offsetMs) {
-  const sessionId = datasetCapture.sessionId;
+async function uploadDatasetChunk(blob, offsetMs, sessionId, sequence) {
   if (!sessionId) return;
-  const sequence = datasetCapture.sequence++;
   const body = new FormData();
   body.append("session_id", sessionId);
   body.append("sequence", String(sequence));

@@ -45,6 +45,7 @@ class VoiceRecorder:
         silence_threshold: float = 0.012,
         silence_duration: float = 1.8,
         min_speech_duration: float = 0.4,
+        stop_on_silence: bool = True,
     ) -> None:
         self.sample_rate = sample_rate
         self.channels = channels
@@ -52,6 +53,7 @@ class VoiceRecorder:
         self.silence_threshold = silence_threshold
         self.silence_duration = silence_duration
         self.min_speech_duration = min_speech_duration
+        self.stop_on_silence = stop_on_silence
         self._stream = None
         self._wave_file: wave.Wave_write | None = None
         self._file_path = ""
@@ -112,7 +114,7 @@ class VoiceRecorder:
                 if self._captured_frames >= max_frames:
                     raise sd.CallbackStop()
                 # Stop early only after user has spoken and then gone silent
-                if speech_started and silence_long_enough:
+                if self.stop_on_silence and speech_started and silence_long_enough:
                     raise sd.CallbackStop()
 
         try:
