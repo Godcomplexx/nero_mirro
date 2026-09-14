@@ -441,6 +441,10 @@ class MocaTestPlugin(ProcessorPlugin):
                 logger.warning("moca_test: один из ответов последовательного счёта не распознан")
             all_transcripts.append(t)
 
+        if not any(item.strip() for item in all_transcripts):
+            # Joining empty steps would yield a string of separators, which
+            # reads as an answer downstream. Nothing was said — say so.
+            return ""
         return " | ".join(all_transcripts)
 
     async def _speak(self, text: str) -> bool:

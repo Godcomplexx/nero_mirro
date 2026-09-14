@@ -202,25 +202,33 @@ def test_moca_restores_completed_tasks_and_rescores_with_current_algorithm():
 
 
 def test_moca_worker_failure_is_not_scored_and_removes_audio(tmp_path):
+    """A rejected transcript is discarded, not used, and the audio is removed.
+
+    The test no longer aborts on a recognition failure, so ``_transcribe``
+    returns an empty answer instead of raising — but the unreliable text the
+    worker attached to its rejection must never reach scoring.
+    """
     async def run():
         path = tmp_path / 'answer.wav'
         path.write_bytes(b'temporary audio')
         bus = Mock()
         bus.request = AsyncMock(return_value={'accepted': False, 'transcript': 'guess', 'message': 'worker failed'})
         plugin = MocaTestPlugin(bus, settings=Settings())
-        with pytest.raises(RuntimeError, match='worker failed'):
-            await plugin._transcribe(str(path))
+        assert await plugin._transcribe(str(path)) == ''
         assert not path.exists()
     asyncio.run(run())
 
 
 def test_serial_subtraction_does_not_score_missing_audio():
+    """Unheard steps must not turn into a pseudo-answer of separators."""
     async def run():
         plugin = MocaTestPlugin(EventBus(), settings=Settings())
         plugin._record_and_transcribe = AsyncMock(return_value='')
+        plugin._speak = AsyncMock(return_value=True)
         task = next(t for t in MOCA_TASKS if t.task_id == 'attention_serial')
-        with pytest.raises(RuntimeError):
-            await plugin._run_serial_subtraction(task, 4, 11)
+        transcript = await plugin._run_serial_subtraction(task, 4, 11)
+        assert transcript == ''
+        assert score_moca_task(task.task_id, transcript)['score'] == 0
     asyncio.run(run())
 
 
