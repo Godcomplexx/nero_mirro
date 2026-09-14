@@ -147,6 +147,8 @@ def test_video_chunks_are_stored_in_sequence(store):
     assert (video_dir / "000001.webm").read_bytes() == b"second"
     index = [json.loads(line) for line in (video_dir / "index.jsonl").read_text("utf-8").splitlines()]
     assert [item["sequence"] for item in index] == [0, 1]
+    assert (video_dir / "session.webm").read_bytes() == b"firstsecond"
+    assert store.next_video_sequence("abc123") == 2
 
 
 def test_audio_sidecar_carries_duration_and_server_clock_bounds(store, tmp_path):
@@ -241,6 +243,7 @@ def test_manifest_records_result_on_close(store, tmp_path):
     assert manifest["status"] == "completed"
     assert manifest["audio_count"] == 1
     assert manifest["video_chunk_count"] == 1
+    assert manifest["video_file"] == "video\\session.webm" or manifest["video_file"] == "video/session.webm"
     assert manifest["result"]["moca_score"] == 12
     assert manifest["versions"] == {"app": "0.7.0"}
     assert store.is_open("abc123") is False

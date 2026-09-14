@@ -126,7 +126,9 @@ class DatasetStore:
         manifest["status"] = status
         manifest["finished_at"] = _utc_now()
         manifest["audio_count"] = len(list((directory / "audio").glob("*.wav")))
-        manifest["video_chunk_count"] = len(list((directory / "video").glob("*.webm")))
+        manifest["video_chunk_count"] = len(list(
+            (directory / "video").glob("[0-9][0-9][0-9][0-9][0-9][0-9].webm")
+        ))
         if result is not None:
             manifest["result"] = redact_test_data(result)
         self._write_json(manifest_path, manifest)
@@ -143,6 +145,24 @@ class DatasetStore:
         if not manifest_path.exists():
             return False
         return self._read_json(manifest_path).get("status") == "in_progress"
+
+    def session_exists(self, session_id: str) -> bool:
+        """Return whether a validated dataset session has already been created."""
+        if not session_id or not SESSION_ID_RE.match(session_id):
+            return False
+        return (self.root / session_id / "manifest.json").is_file()
+
+    def next_video_sequence(self, session_id: str) -> int:
+        """Return the first unused browser video chunk number."""
+        if not self.session_exists(session_id):
+            return 0
+        video_dir = self.root / session_id / "video"
+        sequences = [
+            int(item.stem)
+            for item in video_dir.glob("[0-9][0-9][0-9][0-9][0-9][0-9].webm")
+            if item.stem.isdigit()
+        ]
+        return max(sequences, default=-1) + 1
 
     # ---- Answers ----
 
@@ -254,7 +274,10 @@ class DatasetStore:
 
         written = self._video_bytes.get(session_id)
         if written is None:
-            written = sum(item.stat().st_size for item in video_dir.glob("*.webm"))
+            written = sum(
+                item.stat().st_size
+                for item in video_dir.glob("[0-9][0-9][0-9][0-9][0-9][0-9].webm")
+            )
         if written + len(data) > MAX_SESSION_VIDEO_BYTES:
             raise DatasetCaptureError("Достигнут предел объёма видео для сессии.")
 
@@ -262,6 +285,22 @@ class DatasetStore:
         target = video_dir / f"{sequence:06d}{suffix}"
         target.write_bytes(data)
         self._video_bytes[session_id] = written + len(data)
+
+        # MediaRecorder timeslices after the first are continuations of one
+        # WebM stream. Keep them for recovery and also produce one playable
+        # stream containing the chunks in browser sequence order.
+        complete_path = video_dir / "session.webm"
+        if sequence == 0:
+            complete_path.write_bytes(data)
+        elif complete_path.exists():
+            with complete_path.open("ab") as complete:
+                complete.write(data)
+        else:
+            temp_path = video_dir / "session.webm.tmp"
+            with temp_path.open("wb") as complete:
+                for item in sorted(video_dir.glob("[0-9][0-9][0-9][0-9][0-9][0-9].webm")):
+                    complete.write(item.read_bytes())
+            temp_path.replace(complete_path)
 
         record = {
             "sequence": sequence,
@@ -271,8 +310,19 @@ class DatasetStore:
             # Milliseconds from video_started_at to the end of this chunk.
             "offset_ms": round(offset_ms, 1) if offset_ms is not None else None,
             "received_at": _utc_now(),
+            "complete_file": complete_path.name,
         }
         self._append_line(video_dir / "index.jsonl", record)
+
+        # A final browser chunk may arrive after close_session(). Keep the
+        # closed manifest accurate without reopening the session.
+        manifest_path = directory / "manifest.json"
+        manifest = self._read_json(manifest_path)
+        manifest["video_chunk_count"] = len(list(
+            video_dir.glob("[0-9][0-9][0-9][0-9][0-9][0-9].webm")
+        ))
+        manifest["video_file"] = str(Path("video") / complete_path.name)
+        self._write_json(manifest_path, manifest)
         return record
 
     # ---- Timeline ----

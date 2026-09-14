@@ -142,7 +142,7 @@ MOCA_TASKS: list[MocaTask] = [
             "которые начинаются на букву Л. "
             "Имена людей не считаются. Начните."
         ),
-        max_record_seconds=65.0,
+        max_record_seconds=60.0,
         hint="Слова на букву Л — 1 минута",
     ),
     MocaTask(
@@ -329,7 +329,10 @@ class MocaTestPlugin(ProcessorPlugin):
                 transcript = await self._record_and_transcribe(task)
 
             if not transcript.strip():
-                raise RuntimeError("Ответ не распознан. Проверьте микрофон и повторите тест.")
+                logger.warning(
+                    "moca_test: ответ для %s не распознан, перехожу к следующему заданию",
+                    task.task_id,
+                )
 
             # Для оценки достаточно идентификатора задания и транскрипции.
             # Результат задания формируется сразу после распознавания.
@@ -400,7 +403,7 @@ class MocaTestPlugin(ProcessorPlugin):
         # First answer already prompted by the main task prompt (100-7=?)
         transcript = await self._record_and_transcribe(task)
         if not transcript.strip():
-            raise RuntimeError("Ответ не распознан. Проверьте микрофон и повторите тест.")
+            logger.warning("moca_test: первый ответ в последовательном счёте не распознан")
         all_transcripts.append(transcript)
 
         for step_prompt, _ in SERIAL_SUBTRACTION_STEPS:
@@ -435,7 +438,7 @@ class MocaTestPlugin(ProcessorPlugin):
             )
             t = await self._record_and_transcribe(step_task)
             if not t.strip():
-                raise RuntimeError("Ответ не распознан. Проверьте микрофон и повторите тест.")
+                logger.warning("moca_test: один из ответов последовательного счёта не распознан")
             all_transcripts.append(t)
 
         return " | ".join(all_transcripts)
@@ -499,6 +502,7 @@ class MocaTestPlugin(ProcessorPlugin):
             silence_threshold=self.settings.voice_silence_threshold,
             silence_duration=self.settings.voice_silence_duration,
             min_speech_duration=self.settings.voice_min_speech_duration,
+            stop_on_silence=task.task_id != "language_fluency",
         )
 
         if not recorder.available:
@@ -541,7 +545,7 @@ class MocaTestPlugin(ProcessorPlugin):
                     break
                 # Update countdown every second so user sees progress
                 current_second = int(elapsed)
-                if current_second != last_ui_second:
+                if task.task_id != "language_fluency" and current_second != last_ui_second:
                     last_ui_second = current_second
                     remaining = max(0, int(task.max_record_seconds - elapsed))
                     await self.bus.publish(Event(
@@ -617,7 +621,7 @@ class MocaTestPlugin(ProcessorPlugin):
             return transcript
         except Exception as exc:
             logger.warning("moca_test: transcribe error: %s", exc)
-            raise
+            return ""
         finally:
             # Copy into the dataset while the file still exists; capture must
             # never interfere with the test, so failures are swallowed.
