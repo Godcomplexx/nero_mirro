@@ -48,6 +48,22 @@ SERIAL_NUMBER_FORMS = {
     "восьмидесяти": "восемьдесят",
     "девяноста": "девяносто",
 }
+SERIAL_CORRECTION_CUES = (
+    "ой",
+    "нет",
+    "ошиб",
+    "исправ",
+    "запут",
+    "пута",
+    "господи",
+    "проблем",
+    "не помню",
+    "не получается",
+)
+SENTENCE_ASR_WORD_REPLACEMENTS = {
+    "диан": "диван",
+    "зеваном": "диваном",
+}
 DIGITS_FORWARD_EXPECTED = (2, 1, 8, 5, 4)
 DIGITS_BACKWARD_EXPECTED = (2, 4, 7)
 
@@ -150,11 +166,21 @@ def _score_task(task: dict[str, Any]) -> dict[str, Any]:
 
     if task_id == "language_sentence_1":
         expected = "я знаю только одно что иван это тот кто может сегодня помочь"
-        return _score_sentence_words(base, transcript, expected)
+        return _score_sentence_words(
+            base,
+            transcript,
+            expected,
+            optional_asr_words=("это",),
+        )
 
     if task_id == "language_sentence_2":
         expected = "кошка всегда пряталась под диваном когда собаки были в комнате"
-        return _score_sentence_words(base, transcript, expected)
+        return _score_sentence_words(
+            base,
+            transcript,
+            expected,
+            optional_asr_words=("под", "в"),
+        )
 
     if task_id == "language_fluency":
         return _score_fluency(base, transcript)
@@ -176,16 +202,21 @@ def _score_task(task: dict[str, Any]) -> dict[str, Any]:
                 "измер",
                 "замер",
                 "мерить",
-                "меряют",
-                "длин",
-                "врем",
                 "прибор",
                 "инструмент",
                 "шкал",
-                "делени",
-                "цифр",
-                "числ",
-                "циферблат",
+            ),
+            exact_phrases=(
+                "смирение",
+                "извинени",
+                "это время",
+                "меры времени и длины",
+                "меру времени и длины",
+                "цифр блат",
+                "тут циферблат а тут цифры",
+                "циферблат общий",
+                "сантиметр миллиметр",
+                "сантиметрах миллиметр",
             ),
             fuzzy_phrases=("измерительный прибор",),
         )
@@ -222,8 +253,12 @@ def _score_digit_span(
 
 
 def _score_serial_subtraction(base: dict[str, Any], transcript: str) -> dict[str, Any]:
+    normalized_transcript = _normalize_serial_number_forms(transcript)
+    normalized_transcript = _normalize_fragmented_serial_numbers(
+        normalized_transcript
+    )
     extracted_numbers = _split_serial_compound_hundreds(
-        _extract_numbers(_normalize_serial_number_forms(transcript))
+        _extract_numbers(normalized_transcript)
     )
     # 100 — исходное число, а однозначные числа обычно являются вслух
     # произнесённым оператором («минус семь»), а не результатом вычитания.
@@ -240,14 +275,22 @@ def _score_serial_subtraction(base: dict[str, Any], transcript: str) -> dict[str
         if previous - current == 7
     ][:5]
     correct_count = len(correct_transitions)
-    if correct_count >= 4:
-        score = 3
-    elif correct_count >= 2:
-        score = 2
-    elif correct_count == 1:
-        score = 1
-    else:
-        score = 0
+    transition_score = _serial_score_from_count(correct_count)
+
+    # В естественной речи испытуемый часто повторяет операнд,
+    # рассуждает вслух и исправляется. Это разрывает цепочку
+    # соседних переходов. При явных признаках самокоррекции дополнительно
+    # ищем эталонные ответы в правильном порядке, не удаляя ошибки.
+    has_correction_cue = any(
+        cue in normalized_transcript for cue in SERIAL_CORRECTION_CUES
+    )
+    ordered_expected_count = (
+        _longest_serial_expected_subsequence(raw_answers)
+        if has_correction_cue
+        else 0
+    )
+    recovery_score = _serial_score_from_count(ordered_expected_count)
+    score = max(transition_score, recovery_score)
     return {
         **base,
         "score": score,
@@ -260,9 +303,52 @@ def _score_serial_subtraction(base: dict[str, Any], transcript: str) -> dict[str
             f"{_format_serial_transitions(correct_transitions)}. "
             f"Результаты: {' '.join(map(str, answers)) or '-'}. "
             f"Исправления: "
-            f"{' '.join(map(str, corrected_answers)) or '-'}"
+            f"{' '.join(map(str, corrected_answers)) or '-'}. "
+            f"Эталонных ответов по порядку: "
+            f"{ordered_expected_count}/5"
         ),
     }
+
+
+def _serial_score_from_count(correct_count: int) -> int:
+    """Перевести число верных ответов в балл серийного счёта."""
+    if correct_count >= 4:
+        return 3
+    if correct_count >= 2:
+        return 2
+    if correct_count == 1:
+        return 1
+    return 0
+
+
+def _longest_serial_expected_subsequence(answers: list[int]) -> int:
+    """Посчитать эталонные ответы, встреченные в нужном порядке."""
+    previous_row = [0] * (len(SERIAL_EXPECTED) + 1)
+    for answer in answers:
+        current_row = [0]
+        for index, expected in enumerate(SERIAL_EXPECTED, start=1):
+            if answer == expected:
+                current_row.append(previous_row[index - 1] + 1)
+            else:
+                current_row.append(
+                    max(previous_row[index], current_row[index - 1])
+                )
+        previous_row = current_row
+    return previous_row[-1]
+
+
+def _normalize_fragmented_serial_numbers(text: str) -> str:
+    """Склеить разорванные ASR числа вида «восемьдесят это шесть»."""
+    normalized = text
+    fillers = r"(?:это|(?:у\s+меня\s+)?будет|так|ну)"
+    for tens_word in TENS:
+        for unit_word in UNITS:
+            normalized = re.sub(
+                rf"(?<![а-я]){tens_word}\s+{fillers}\s+{unit_word}(?![а-я])",
+                f"{tens_word} {unit_word}",
+                normalized,
+            )
+    return normalized
 
 
 def _normalize_serial_number_forms(text: str) -> str:
@@ -357,35 +443,54 @@ def _score_sentence_words(
     base: dict[str, Any],
     transcript: str,
     expected: str,
+    *,
+    optional_asr_words: tuple[str, ...] = (),
 ) -> dict[str, Any]:
-    """Проверить строгий порядок слов, разрешив изменение окончаний."""
+    """Найти нужное предложение в непрерывной последовательности слов."""
     expected_words = _normalize_text(expected).split()
     actual_words = _normalize_text(transcript).split()
-    same_length = len(actual_words) == len(expected_words)
-    mismatches = [
-        (index, expected_word, actual_word)
-        for index, (expected_word, actual_word) in enumerate(
-            zip(expected_words, actual_words),
-            start=1,
-        )
-        if not _same_word_with_different_ending(expected_word, actual_word)
-    ]
-    correct = same_length and not mismatches
+    expected_length = len(expected_words)
+    matching_start: int | None = None
+    for start in range(len(actual_words) - expected_length + 1):
+        candidate = actual_words[start : start + expected_length]
+        if all(
+            _same_word_with_different_ending(expected_word, actual_word)
+            for expected_word, actual_word in zip(expected_words, candidate)
+        ):
+            matching_start = start
+            break
 
-    if not same_length:
+    matched_with_asr_tolerance = (
+        matching_start is None
+        and _sentence_matches_after_asr_correction(
+            expected_words,
+            actual_words,
+            optional_asr_words,
+        )
+    )
+    correct = matching_start is not None or matched_with_asr_tolerance
+    if matching_start is not None:
+        ignored_before = matching_start or 0
+        ignored_after = len(actual_words) - ignored_before - expected_length
+        details = (
+            "Найдена непрерывная последовательность слов; "
+            f"пропущено комментариев до: {ignored_before}, "
+            f"после: {ignored_after}."
+        )
+    elif matched_with_asr_tolerance:
+        details = (
+            "Предложение совпало после коррекции типичных ошибок ASR "
+            "в служебных словах, окончаниях или известных заменах."
+        )
+    elif len(actual_words) < expected_length:
         details = (
             "Количество слов не совпало: "
             f"ожидалось {len(expected_words)}, распознано {len(actual_words)}."
         )
-    elif mismatches:
-        details = "Не совпали слова: " + "; ".join(
-            f"{index}: {expected_word} ≠ {actual_word}"
-            for index, expected_word, actual_word in mismatches
-        )
     else:
         details = (
-            "Строгая последовательность слов совпала; "
-            "различия окончаний разрешены."
+            "Не совпали слова: нужная непрерывная "
+            "последовательность не найдена."
         )
     return {
         **base,
@@ -395,6 +500,53 @@ def _score_sentence_words(
         "expected": expected,
         "details": details,
     }
+
+
+def _sentence_matches_after_asr_correction(
+    expected_words: list[str],
+    actual_words: list[str],
+    optional_words: tuple[str, ...],
+) -> bool:
+    """Проверить всё предложение после узких исправлений ошибок ASR.
+
+    В этом резервном режиме комментарии внутри или снаружи не пропускаются:
+    после удаления разрешённых служебных слов длина и порядок остальных слов
+    должны полностью совпасть.
+    """
+    optional = set(optional_words)
+    expected_content = [
+        word for word in expected_words if word not in optional
+    ]
+    actual_content = [
+        SENTENCE_ASR_WORD_REPLACEMENTS.get(word, word)
+        for word in actual_words
+        if word not in optional
+    ]
+    if len(expected_content) != len(actual_content):
+        return False
+    return all(
+        _same_word_with_asr_tolerance(expected_word, actual_word)
+        for expected_word, actual_word in zip(
+            expected_content,
+            actual_content,
+        )
+    )
+
+
+def _same_word_with_asr_tolerance(expected: str, actual: str) -> bool:
+    """Сравнить слово с дополнительным допуском для коротких окончаний."""
+    if _same_word_with_different_ending(expected, actual):
+        return True
+    common_prefix_length = 0
+    for expected_char, actual_char in zip(expected, actual):
+        if expected_char != actual_char:
+            break
+        common_prefix_length += 1
+    return (
+        common_prefix_length >= 3
+        and len(expected) - common_prefix_length <= 2
+        and len(actual) - common_prefix_length <= 2
+    )
 
 
 def _same_word_with_different_ending(expected: str, actual: str) -> bool:
@@ -438,6 +590,7 @@ def _score_abstraction(
     *,
     expected: str,
     word_stems: tuple[str, ...],
+    exact_phrases: tuple[str, ...] = (),
     fuzzy_phrases: tuple[str, ...] = (),
 ) -> dict[str, Any]:
     normalized = _normalize_text(transcript)
@@ -451,6 +604,15 @@ def _score_abstraction(
         ),
         "",
     )
+    if not matched_rule:
+        matched_rule = next(
+            (
+                phrase
+                for phrase in exact_phrases
+                if _normalize_text(phrase) in normalized
+            ),
+            "",
+        )
     if not matched_rule:
         matched_rule = _find_fuzzy_phrase(words, fuzzy_phrases)
     correct = bool(matched_rule)

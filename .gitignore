@@ -17,6 +17,8 @@ runtime/device_selection.json
 # Аудио и результаты экспериментов
 audio/
 moca_evaluation*/
+moca_validated_dataset/
+moca_validated_dataset_building/
 moca_recall_split_experiment/
 
 # Журналы запусков
