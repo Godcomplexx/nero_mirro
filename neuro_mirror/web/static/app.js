@@ -698,6 +698,30 @@ function renderReport(report) {
     return;
   }
 
+  if (report.report_type === "moca") {
+    const rows = [];
+    const domains = report.domains || {};
+    const summary = report.summary || {};
+    const score = domains.moca_score ?? 0;
+    const maxScore = domains.moca_max_score ?? 15;
+
+    rows.push('<div class="report-section">Результат MoCA</div>');
+    rows.push(`
+      <div class="moca-total-score">
+        <span>Общий балл</span>
+        <strong>${escapeHtml(score)} <small>/ ${escapeHtml(maxScore)}</small></strong>
+      </div>`);
+    rows.push(renderMocaModuleScores(report));
+    if (summary.moca_interpretation) {
+      rows.push(reportRow("Интерпретация", summary.moca_interpretation));
+    }
+    if (summary.moca_notes) rows.push(reportRow("Примечание", summary.moca_notes));
+    if (summary.limitations) rows.push(reportRow("Ограничения", summary.limitations));
+    rows.push(renderMocaExerciseDetails(report));
+    el.reportValue.innerHTML = rows.join("");
+    return;
+  }
+
   if (report.report_type === "hads") {
     const rows = [];
     rows.push('<div class="report-section">Тест на тревожность (HADS)</div>');
@@ -752,19 +776,112 @@ function reportRow(label, value) {
 
 function mocaTaskLabel(taskId) {
   const labels = {
-    memory_1: "Memory 1",
-    memory_2: "Memory 2",
-    attention_digits_forward: "Digits forward",
-    attention_digits_backward: "Digits backward",
-    attention_serial: "Serial 100-7",
-    language_sentence_1: "Sentence 1",
-    language_sentence_2: "Sentence 2",
-    language_fluency: "Fluency",
-    abstraction_1: "Abstraction 1",
-    abstraction_2: "Abstraction 2",
-    delayed_recall: "Delayed recall",
+    memory_1: "Запоминание слов — попытка 1",
+    memory_2: "Запоминание слов — попытка 2",
+    attention_digits_forward: "Цифры в прямом порядке",
+    attention_digits_backward: "Цифры в обратном порядке",
+    attention_serial: "Последовательный счёт 100 − 7",
+    language_sentence_1: "Повторение предложения 1",
+    language_sentence_2: "Повторение предложения 2",
+    language_fluency: "Беглость речи",
+    abstraction_1: "Абстракция — поезд и велосипед",
+    abstraction_2: "Абстракция — часы и линейка",
+    delayed_recall: "Отсроченное воспроизведение",
   };
-  return labels[taskId] || taskId || "MoCA task";
+  return labels[taskId] || taskId || "Упражнение MoCA";
+}
+
+const MOCA_MODULE_DEFINITIONS = [
+  { id: "memory", label: "Память", max_score: 5, taskIds: ["memory_1", "memory_2", "delayed_recall"] },
+  { id: "attention", label: "Внимание", max_score: 5, taskIds: ["attention_digits_forward", "attention_digits_backward", "attention_serial"] },
+  { id: "speech", label: "Речь", max_score: 3, taskIds: ["language_sentence_1", "language_sentence_2", "language_fluency"] },
+  { id: "abstraction", label: "Абстракция", max_score: 2, taskIds: ["abstraction_1", "abstraction_2"] },
+];
+
+function mocaTasksFromReport(report) {
+  const domains = report.domains || {};
+  const source = (report.sources || {}).moca || {};
+  if (Array.isArray(domains.moca_tasks)) return domains.moca_tasks;
+  return Array.isArray(source.tasks) ? source.tasks : [];
+}
+
+function mocaModulesFromReport(report) {
+  const domains = report.domains || {};
+  const source = (report.sources || {}).moca || {};
+  const storedModules = Array.isArray(domains.moca_modules)
+    ? domains.moca_modules
+    : source.modules;
+  if (Array.isArray(storedModules) && storedModules.length > 0) {
+    return storedModules;
+  }
+
+  // Старые отчёты не содержат агрегатов — собираем их из списка упражнений.
+  const tasks = mocaTasksFromReport(report);
+  return MOCA_MODULE_DEFINITIONS.map((definition) => {
+    const moduleTasks = tasks.filter((task) => definition.taskIds.includes(task.task_id));
+    return {
+      id: definition.id,
+      label: definition.label,
+      score: moduleTasks.reduce((sum, task) => sum + Number(task.score || 0), 0),
+      max_score: definition.max_score,
+      tasks: moduleTasks,
+    };
+  });
+}
+
+function renderMocaModuleScores(report) {
+  const modules = mocaModulesFromReport(report);
+  if (modules.length === 0) return "";
+  const cards = modules.map((module) => `
+    <div class="moca-module-score">
+      <span>${escapeHtml(module.label || module.id)}</span>
+      <strong>${escapeHtml(module.score ?? 0)} <small>/ ${escapeHtml(module.max_score ?? 0)}</small></strong>
+    </div>`).join("");
+  return `<div class="moca-module-scores">${cards}</div>`;
+}
+
+function renderMocaExerciseDetails(report) {
+  const modules = mocaModulesFromReport(report);
+  const hasTasks = modules.some(
+    (module) => Array.isArray(module.tasks)
+      && module.tasks.some((task) => Number(task.max_score || 0) > 0),
+  );
+  if (!hasTasks) return "";
+
+  const sections = modules.map((module) => {
+    // Первые две пробы запоминания нужны алгоритму, но не оцениваются.
+    // Храним их в JSON, однако не перегружаем ими пользовательский отчёт.
+    const tasks = Array.isArray(module.tasks)
+      ? module.tasks.filter((task) => Number(task.max_score || 0) > 0)
+      : [];
+    if (tasks.length === 0) return "";
+    const taskRows = tasks.map((task) => {
+      const maxScore = Number(task.max_score || 0);
+      const score = maxScore > 0 ? `${Number(task.score || 0)} / ${maxScore}` : "не оценивается";
+      const transcript = task.transcript || "Речь не распознана";
+      const details = task.details || "";
+      return `
+        <div class="moca-exercise-row">
+          <div class="moca-exercise-head">
+            <strong>${escapeHtml(mocaTaskLabel(task.task_id))}</strong>
+            <span>${escapeHtml(score)}</span>
+          </div>
+          <p><span>Транскрипция:</span> ${escapeHtml(transcript)}</p>
+          ${details ? `<p><span>Результат:</span> ${escapeHtml(details)}</p>` : ""}
+        </div>`;
+    }).join("");
+    return `
+      <section class="moca-exercise-module">
+        <h4>${escapeHtml(module.label || module.id)}</h4>
+        ${taskRows}
+      </section>`;
+  }).join("");
+
+  return `
+    <details class="moca-exercise-details">
+      <summary>Показать результаты по упражнениям</summary>
+      <div class="moca-exercise-list">${sections}</div>
+    </details>`;
 }
 
 function renderModules(modules) {
@@ -1094,13 +1211,17 @@ async function stopMocaTest() {
   } catch (_) {}
 }
 
-async function _mocaNotifyTtsFinished(ttsId) {
+async function _mocaNotifyTtsFinished(ttsId, ttsOk, errorMessage = "") {
   if (!ttsId) return;
   try {
     await fetch("/api/actions/moca_tts_finished", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ moca_tts_id: ttsId }),
+      body: JSON.stringify({
+        moca_tts_id: ttsId,
+        tts_ok: Boolean(ttsOk),
+        tts_error: errorMessage,
+      }),
     });
   } catch (_) {}
 }
@@ -1108,6 +1229,10 @@ async function _mocaNotifyTtsFinished(ttsId) {
 function stopMocaAudio() {
   // Invalidate any in-flight TTS fetch (see stopHadsAudio)
   window._mocaTtsSeq = (window._mocaTtsSeq || 0) + 1;
+  if (window._currentMocaUtterance && window.speechSynthesis) {
+    window.speechSynthesis.cancel();
+    window._currentMocaUtterance = null;
+  }
   if (!window._currentMocaAudio) return;
   window._currentMocaAudio.pause();
   window._currentMocaAudio.removeAttribute("src");
@@ -1115,36 +1240,88 @@ function stopMocaAudio() {
   window._currentMocaAudio = null;
 }
 
+function _mocaSpeakWithBrowserVoice(text, seq) {
+  return new Promise((resolve) => {
+    if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+      resolve(false);
+      return;
+    }
+
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = "ru-RU";
+    utterance.rate = 1.05;
+    const russianVoice = window.speechSynthesis
+      .getVoices()
+      .find((voice) => String(voice.lang || "").toLowerCase().startsWith("ru"));
+    if (russianVoice) utterance.voice = russianVoice;
+    window._currentMocaUtterance = utterance;
+
+    let settled = false;
+    const finish = (ok) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutId);
+      if (window._currentMocaUtterance === utterance) {
+        window._currentMocaUtterance = null;
+      }
+      resolve(Boolean(ok) && seq === window._mocaTtsSeq);
+    };
+    utterance.onend = () => finish(true);
+    utterance.onerror = () => finish(false);
+    const estimatedMs = Math.min(90000, Math.max(10000, text.split(/\s+/).length * 650));
+    const timeoutId = setTimeout(() => {
+      window.speechSynthesis.cancel();
+      finish(false);
+    }, estimatedMs);
+    window.speechSynthesis.speak(utterance);
+  });
+}
+
 async function _mocaPlayTts(text, ttsId) {
   // Sequence guard against overlapping speech (see _hadsPlayTts)
   stopMocaAudio();
   const seq = window._mocaTtsSeq;
+  let ttsOk = false;
+  let errorMessage = "";
 
-  try {
-    const resp = await fetch("/api/tts/speak", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text }),
-    });
-    if (!resp.ok) return;
-    const blob = await resp.blob();
-    if (seq !== window._mocaTtsSeq) return; // superseded or stopped
-    const url = URL.createObjectURL(blob);
-    const audio = new Audio(url);
-    window._currentMocaAudio = audio;
-    const playbackDone = new Promise((resolve) => {
-      audio.onended = resolve;
-      audio.onerror = resolve;
-      audio.onabort = resolve;
-    });
-    await audio.play();
-    await playbackDone;
-    URL.revokeObjectURL(url);
-    if (window._currentMocaAudio === audio) window._currentMocaAudio = null;
-  } catch (_) {
-  } finally {
-    await _mocaNotifyTtsFinished(ttsId);
+  if (!window._mocaRemoteTtsUnavailable) {
+    try {
+      const resp = await fetch("/api/tts/speak", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const blob = await resp.blob();
+      if (!blob.size) throw new Error("empty TTS audio");
+      if (seq !== window._mocaTtsSeq) return;
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      window._currentMocaAudio = audio;
+      const playbackDone = new Promise((resolve) => {
+        audio.onended = () => resolve(true);
+        audio.onerror = () => resolve(false);
+        audio.onabort = () => resolve(false);
+      });
+      try {
+        await audio.play();
+        ttsOk = await playbackDone;
+      } finally {
+        URL.revokeObjectURL(url);
+        if (window._currentMocaAudio === audio) window._currentMocaAudio = null;
+      }
+    } catch (error) {
+      errorMessage = String(error && error.message ? error.message : error);
+      window._mocaRemoteTtsUnavailable = true;
+      appendLogLine(`[moca] Edge TTS недоступен, включён локальный голос: ${errorMessage}`);
+    }
   }
+
+  if (!ttsOk && seq === window._mocaTtsSeq) {
+    ttsOk = await _mocaSpeakWithBrowserVoice(text, seq);
+    if (!ttsOk && !errorMessage) errorMessage = "Локальный голос браузера недоступен";
+  }
+  await _mocaNotifyTtsFinished(ttsId, ttsOk, errorMessage);
 }
 
 // ---- Dataset capture: raw session video for the research dataset ----
@@ -1613,6 +1790,12 @@ function renderResults(items) {
         </div>`;
     }).join("");
     const note = resultInterpretations(item);
+    const mocaModuleScores = item.report_type === "moca"
+      ? renderMocaModuleScores(item)
+      : "";
+    const mocaExerciseDetails = item.report_type === "moca"
+      ? renderMocaExerciseDetails(item)
+      : "";
     return `
       <article class="result-card">
         <div class="result-card-head">
@@ -1620,7 +1803,9 @@ function renderResults(items) {
           <span class="result-date mono">${escapeHtml(dateLabel)}</span>
         </div>
         <div class="result-metrics">${metricTiles}</div>
+        ${mocaModuleScores}
         ${note ? `<p class="result-note">${escapeHtml(note)}</p>` : ""}
+        ${mocaExerciseDetails}
       </article>`;
   });
 

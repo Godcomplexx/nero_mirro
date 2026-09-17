@@ -20,7 +20,7 @@ import edge_tts
 from fastapi import (
     FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect,
 )
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -59,6 +59,26 @@ class DeviceSelectionIn(BaseModel):
 
 class TTSRequest(BaseModel):
     text: str
+
+
+async def _synthesize_edge_tts(
+    text: str,
+    *,
+    voice: str,
+    rate: str,
+    timeout_seconds: float = 6.0,
+) -> bytes:
+    """Синтезировать речь целиком, не возвращая HTTP 200 без аудио."""
+    chunks: list[bytes] = []
+    communicate = edge_tts.Communicate(text=text, voice=voice, rate=rate)
+    async with asyncio.timeout(timeout_seconds):
+        async for item in communicate.stream():
+            if item["type"] == "audio":
+                chunks.append(item["data"])
+    audio = b"".join(chunks)
+    if not audio:
+        raise RuntimeError("Edge TTS вернул пустой аудиопоток")
+    return audio
 
 
 class UserCreateIn(BaseModel):
@@ -961,23 +981,24 @@ def create_app() -> FastAPI:
     # ---- TTS (pure transport, no business logic) ----
 
     @app.post("/api/tts/speak")
-    async def tts_speak(payload: TTSRequest) -> StreamingResponse:
+    async def tts_speak(payload: TTSRequest) -> Response:
         ctx: WebAppContext = app.state.context
         if not payload.text.strip():
             raise HTTPException(status_code=400, detail="text is required")
-
-        async def _stream_tts():
-            communicate = edge_tts.Communicate(
-                text=payload.text.strip(),
+        try:
+            audio = await _synthesize_edge_tts(
+                payload.text.strip(),
                 voice=ctx.settings.tts_voice,
                 rate=ctx.settings.tts_rate,
             )
-            async for item in communicate.stream():
-                if item["type"] == "audio":
-                    yield item["data"]
-
-        return StreamingResponse(
-            _stream_tts(),
+        except Exception as exc:  # noqa: BLE001 — браузер включит локальный TTS
+            logging.getLogger(__name__).warning("Edge TTS недоступен: %s", exc)
+            raise HTTPException(
+                status_code=503,
+                detail="Облачная озвучка временно недоступна",
+            ) from exc
+        return Response(
+            content=audio,
             media_type="audio/mpeg",
             headers={"Cache-Control": "no-cache"},
         )

@@ -1,11 +1,53 @@
 from __future__ import annotations
 
 import re
+from collections import Counter
 from difflib import SequenceMatcher
 from typing import Any
 
+from neuro_mirror.screening.speech_metrics import (
+    build_speech_metrics,
+    normalize_words,
+    summarize_speech_metrics,
+)
+
 
 VOICE_MOCA_MAX_SCORE = 15
+
+MOCA_MODULES = (
+    {
+        "id": "memory",
+        "label": "Память",
+        "max_score": 5,
+        "task_ids": ("memory_1", "memory_2", "delayed_recall"),
+    },
+    {
+        "id": "attention",
+        "label": "Внимание",
+        "max_score": 5,
+        "task_ids": (
+            "attention_digits_forward",
+            "attention_digits_backward",
+            "attention_serial",
+        ),
+    },
+    {
+        "id": "speech",
+        "label": "Речь",
+        "max_score": 3,
+        "task_ids": (
+            "language_sentence_1",
+            "language_sentence_2",
+            "language_fluency",
+        ),
+    },
+    {
+        "id": "abstraction",
+        "label": "Абстракция",
+        "max_score": 2,
+        "task_ids": ("abstraction_1", "abstraction_2"),
+    },
+)
 
 MEMORY_WORDS = ("лицо", "бархат", "церковь", "фиалка", "красный")
 MEMORY_WORD_FORMS = {
@@ -60,6 +102,14 @@ SERIAL_CORRECTION_CUES = (
     "не помню",
     "не получается",
 )
+FLUENCY_EXCLUDED_NAMES = {
+    "лариса",
+    "леонид",
+    "лера",
+    "леша",
+    "леха",
+    "людмила",
+}
 SENTENCE_ASR_WORD_REPLACEMENTS = {
     "диан": "диван",
     "зеваном": "диваном",
@@ -107,9 +157,17 @@ TENS = {
 }
 
 
-def score_moca_task(task_id: str, transcript: str) -> dict[str, Any]:
+def score_moca_task(
+    task_id: str,
+    transcript: str,
+    *,
+    acoustic_metrics: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     """Оценить одно задание MoCA по идентификатору и транскрипции."""
-    return _score_task({"task_id": task_id, "transcript": transcript})
+    return _score_and_analyze(
+        {"task_id": task_id, "transcript": transcript},
+        acoustic_metrics=acoustic_metrics,
+    )
 
 
 def summarize_moca_tasks(
@@ -124,6 +182,8 @@ def summarize_moca_tasks(
         "percent": percent,
         "interpretation": _interpret(total),
         "tasks": scored_tasks,
+        "modules": _group_moca_modules(scored_tasks),
+        "speech_summary": summarize_speech_metrics(scored_tasks),
         "notes": (
             "Автоматический подсчет основан на распознанной речи и требует проверки специалистом. "
             "Это voice-only профиль MoCA без зрительно-пространственных заданий и ориентации."
@@ -131,17 +191,81 @@ def summarize_moca_tasks(
     }
 
 
+def _group_moca_modules(
+    scored_tasks: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Собрать упражнения и баллы в четыре понятных блока отчёта."""
+    tasks_by_id = {
+        str(task.get("task_id") or ""): task
+        for task in scored_tasks
+        if isinstance(task, dict)
+    }
+    modules = []
+    for definition in MOCA_MODULES:
+        tasks = [
+            tasks_by_id[task_id]
+            for task_id in definition["task_ids"]
+            if task_id in tasks_by_id
+        ]
+        score = sum(int(task.get("score") or 0) for task in tasks)
+        max_score = int(definition["max_score"])
+        modules.append(
+            {
+                "id": definition["id"],
+                "label": definition["label"],
+                "score": score,
+                "max_score": max_score,
+                "percent": round(score / max_score, 3),
+                "tasks": tasks,
+            }
+        )
+    return modules
+
+
 def score_moca_tasks(tasks: list[dict[str, Any]]) -> dict[str, Any]:
     """Оценить список заданий и вернуть баллы по заданиям и общий итог."""
-    scored_tasks = [_score_task(task) for task in tasks]
+    scored_tasks = [_score_and_analyze(task) for task in tasks]
     return summarize_moca_tasks(scored_tasks)
+
+
+def _score_and_analyze(
+    task: dict[str, Any],
+    *,
+    acoustic_metrics: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Добавить к стандартному баллу речевые и предметные показатели."""
+    scored = _score_task(task)
+    transcript = str(scored.get("transcript") or "")
+    previous_metrics = task.get("speech_metrics")
+    if acoustic_metrics is None and isinstance(previous_metrics, dict):
+        # При возобновлении теста сохраняем ранее рассчитанную акустику,
+        # но пересчитываем текстовые показатели текущим алгоритмом.
+        acoustic_metrics = [previous_metrics]
+    scored["speech_metrics"] = build_speech_metrics(
+        transcript,
+        acoustic_metrics,
+    )
+    scored["task_analysis"] = _build_task_analysis(scored)
+    return scored
 
 
 def _score_task(task: dict[str, Any]) -> dict[str, Any]:
     task_id = str(task.get("task_id") or "")
     transcript = str(task.get("transcript") or "")
+    module = next(
+        (
+            definition
+            for definition in MOCA_MODULES
+            if task_id in definition["task_ids"]
+        ),
+        None,
+    )
     base = {
         **task,
+        "task_id": task_id,
+        "transcript": transcript,
+        "module_id": module["id"] if module else "",
+        "domain": module["label"] if module else str(task.get("domain") or ""),
         "score": 0,
         "max_score": 0,
         "status": "not_scored",
@@ -571,7 +695,11 @@ def _score_fluency(base: dict[str, Any], transcript: str) -> dict[str, Any]:
     words = {
         word
         for word in _normalize_text(transcript).split()
-        if len(word) > 1 and word.startswith("л")
+        if (
+            len(word) > 1
+            and word.startswith("л")
+            and word not in FLUENCY_EXCLUDED_NAMES
+        )
     }
     correct = len(words) >= 11
     return {
@@ -733,6 +861,240 @@ def _contains_word_like(text: str, expected: str) -> bool:
         ):
             return True
     return False
+
+
+def _build_task_analysis(task: dict[str, Any]) -> dict[str, Any]:
+    """Разложить ответ на верные элементы, повторы и посторонние элементы."""
+    task_id = str(task.get("task_id") or "")
+    transcript = str(task.get("transcript") or "")
+    if task_id in {"memory_1", "memory_2", "delayed_recall"}:
+        return _memory_task_analysis(transcript)
+    if task_id == "attention_digits_forward":
+        return _number_task_analysis(transcript, DIGITS_FORWARD_EXPECTED)
+    if task_id == "attention_digits_backward":
+        return _number_task_analysis(transcript, DIGITS_BACKWARD_EXPECTED)
+    if task_id == "attention_serial":
+        return _serial_task_analysis(transcript)
+    if task_id in {"language_sentence_1", "language_sentence_2"}:
+        return _sentence_task_analysis(transcript, str(task.get("expected") or ""))
+    if task_id == "language_fluency":
+        return _fluency_task_analysis(transcript)
+    if task_id.startswith("abstraction_"):
+        return _abstraction_task_analysis(task_id, transcript, task)
+    return _analysis_result([], [], normalize_words(transcript))
+
+
+def _analysis_result(
+    correct: list[Any],
+    repeated: list[Any],
+    extraneous: list[Any],
+    **extra: Any,
+) -> dict[str, Any]:
+    return {
+        "correct_elements": {"count": len(correct), "items": correct},
+        "repeated_elements": {"count": len(repeated), "items": repeated},
+        "extraneous_elements": {"count": len(extraneous), "items": extraneous},
+        **extra,
+    }
+
+
+def _memory_task_analysis(transcript: str) -> dict[str, Any]:
+    recognized = []
+    extraneous = []
+    for word in normalize_words(transcript):
+        canonical = next(
+            (
+                expected
+                for expected in MEMORY_WORDS
+                if _contains_word_like(word, expected)
+            ),
+            "",
+        )
+        if canonical:
+            recognized.append(canonical)
+        else:
+            extraneous.append(word)
+    counts = Counter(recognized)
+    correct = [word for word in MEMORY_WORDS if counts[word]]
+    # Формируем точное число лишних повторений, не теряя порядок слов.
+    seen: Counter[str] = Counter()
+    repeated = []
+    for word in recognized:
+        seen[word] += 1
+        if seen[word] > 1:
+            repeated.append(word)
+    return _analysis_result(correct, repeated, extraneous)
+
+
+def _number_task_analysis(
+    transcript: str,
+    expected: tuple[int, ...],
+) -> dict[str, Any]:
+    actual = _extract_numbers(transcript)
+    expected_counts = Counter(expected)
+    correct = [
+        number
+        for index, number in enumerate(actual[:len(expected)])
+        if number == expected[index]
+    ]
+    repeated: list[int] = []
+    extraneous = [number for number in actual if number not in expected_counts]
+    seen: Counter[int] = Counter()
+    for number in actual:
+        seen[number] += 1
+        if number in expected_counts and seen[number] > expected_counts[number]:
+            repeated.append(number)
+    errors = [
+        {
+            "position": index + 1,
+            "expected": expected[index],
+            "actual": actual[index] if index < len(actual) else None,
+        }
+        for index in range(len(expected))
+        if index >= len(actual) or actual[index] != expected[index]
+    ]
+    return _analysis_result(
+        correct,
+        repeated,
+        extraneous,
+        sequence={
+            "expected": list(expected),
+            "actual": actual,
+            "exact": actual == list(expected),
+            "errors": errors,
+            "error_count": len(errors),
+        },
+    )
+
+
+def _serial_task_analysis(transcript: str) -> dict[str, Any]:
+    normalized = _normalize_fragmented_serial_numbers(
+        _normalize_serial_number_forms(transcript)
+    )
+    extracted = _split_serial_compound_hundreds(_extract_numbers(normalized))
+    raw_answers = [number for number in extracted if 10 <= number < 100]
+    answers, corrected_answers = _remove_immediate_serial_corrections(raw_answers)
+    expected = list(SERIAL_EXPECTED)
+    correct = []
+    errors = []
+    repeated = []
+    for index, actual in enumerate(answers[: len(expected)]):
+        expected_value = expected[index]
+        if actual == expected_value:
+            correct.append(actual)
+        else:
+            errors.append(
+                {"position": index + 1, "expected": expected_value, "actual": actual}
+            )
+        if index and actual in answers[:index]:
+            repeated.append(actual)
+    for index in range(len(answers), len(expected)):
+        errors.append(
+            {"position": index + 1, "expected": expected[index], "actual": None}
+        )
+    extra_answers = answers[len(expected):]
+    return _analysis_result(
+        correct,
+        repeated,
+        extra_answers,
+        sequence={
+            "expected": expected,
+            "raw": raw_answers,
+            "accepted": answers,
+            "self_corrected": corrected_answers,
+            "errors": errors,
+            "error_count": len(errors),
+        },
+    )
+
+
+def _sentence_task_analysis(transcript: str, expected: str) -> dict[str, Any]:
+    expected_words = normalize_words(expected)
+    actual_words = normalize_words(transcript)
+    matcher = SequenceMatcher(None, expected_words, actual_words)
+    correct = []
+    extraneous = []
+    for tag, _i1, _i2, j1, j2 in matcher.get_opcodes():
+        if tag == "equal":
+            correct.extend(actual_words[j1:j2])
+        elif tag in {"replace", "insert"}:
+            extraneous.extend(actual_words[j1:j2])
+    expected_counts = Counter(expected_words)
+    seen: Counter[str] = Counter()
+    repeated = []
+    for word in actual_words:
+        seen[word] += 1
+        if seen[word] > expected_counts[word] and word in expected_counts:
+            repeated.append(word)
+    return _analysis_result(correct, repeated, extraneous)
+
+
+def _fluency_task_analysis(transcript: str) -> dict[str, Any]:
+    words = [word for word in normalize_words(transcript) if len(word) > 1]
+    valid_occurrences = [
+        word
+        for word in words
+        if word.startswith("л") and word not in FLUENCY_EXCLUDED_NAMES
+    ]
+    valid_unique = list(dict.fromkeys(valid_occurrences))
+    seen: set[str] = set()
+    repetitions = []
+    for word in valid_occurrences:
+        if word in seen:
+            repetitions.append(word)
+        seen.add(word)
+    invalid = [word for word in words if word not in valid_occurrences]
+    return _analysis_result(
+        valid_unique,
+        repetitions,
+        invalid,
+        fluency={
+            "valid_word_count": len(valid_unique),
+            "valid_words": valid_unique,
+            "repetition_count": len(repetitions),
+            "repetitions": repetitions,
+        },
+    )
+
+
+def _abstraction_task_analysis(
+    task_id: str,
+    transcript: str,
+    scored_task: dict[str, Any],
+) -> dict[str, Any]:
+    normalized = _normalize_text(transcript)
+    if task_id == "abstraction_1":
+        concepts = {
+            "transport": ("транспорт", "передвиж", "перемещ", "езд", "ехать"),
+        }
+    else:
+        concepts = {
+            "measurement": (
+                "измер",
+                "замер",
+                "мерить",
+                "прибор",
+                "инструмент",
+                "шкал",
+            ),
+            "time_and_length": ("врем", "длин", "сантиметр", "миллиметр"),
+        }
+    matched = {
+        concept: [stem for stem in stems if stem in normalized]
+        for concept, stems in concepts.items()
+    }
+    matched = {concept: stems for concept, stems in matched.items() if stems}
+    correct = list(matched)
+    return _analysis_result(
+        correct,
+        [],
+        [] if scored_task.get("score") else normalize_words(transcript),
+        semantic_features={
+            "expected_category": str(scored_task.get("expected") or ""),
+            "matched_concepts": matched,
+            "abstract_category_detected": bool(scored_task.get("score")),
+        },
+    )
 
 
 def _normalize_text(text: str) -> str:

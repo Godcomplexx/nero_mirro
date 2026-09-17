@@ -11,6 +11,7 @@ from neuro_mirror.models.events import Event, Topics
 from neuro_mirror.plugins.moca_test.plugin import MocaTask, MocaTestPlugin
 from neuro_mirror.plugins.moca_test.plugin import SERIAL_SUBTRACTION_STEPS
 from neuro_mirror.plugins.speech_worker.plugin import SpeechWorkerPlugin
+from neuro_mirror.web.app import _synthesize_edge_tts
 
 
 class MocaPromptTest(unittest.TestCase):
@@ -53,6 +54,65 @@ class MocaTtsFlowTest(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertTrue(await asyncio.wait_for(speak_task, timeout=1))
+
+    async def test_speak_receives_failed_playback_status(self) -> None:
+        bus = EventBus()
+        plugin = MocaTestPlugin(bus, settings=Settings())
+        ui_updates = bus.subscribe(Topics.UI_UPDATE)
+
+        speak_task = asyncio.create_task(plugin._speak("Тестовое задание."))
+        update = await asyncio.wait_for(ui_updates.queue.get(), timeout=1)
+        await plugin.handle_event(
+            Event(
+                topic=Topics.UI_ACTION,
+                source="test",
+                payload={
+                    "action": "moca_tts_finished",
+                    "moca_tts_id": update.payload["moca_tts_id"],
+                    "tts_ok": False,
+                },
+            )
+        )
+
+        self.assertFalse(await asyncio.wait_for(speak_task, timeout=1))
+
+
+class EdgeTtsBufferingTest(unittest.IsolatedAsyncioTestCase):
+    async def test_synthesis_returns_only_non_empty_complete_audio(self) -> None:
+        class FakeCommunicate:
+            def __init__(self, **_kwargs):  # type: ignore[no-untyped-def]
+                pass
+
+            async def stream(self):  # type: ignore[no-untyped-def]
+                yield {"type": "WordBoundary", "data": b""}
+                yield {"type": "audio", "data": b"first"}
+                yield {"type": "audio", "data": b"second"}
+
+        with patch("neuro_mirror.web.app.edge_tts.Communicate", FakeCommunicate):
+            audio = await _synthesize_edge_tts(
+                "Проверка",
+                voice="ru-RU-SvetlanaNeural",
+                rate="+15%",
+            )
+
+        self.assertEqual(audio, b"firstsecond")
+
+    async def test_empty_synthesis_is_an_error(self) -> None:
+        class EmptyCommunicate:
+            def __init__(self, **_kwargs):  # type: ignore[no-untyped-def]
+                pass
+
+            async def stream(self):  # type: ignore[no-untyped-def]
+                if False:
+                    yield {}
+
+        with patch("neuro_mirror.web.app.edge_tts.Communicate", EmptyCommunicate):
+            with self.assertRaisesRegex(RuntimeError, "пустой"):
+                await _synthesize_edge_tts(
+                    "Проверка",
+                    voice="ru-RU-SvetlanaNeural",
+                    rate="+15%",
+                )
 
 
 class MocaMissingSpeechTest(unittest.IsolatedAsyncioTestCase):

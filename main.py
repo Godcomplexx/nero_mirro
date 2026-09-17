@@ -8,12 +8,20 @@ import uvicorn
 from neuro_mirror.core.settings import Settings
 from neuro_mirror.web.app import create_app
 
+
+# ── CONFIG ───────────────────────────────────────────────────────────────────
+# Сохранять WAV-ответы MoCA в runtime/dataset/<session_id>/audio.
+# Файлы сохраняются только при наличии согласия профиля на набор данных.
+SAVE_MOCA_AUDIO = True
+
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
 
 if __name__ == "__main__":
+    os.environ["NEURO_MIRROR_SAVE_MOCA_AUDIO"] = "1" if SAVE_MOCA_AUDIO else "0"
     args = sys.argv[1:]
     if "-gpu" in args:
         os.environ["NEURO_MIRROR_DEVICE"] = "cuda"
