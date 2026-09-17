@@ -282,7 +282,7 @@
             </button>
             <button type="button" class="menu-item" data-menu="training">
               <strong>Тренировка</strong>
-              <span>Режим в разработке</span>
+              <span>Когнитивные браузерные игры</span>
             </button>
             <button type="button" class="menu-item" data-menu="report">
               <strong>Отчёт</strong>
@@ -321,6 +321,224 @@
           </details>
 
           <button type="button" class="icon-btn main-menu-close" id="main-menu-close"><span>Закрыть</span></button>
+        </div>
+      </div>
+
+      <!-- Выбор тренировочной игры -->
+      <div class="main-menu training-menu" id="training-menu" hidden>
+        <div class="main-menu-panel training-menu-panel">
+          <h2 class="user-gate-title">Тренировка</h2>
+          <p class="user-gate-sub">Выберите когнитивную игру</p>
+          <div class="menu-grid">
+            <button type="button" class="menu-item" data-training-game="gm02">
+              <strong>GM-02 · Запомни последовательность</strong>
+              <span>Память</span>
+            </button>
+            <button type="button" class="menu-item" data-training-game="gm07">
+              <strong>GM-07 · Найди цель</strong>
+              <span>Внимание</span>
+            </button>
+            <button type="button" class="menu-item" data-training-game="gm14">
+              <strong>GM-14 · Собери слово</strong>
+              <span>Речь</span>
+            </button>
+            <button type="button" class="menu-item" data-training-game="gm17">
+              <strong>GM-17 · Поверни фигуру</strong>
+              <span>Абстракция</span>
+            </button>
+            <button type="button" class="menu-item" data-training-game="gm20">
+              <strong>GM-20 · Сортировка по правилу</strong>
+              <span>Исполнительные навыки</span>
+            </button>
+          </div>
+          <button type="button" class="icon-btn main-menu-close" id="training-menu-close">
+            <span>Вернуться в главное меню</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- GM-02: отдельный проверочный экран игры -->
+      <div class="gm02-panel" id="gm02-panel" hidden>
+        <div class="gm02-shell">
+          <header class="gm02-header">
+            <div>
+              <p class="gm02-code mono">ПАМЯТЬ · GM-02</p>
+              <h2>Запомни последовательность</h2>
+              <p id="gm02-instruction">Запомните порядок подсвечивания клеток и повторите его.</p>
+            </div>
+            <div class="gm02-round" id="gm02-round">Раунд 1 из 10</div>
+          </header>
+
+          <div class="gm02-stage">
+            <div class="gm02-intro" id="gm02-intro">
+              <p>После показа последовательности нажимайте клетки в том же порядке.</p>
+              <button type="button" class="icon-btn primary-btn" id="gm02-start"><span>Начать</span></button>
+            </div>
+            <div class="gm02-grid" id="gm02-grid" aria-label="Игровое поле 3 на 3" hidden></div>
+            <div class="gm02-result" id="gm02-result" hidden>
+              <h3 id="gm02-result-title">Игра завершена</h3>
+              <p id="gm02-result-text"></p>
+              <button type="button" class="icon-btn primary-btn" id="gm02-restart"><span>Попробовать ещё раз</span></button>
+            </div>
+          </div>
+
+          <footer class="gm02-actions">
+            <button type="button" class="icon-btn" id="gm02-close"><span>К выбору игр</span></button>
+          </footer>
+        </div>
+      </div>
+
+      <!-- GM-07: отдельный проверочный экран игры -->
+      <div class="gm07-panel" id="gm07-panel" hidden>
+        <div class="gm07-shell">
+          <header class="gm07-header">
+            <div>
+              <p class="gm07-code mono">ВНИМАНИЕ · GM-07</p>
+              <h2>Найди цель</h2>
+              <p id="gm07-instruction">Запомните цель, которую нужно будет найти.</p>
+            </div>
+            <div class="gm07-progress" id="gm07-progress">Проба 1 из 10</div>
+          </header>
+
+          <div class="gm07-stage">
+            <div class="gm07-intro" id="gm07-intro">
+              <p class="gm07-intro-label">Цель</p>
+              <div class="gm07-target-example" aria-label="Красная буква Т">Т</div>
+              <p>Ищите красную букву «Т» в обычном положении. Цвет и направление важны.</p>
+              <button type="button" class="icon-btn primary-btn" id="gm07-start"><span>Начать</span></button>
+            </div>
+            <div class="gm07-play" id="gm07-play" hidden>
+              <div class="gm07-grid" id="gm07-grid" aria-label="Поле поиска цели"></div>
+              <button type="button" class="icon-btn gm07-absent" id="gm07-absent"><span>Цели нет</span></button>
+            </div>
+            <div class="gm07-result" id="gm07-result" hidden>
+              <h3>Игра завершена</h3>
+              <p id="gm07-result-text"></p>
+              <button type="button" class="icon-btn primary-btn" id="gm07-restart"><span>Попробовать ещё раз</span></button>
+            </div>
+          </div>
+
+          <footer class="gm07-actions">
+            <button type="button" class="icon-btn" id="gm07-close"><span>К выбору игр</span></button>
+          </footer>
+        </div>
+      </div>
+
+      <!-- GM-14: отдельный проверочный экран игры -->
+      <div class="gm14-panel" id="gm14-panel" hidden>
+        <div class="gm14-shell">
+          <header class="gm14-header">
+            <div>
+              <p class="gm14-code mono">РЕЧЬ · GM-14</p>
+              <h2>Собери слово</h2>
+              <p id="gm14-instruction">Перетащите буквы в ячейки в правильном порядке.</p>
+            </div>
+            <div class="gm14-progress" id="gm14-progress">Слово 1 из 10</div>
+          </header>
+
+          <div class="gm14-stage">
+            <div class="gm14-intro" id="gm14-intro">
+              <p class="gm14-category mono">ПРИРОДА И ЯВЛЕНИЯ · 3–4 БУКВЫ</p>
+              <p>Перетаскивайте плитки с буквами в пустые ячейки. Когда все ячейки заполнятся, слово проверится автоматически.</p>
+              <button type="button" class="icon-btn primary-btn" id="gm14-start"><span>Начать</span></button>
+            </div>
+            <div class="gm14-play" id="gm14-play" hidden>
+              <div class="gm14-slots" id="gm14-slots" aria-label="Ячейки для слова"></div>
+              <div class="gm14-bank" id="gm14-bank" aria-label="Перемешанные буквы"></div>
+              <p class="gm14-hint">Плитки можно переставлять между ячейками или возвращать вниз.</p>
+            </div>
+            <div class="gm14-result" id="gm14-result" hidden>
+              <h3>Игра завершена</h3>
+              <p id="gm14-result-text"></p>
+              <button type="button" class="icon-btn primary-btn" id="gm14-restart"><span>Попробовать ещё раз</span></button>
+            </div>
+          </div>
+
+          <footer class="gm14-actions">
+            <button type="button" class="icon-btn" id="gm14-close"><span>К выбору игр</span></button>
+          </footer>
+        </div>
+      </div>
+
+      <!-- GM-17: отдельный проверочный экран игры -->
+      <div class="gm17-panel" id="gm17-panel" hidden>
+        <div class="gm17-shell">
+          <header class="gm17-header">
+            <div>
+              <p class="gm17-code mono">АБСТРАКЦИЯ · GM-17</p>
+              <h2>Поверни фигуру</h2>
+              <p id="gm17-instruction">Выберите фигуру, которая совпадает с образцом после поворота.</p>
+            </div>
+            <div class="gm17-progress" id="gm17-progress">Проба 1 из 10</div>
+          </header>
+
+          <div class="gm17-stage">
+            <div class="gm17-intro" id="gm17-intro">
+              <p>Слева будет показан образец. Справа выберите тот же самый контур, мысленно повернув его.</p>
+              <button type="button" class="icon-btn primary-btn" id="gm17-start"><span>Начать</span></button>
+            </div>
+            <div class="gm17-play" id="gm17-play" hidden>
+              <section class="gm17-sample-wrap">
+                <p class="mono">ОБРАЗЕЦ</p>
+                <div class="gm17-sample" id="gm17-sample"></div>
+              </section>
+              <div class="gm17-divider" aria-hidden="true"></div>
+              <section class="gm17-choices-wrap">
+                <p class="mono">ВЫБЕРИТЕ СОВПАДЕНИЕ</p>
+                <div class="gm17-choices" id="gm17-choices"></div>
+              </section>
+            </div>
+            <div class="gm17-result" id="gm17-result" hidden>
+              <h3>Игра завершена</h3>
+              <p id="gm17-result-text"></p>
+              <button type="button" class="icon-btn primary-btn" id="gm17-restart"><span>Попробовать ещё раз</span></button>
+            </div>
+          </div>
+
+          <footer class="gm17-actions">
+            <button type="button" class="icon-btn" id="gm17-close"><span>К выбору игр</span></button>
+          </footer>
+        </div>
+      </div>
+
+      <!-- GM-20: отдельный проверочный экран игры -->
+      <div class="gm20-panel" id="gm20-panel" hidden>
+        <div class="gm20-shell">
+          <header class="gm20-header">
+            <div>
+              <p class="gm20-code mono">ИСПОЛНИТЕЛЬНЫЕ НАВЫКИ · GM-20</p>
+              <h2>Сортировка по правилу</h2>
+              <p id="gm20-instruction">Определите правило по обратной связи и выберите подходящую карточку.</p>
+            </div>
+            <div class="gm20-progress" id="gm20-progress">Карточка 1 из 60</div>
+          </header>
+
+          <div class="gm20-stage">
+            <div class="gm20-intro" id="gm20-intro">
+              <p>Сортируйте карточки по цвету, форме или количеству. Правило скрыто и может измениться — ориентируйтесь на ответы «Верно» и «Неверно».</p>
+              <button type="button" class="icon-btn primary-btn" id="gm20-start"><span>Начать</span></button>
+            </div>
+            <div class="gm20-play" id="gm20-play" hidden>
+              <section class="gm20-reference-wrap">
+                <p class="mono">ВЫБЕРИТЕ ПОДХОДЯЩУЮ КАРТОЧКУ</p>
+                <div class="gm20-references" id="gm20-references"></div>
+              </section>
+              <section class="gm20-stimulus-wrap">
+                <p class="mono">СОРТИРУЕМАЯ КАРТОЧКА</p>
+                <div class="gm20-stimulus" id="gm20-stimulus"></div>
+              </section>
+              <div class="gm20-feedback" id="gm20-feedback" hidden></div>
+            </div>
+            <div class="gm20-result" id="gm20-result" hidden>
+              <h3>Игра завершена</h3>
+              <p id="gm20-result-text"></p>
+              <button type="button" class="icon-btn primary-btn" id="gm20-restart"><span>Попробовать ещё раз</span></button>
+            </div>
+          </div>
+
+          <footer class="gm20-actions">
+            <button type="button" class="icon-btn" id="gm20-close"><span>К выбору игр</span></button>
+          </footer>
         </div>
       </div>
 

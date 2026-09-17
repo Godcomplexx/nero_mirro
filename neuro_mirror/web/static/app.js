@@ -141,6 +141,68 @@ const el = {
   menuButton: $("menu-button"),
   mainMenu: $("main-menu"),
   mainMenuClose: $("main-menu-close"),
+  trainingMenu: $("training-menu"),
+  trainingMenuClose: $("training-menu-close"),
+  gm02Panel: $("gm02-panel"),
+  gm02Grid: $("gm02-grid"),
+  gm02Intro: $("gm02-intro"),
+  gm02Start: $("gm02-start"),
+  gm02Restart: $("gm02-restart"),
+  gm02Close: $("gm02-close"),
+  gm02Round: $("gm02-round"),
+  gm02Instruction: $("gm02-instruction"),
+  gm02Result: $("gm02-result"),
+  gm02ResultTitle: $("gm02-result-title"),
+  gm02ResultText: $("gm02-result-text"),
+  gm07Panel: $("gm07-panel"),
+  gm07Grid: $("gm07-grid"),
+  gm07Intro: $("gm07-intro"),
+  gm07Play: $("gm07-play"),
+  gm07Start: $("gm07-start"),
+  gm07Restart: $("gm07-restart"),
+  gm07Close: $("gm07-close"),
+  gm07Absent: $("gm07-absent"),
+  gm07Progress: $("gm07-progress"),
+  gm07Instruction: $("gm07-instruction"),
+  gm07Result: $("gm07-result"),
+  gm07ResultText: $("gm07-result-text"),
+  gm14Panel: $("gm14-panel"),
+  gm14Slots: $("gm14-slots"),
+  gm14Bank: $("gm14-bank"),
+  gm14Intro: $("gm14-intro"),
+  gm14Play: $("gm14-play"),
+  gm14Start: $("gm14-start"),
+  gm14Restart: $("gm14-restart"),
+  gm14Close: $("gm14-close"),
+  gm14Progress: $("gm14-progress"),
+  gm14Instruction: $("gm14-instruction"),
+  gm14Result: $("gm14-result"),
+  gm14ResultText: $("gm14-result-text"),
+  gm17Panel: $("gm17-panel"),
+  gm17Sample: $("gm17-sample"),
+  gm17Choices: $("gm17-choices"),
+  gm17Intro: $("gm17-intro"),
+  gm17Play: $("gm17-play"),
+  gm17Start: $("gm17-start"),
+  gm17Restart: $("gm17-restart"),
+  gm17Close: $("gm17-close"),
+  gm17Progress: $("gm17-progress"),
+  gm17Instruction: $("gm17-instruction"),
+  gm17Result: $("gm17-result"),
+  gm17ResultText: $("gm17-result-text"),
+  gm20Panel: $("gm20-panel"),
+  gm20References: $("gm20-references"),
+  gm20Stimulus: $("gm20-stimulus"),
+  gm20Feedback: $("gm20-feedback"),
+  gm20Intro: $("gm20-intro"),
+  gm20Play: $("gm20-play"),
+  gm20Start: $("gm20-start"),
+  gm20Restart: $("gm20-restart"),
+  gm20Close: $("gm20-close"),
+  gm20Progress: $("gm20-progress"),
+  gm20Instruction: $("gm20-instruction"),
+  gm20Result: $("gm20-result"),
+  gm20ResultText: $("gm20-result-text"),
   resultsPanel: $("results-panel"),
   resultsList: $("results-list"),
   resultsSub: $("results-sub"),
@@ -2054,6 +2116,636 @@ function bindSessionCheckEvents() {
 
 // ---- Main menu ----
 
+const gm02 = {
+  sessionId: "",
+  sequence: [],
+  clicks: [],
+  acceptingInput: false,
+  playbackToken: 0,
+};
+
+function delay(ms) {
+  return new Promise(resolve => window.setTimeout(resolve, ms));
+}
+
+function buildGm02Grid() {
+  if (!el.gm02Grid || el.gm02Grid.children.length) return;
+  for (let cell = 0; cell < 9; cell += 1) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "gm02-cell";
+    button.dataset.cell = String(cell);
+    button.setAttribute("aria-label", `Клетка ${cell + 1}`);
+    button.addEventListener("click", () => handleGm02Cell(cell, button));
+    el.gm02Grid.appendChild(button);
+  }
+}
+
+async function showGm02Sequence() {
+  const token = ++gm02.playbackToken;
+  gm02.acceptingInput = false;
+  gm02.clicks = [];
+  setText(el.gm02Instruction, "Смотрите и запоминайте…");
+  await delay(500);
+  for (const cell of gm02.sequence) {
+    if (token !== gm02.playbackToken || !el.gm02Panel || el.gm02Panel.hidden) return;
+    const node = el.gm02Grid.children[cell];
+    node.classList.add("is-active");
+    await delay(430);
+    node.classList.remove("is-active");
+    await delay(180);
+  }
+  if (token !== gm02.playbackToken) return;
+  gm02.acceptingInput = true;
+  setText(el.gm02Instruction, "Теперь повторите последовательность.");
+}
+
+function applyGm02Round(payload) {
+  gm02.sessionId = payload.session_id;
+  gm02.sequence = payload.sequence || [];
+  gm02.clicks = [];
+  setText(el.gm02Round, `Раунд ${payload.round} из ${payload.max_rounds}`);
+  setHidden(el.gm02Intro, true);
+  setHidden(el.gm02Result, true);
+  setHidden(el.gm02Grid, false);
+  showGm02Sequence();
+}
+
+async function startGm02() {
+  gm02.playbackToken += 1;
+  gm02.acceptingInput = false;
+  const payload = await fetchJson("/api/games/gm02/start", { method: "POST" });
+  applyGm02Round(payload);
+}
+
+async function submitGm02Answer() {
+  gm02.acceptingInput = false;
+  const payload = await fetchJson("/api/games/gm02/answer", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ session_id: gm02.sessionId, clicks: gm02.clicks }),
+  });
+  if (!payload.finished) {
+    await delay(450);
+    applyGm02Round(payload);
+    return;
+  }
+
+  setHidden(el.gm02Grid, true);
+  setHidden(el.gm02Result, false);
+  const length = Number(payload.metrics?.m01_max_sequence_length || 0);
+  const completed = payload.reason === "level_complete";
+  setText(el.gm02ResultTitle, completed ? "Уровень пройден" : "Последовательность прервана");
+  setText(
+    el.gm02ResultText,
+    completed
+      ? "Вы успешно прошли все 10 раундов."
+      : `Максимальная длина последовательности: ${length}.`,
+  );
+  setText(el.gm02Instruction, completed ? "Задание выполнено." : "Первый неверный выбор завершает попытку.");
+}
+
+async function handleGm02Cell(cell, node) {
+  if (!gm02.acceptingInput) return;
+  const position = gm02.clicks.length;
+  gm02.clicks.push({ cell, timestamp_ms: Date.now() });
+  node.classList.add("is-pressed");
+  window.setTimeout(() => node.classList.remove("is-pressed"), 160);
+
+  if (cell !== gm02.sequence[position] || gm02.clicks.length === gm02.sequence.length) {
+    await submitGm02Answer();
+  }
+}
+
+function openGm02() {
+  buildGm02Grid();
+  gm02.playbackToken += 1;
+  gm02.acceptingInput = false;
+  gm02.sessionId = "";
+  gm02.sequence = [];
+  gm02.clicks = [];
+  setText(el.gm02Round, "Раунд 1 из 10");
+  setText(el.gm02Instruction, "Запомните порядок подсвечивания клеток и повторите его.");
+  setHidden(el.gm02Grid, true);
+  setHidden(el.gm02Result, true);
+  setHidden(el.gm02Intro, false);
+  setHidden(el.gm02Panel, false);
+}
+
+function closeGm02() {
+  gm02.playbackToken += 1;
+  gm02.acceptingInput = false;
+  setHidden(el.gm02Panel, true);
+  openTrainingMenu();
+}
+
+const gm07 = {
+  sessionId: "",
+  acceptingInput: false,
+  renderToken: 0,
+};
+
+function renderGm07Stimuli(stimuli) {
+  if (!el.gm07Grid) return;
+  el.gm07Grid.replaceChildren();
+  for (const stimulus of stimuli) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `gm07-stimulus is-${stimulus.color}`;
+    button.dataset.stimulusId = stimulus.id;
+    button.setAttribute("aria-label", `${stimulus.color === "red" ? "Красная" : "Чёрная"} буква Т`);
+    const symbol = document.createElement("span");
+    symbol.textContent = stimulus.symbol;
+    symbol.style.transform = `rotate(${Number(stimulus.rotation) || 0}deg)`;
+    button.appendChild(symbol);
+    button.addEventListener("click", () => submitGm07Answer(stimulus.id).catch(error => {
+      setText(el.gm07Instruction, `Не удалось сохранить ответ: ${error.message || error}`);
+      gm07.acceptingInput = true;
+    }));
+    el.gm07Grid.appendChild(button);
+  }
+}
+
+async function applyGm07Trial(payload) {
+  const token = ++gm07.renderToken;
+  gm07.sessionId = payload.session_id;
+  gm07.acceptingInput = false;
+  setText(el.gm07Progress, `Проба ${payload.trial} из ${payload.trial_count}`);
+  setText(el.gm07Instruction, "Приготовьтесь…");
+  setHidden(el.gm07Intro, true);
+  setHidden(el.gm07Result, true);
+  setHidden(el.gm07Play, true);
+  await delay(400);
+  if (token !== gm07.renderToken || !el.gm07Panel || el.gm07Panel.hidden) return;
+  renderGm07Stimuli(payload.stimuli || []);
+  setHidden(el.gm07Play, false);
+  setText(el.gm07Instruction, "Нажмите на цель или выберите «Цели нет».");
+  gm07.acceptingInput = true;
+}
+
+async function startGm07() {
+  gm07.renderToken += 1;
+  gm07.acceptingInput = false;
+  const payload = await fetchJson("/api/games/gm07/start", { method: "POST" });
+  await applyGm07Trial(payload);
+}
+
+async function submitGm07Answer(selectedId) {
+  if (!gm07.acceptingInput) return;
+  gm07.acceptingInput = false;
+  const payload = await fetchJson("/api/games/gm07/answer", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      session_id: gm07.sessionId,
+      selected_id: selectedId,
+      timestamp_ms: Date.now(),
+    }),
+  });
+  if (!payload.finished) {
+    await applyGm07Trial(payload);
+    return;
+  }
+
+  setHidden(el.gm07Play, true);
+  setHidden(el.gm07Result, false);
+  const accuracy = Math.round(Number(payload.metrics?.u01_correct_action_rate || 0) * 100);
+  setText(el.gm07ResultText, `Правильных ответов: ${accuracy}%.`);
+  setText(el.gm07Instruction, "Все 10 проб завершены.");
+}
+
+function openGm07() {
+  gm07.renderToken += 1;
+  gm07.acceptingInput = false;
+  gm07.sessionId = "";
+  setText(el.gm07Progress, "Проба 1 из 10");
+  setText(el.gm07Instruction, "Запомните цель, которую нужно будет найти.");
+  setHidden(el.gm07Play, true);
+  setHidden(el.gm07Result, true);
+  setHidden(el.gm07Intro, false);
+  setHidden(el.gm07Panel, false);
+}
+
+function closeGm07() {
+  gm07.renderToken += 1;
+  gm07.acceptingInput = false;
+  setHidden(el.gm07Panel, true);
+  openTrainingMenu();
+}
+
+const gm14 = {
+  sessionId: "",
+  placementEvents: [],
+  submitting: false,
+  selectedTile: null,
+  renderToken: 0,
+};
+
+function gm14Location(tile) {
+  const parent = tile && tile.parentElement;
+  return parent?.classList.contains("gm14-slot")
+    ? `slot-${parent.dataset.slotIndex}`
+    : "bank";
+}
+
+function recordGm14Placement(tile, from, to) {
+  gm14.placementEvents.push({
+    tile_id: tile.dataset.tileId,
+    letter: tile.dataset.letter,
+    from,
+    to,
+    timestamp_ms: Date.now(),
+  });
+}
+
+function selectGm14Tile(tile) {
+  if (gm14.selectedTile) gm14.selectedTile.classList.remove("is-selected");
+  gm14.selectedTile = tile;
+  if (tile) tile.classList.add("is-selected");
+}
+
+function moveGm14Tile(tile, destination) {
+  if (!tile || !destination || gm14.submitting) return;
+  const source = tile.parentElement;
+  if (source === destination) return;
+  const from = gm14Location(tile);
+  const occupant = destination.classList.contains("gm14-slot")
+    ? destination.querySelector(".gm14-tile")
+    : null;
+  if (occupant && occupant !== tile) {
+    if (source?.classList.contains("gm14-slot")) source.appendChild(occupant);
+    else el.gm14Bank.appendChild(occupant);
+  }
+  destination.appendChild(tile);
+  recordGm14Placement(tile, from, gm14Location(tile));
+  selectGm14Tile(null);
+  maybeSubmitGm14Word();
+}
+
+function makeGm14Tile(item) {
+  const tile = document.createElement("button");
+  tile.type = "button";
+  tile.className = "gm14-tile";
+  tile.draggable = true;
+  tile.dataset.tileId = item.id;
+  tile.dataset.letter = item.letter;
+  tile.textContent = item.letter.toUpperCase();
+  tile.addEventListener("dragstart", event => {
+    event.dataTransfer.setData("text/plain", item.id);
+    event.dataTransfer.effectAllowed = "move";
+    selectGm14Tile(tile);
+  });
+  tile.addEventListener("click", () => selectGm14Tile(tile));
+  return tile;
+}
+
+function bindGm14DropZone(zone) {
+  if (zone.dataset.dropBound === "true") return;
+  zone.dataset.dropBound = "true";
+  zone.addEventListener("dragover", event => {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    zone.classList.add("is-drop-target");
+  });
+  zone.addEventListener("dragleave", () => zone.classList.remove("is-drop-target"));
+  zone.addEventListener("drop", event => {
+    event.preventDefault();
+    zone.classList.remove("is-drop-target");
+    const tileId = event.dataTransfer.getData("text/plain");
+    moveGm14Tile(document.querySelector(`.gm14-tile[data-tile-id="${CSS.escape(tileId)}"]`), zone);
+  });
+  zone.addEventListener("click", event => {
+    if (event.target === zone && gm14.selectedTile) moveGm14Tile(gm14.selectedTile, zone);
+  });
+}
+
+function renderGm14Word(payload) {
+  gm14.sessionId = payload.session_id;
+  gm14.placementEvents = [];
+  gm14.submitting = false;
+  selectGm14Tile(null);
+  el.gm14Slots.replaceChildren();
+  el.gm14Bank.replaceChildren();
+  for (let index = 0; index < payload.letters.length; index += 1) {
+    const slot = document.createElement("div");
+    slot.className = "gm14-slot";
+    slot.dataset.slotIndex = String(index);
+    slot.setAttribute("aria-label", `Позиция ${index + 1}`);
+    bindGm14DropZone(slot);
+    el.gm14Slots.appendChild(slot);
+  }
+  bindGm14DropZone(el.gm14Bank);
+  for (const item of payload.letters) el.gm14Bank.appendChild(makeGm14Tile(item));
+  setText(el.gm14Progress, `Слово ${payload.word_number} из ${payload.word_count}`);
+  setText(el.gm14Instruction, payload.correct ? "Верно! Соберите следующее слово." : "Перетащите буквы в ячейки в правильном порядке.");
+  setHidden(el.gm14Intro, true);
+  setHidden(el.gm14Result, true);
+  setHidden(el.gm14Play, false);
+}
+
+async function maybeSubmitGm14Word() {
+  if (gm14.submitting || !el.gm14Slots) return;
+  const slots = [...el.gm14Slots.querySelectorAll(".gm14-slot")];
+  const tiles = slots.map(slot => slot.querySelector(".gm14-tile"));
+  if (tiles.some(tile => !tile)) return;
+  gm14.submitting = true;
+  const assembled = tiles.map(tile => tile.dataset.letter).join("");
+  try {
+    const payload = await fetchJson("/api/games/gm14/answer", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        session_id: gm14.sessionId,
+        assembled,
+        placements: gm14.placementEvents,
+        timestamp_ms: Date.now(),
+      }),
+    });
+    if (payload.finished) {
+      setHidden(el.gm14Play, true);
+      setHidden(el.gm14Result, false);
+      const accuracy = Math.round(Number(payload.metrics?.u01_first_attempt_word_accuracy || 0) * 100);
+      setText(el.gm14ResultText, `С первой попытки собрано правильно: ${accuracy}%.`);
+      setText(el.gm14Instruction, "Все 10 слов собраны.");
+      return;
+    }
+    if (payload.correct === false) {
+      setText(el.gm14Instruction, "Пока неверно. Переставьте буквы и попробуйте ещё раз.");
+      el.gm14Slots.classList.add("is-error");
+      window.setTimeout(() => el.gm14Slots.classList.remove("is-error"), 350);
+      gm14.submitting = false;
+      return;
+    }
+    await delay(450);
+    renderGm14Word(payload);
+  } catch (error) {
+    setText(el.gm14Instruction, `Не удалось проверить слово: ${error.message || error}`);
+    gm14.submitting = false;
+  }
+}
+
+async function startGm14() {
+  gm14.renderToken += 1;
+  gm14.submitting = true;
+  const payload = await fetchJson("/api/games/gm14/start", { method: "POST" });
+  renderGm14Word(payload);
+}
+
+function openGm14() {
+  gm14.renderToken += 1;
+  gm14.submitting = false;
+  gm14.sessionId = "";
+  selectGm14Tile(null);
+  setText(el.gm14Progress, "Слово 1 из 10");
+  setText(el.gm14Instruction, "Перетащите буквы в ячейки в правильном порядке.");
+  setHidden(el.gm14Play, true);
+  setHidden(el.gm14Result, true);
+  setHidden(el.gm14Intro, false);
+  setHidden(el.gm14Panel, false);
+}
+
+function closeGm14() {
+  gm14.renderToken += 1;
+  gm14.submitting = true;
+  setHidden(el.gm14Panel, true);
+  openTrainingMenu();
+}
+
+const gm17 = {
+  sessionId: "",
+  acceptingInput: false,
+};
+
+function createGm17Svg(shape) {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 100 100");
+  svg.setAttribute("aria-hidden", "true");
+  const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
+  group.setAttribute("transform", `rotate(${Number(shape.rotation) || 0} 50 50)`);
+  const polygon = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
+  polygon.setAttribute("points", (shape.points || []).map(point => point.join(",")).join(" "));
+  group.appendChild(polygon);
+  svg.appendChild(group);
+  return svg;
+}
+
+function renderGm17Trial(payload) {
+  gm17.sessionId = payload.session_id;
+  gm17.acceptingInput = true;
+  el.gm17Sample.replaceChildren(createGm17Svg(payload.sample));
+  el.gm17Choices.replaceChildren();
+  for (const choice of payload.choices || []) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "gm17-choice";
+    button.setAttribute("aria-label", "Вариант фигуры");
+    button.appendChild(createGm17Svg(choice));
+    button.addEventListener("click", () => submitGm17Answer(choice.id, button));
+    el.gm17Choices.appendChild(button);
+  }
+  setText(el.gm17Progress, `Проба ${payload.trial} из ${payload.trial_count}`);
+  setText(el.gm17Instruction, "Выберите фигуру, которая совпадает с образцом после поворота.");
+  setHidden(el.gm17Intro, true);
+  setHidden(el.gm17Result, true);
+  setHidden(el.gm17Play, false);
+}
+
+async function startGm17() {
+  gm17.acceptingInput = false;
+  const payload = await fetchJson("/api/games/gm17/start", { method: "POST" });
+  renderGm17Trial(payload);
+}
+
+async function submitGm17Answer(selectedId, button) {
+  if (!gm17.acceptingInput) return;
+  gm17.acceptingInput = false;
+  button.classList.add("is-selected");
+  try {
+    const payload = await fetchJson("/api/games/gm17/answer", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        session_id: gm17.sessionId,
+        selected_id: selectedId,
+        timestamp_ms: Date.now(),
+      }),
+    });
+    await delay(250);
+    if (!payload.finished) {
+      renderGm17Trial(payload);
+      return;
+    }
+    setHidden(el.gm17Play, true);
+    setHidden(el.gm17Result, false);
+    const accuracy = Math.round(Number(payload.metrics?.u01_correct_action_rate || 0) * 100);
+    setText(el.gm17ResultText, `Правильных ответов: ${accuracy}%.`);
+    setText(el.gm17Instruction, "Все 10 проб завершены.");
+  } catch (error) {
+    button.classList.remove("is-selected");
+    gm17.acceptingInput = true;
+    setText(el.gm17Instruction, `Не удалось сохранить ответ: ${error.message || error}`);
+  }
+}
+
+function openGm17() {
+  gm17.acceptingInput = false;
+  gm17.sessionId = "";
+  setText(el.gm17Progress, "Проба 1 из 10");
+  setText(el.gm17Instruction, "Выберите фигуру, которая совпадает с образцом после поворота.");
+  setHidden(el.gm17Play, true);
+  setHidden(el.gm17Result, true);
+  setHidden(el.gm17Intro, false);
+  setHidden(el.gm17Panel, false);
+}
+
+function closeGm17() {
+  gm17.acceptingInput = false;
+  setHidden(el.gm17Panel, true);
+  openTrainingMenu();
+}
+
+const gm20 = {
+  sessionId: "",
+  acceptingInput: false,
+};
+
+function createGm20Shape(shape, color) {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 100 100");
+  svg.setAttribute("aria-hidden", "true");
+  let node;
+  if (shape === "circle") {
+    node = document.createElementNS(svg.namespaceURI, "circle");
+    node.setAttribute("cx", "50"); node.setAttribute("cy", "50"); node.setAttribute("r", "34");
+  } else if (shape === "triangle") {
+    node = document.createElementNS(svg.namespaceURI, "polygon");
+    node.setAttribute("points", "50,12 90,84 10,84");
+  } else if (shape === "star") {
+    node = document.createElementNS(svg.namespaceURI, "polygon");
+    node.setAttribute("points", "50,7 61,36 93,37 68,56 77,88 50,69 23,88 32,56 7,37 39,36");
+  } else {
+    node = document.createElementNS(svg.namespaceURI, "rect");
+    node.setAttribute("x", "16"); node.setAttribute("y", "16"); node.setAttribute("width", "68"); node.setAttribute("height", "68"); node.setAttribute("rx", "5");
+  }
+  node.classList.add(`is-${color}`);
+  svg.appendChild(node);
+  return svg;
+}
+
+function createGm20Card(card, interactive = false) {
+  const root = document.createElement(interactive ? "button" : "div");
+  if (interactive) root.type = "button";
+  root.className = `${interactive ? "gm20-card gm20-reference" : "gm20-card"} gm20-card-count-${card.count}`;
+  const symbols = document.createElement("div");
+  symbols.className = `gm20-symbols count-${card.count}`;
+  for (let index = 0; index < card.count; index += 1) {
+    symbols.appendChild(createGm20Shape(card.shape, card.color));
+  }
+  root.appendChild(symbols);
+  return root;
+}
+
+function renderGm20Trial(payload) {
+  gm20.sessionId = payload.session_id;
+  gm20.acceptingInput = true;
+  el.gm20References.replaceChildren();
+  const referenceOrder = { 1: 0, 4: 1, 2: 2, 3: 3 };
+  const references = [...(payload.references || [])].sort(
+    (left, right) => referenceOrder[left.count] - referenceOrder[right.count],
+  );
+  for (const reference of references) {
+    const card = createGm20Card(reference, true);
+    card.setAttribute("aria-label", `Эталонная карточка ${reference.count}`);
+    card.addEventListener("click", () => submitGm20Answer(reference.id, card));
+    el.gm20References.appendChild(card);
+  }
+  el.gm20Stimulus.replaceChildren(createGm20Card(payload.stimulus));
+  setText(el.gm20Progress, `Карточка ${payload.trial} из ${payload.trial_count}`);
+  setText(el.gm20Instruction, "Выберите эталонную карточку по предполагаемому правилу.");
+  setHidden(el.gm20Feedback, true);
+  setHidden(el.gm20Intro, true);
+  setHidden(el.gm20Result, true);
+  setHidden(el.gm20Play, false);
+}
+
+async function startGm20() {
+  gm20.acceptingInput = false;
+  const payload = await fetchJson("/api/games/gm20/start", { method: "POST" });
+  renderGm20Trial(payload);
+}
+
+async function submitGm20Answer(selectedReference, card) {
+  if (!gm20.acceptingInput) return;
+  gm20.acceptingInput = false;
+  card.classList.add("is-selected");
+  try {
+    const payload = await fetchJson("/api/games/gm20/answer", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        session_id: gm20.sessionId,
+        selected_reference: selectedReference,
+        timestamp_ms: Date.now(),
+      }),
+    });
+    const correct = payload.feedback === "correct";
+    el.gm20Feedback.className = `gm20-feedback ${correct ? "is-correct" : "is-incorrect"}`;
+    setText(el.gm20Feedback, correct ? "Верно" : "Неверно");
+    setHidden(el.gm20Feedback, false);
+    await delay(650);
+    if (!payload.finished) {
+      renderGm20Trial(payload);
+      return;
+    }
+    setHidden(el.gm20Play, true);
+    setHidden(el.gm20Result, false);
+    const accuracy = Math.round(Number(payload.metrics?.u01_correct_action_rate || 0) * 100);
+    setText(el.gm20ResultText, `Правильных ответов: ${accuracy}%.`);
+    setText(el.gm20Instruction, "Все 60 карточек распределены.");
+  } catch (error) {
+    card.classList.remove("is-selected");
+    gm20.acceptingInput = true;
+    setText(el.gm20Instruction, `Не удалось сохранить ответ: ${error.message || error}`);
+  }
+}
+
+function openGm20() {
+  gm20.acceptingInput = false;
+  gm20.sessionId = "";
+  setText(el.gm20Progress, "Карточка 1 из 60");
+  setText(el.gm20Instruction, "Определите правило по обратной связи и выберите подходящую карточку.");
+  setHidden(el.gm20Play, true);
+  setHidden(el.gm20Result, true);
+  setHidden(el.gm20Intro, false);
+  setHidden(el.gm20Panel, false);
+}
+
+function closeGm20() {
+  gm20.acceptingInput = false;
+  setHidden(el.gm20Panel, true);
+  openTrainingMenu();
+}
+
+function openTrainingMenu() {
+  setHidden(el.trainingMenu, false);
+}
+
+function closeTrainingMenu() {
+  setHidden(el.trainingMenu, true);
+}
+
+function openTrainingGame(game) {
+  closeTrainingMenu();
+  const openers = {
+    gm02: openGm02,
+    gm07: openGm07,
+    gm14: openGm14,
+    gm17: openGm17,
+    gm20: openGm20,
+  };
+  if (openers[game]) openers[game]();
+}
+
 async function openMainMenu() {
   if (!el.mainMenu) return;
   setHidden(el.mainMenu, false);
@@ -2086,7 +2778,22 @@ async function handleMenuAction(item) {
         await openSessionCheck(item);
         break;
       case "training":
-        setText(el.messageValue, "Режим «Тренировка» пока в разработке.");
+        openTrainingMenu();
+        break;
+      case "gm02":
+        openGm02();
+        break;
+      case "gm07":
+        openGm07();
+        break;
+      case "gm14":
+        openGm14();
+        break;
+      case "gm17":
+        openGm17();
+        break;
+      case "gm20":
+        openGm20();
         break;
       case "report":
         await openResults();
@@ -2128,6 +2835,61 @@ async function handleMenuAction(item) {
 function bindMainMenuEvents() {
   el.menuButton && el.menuButton.addEventListener("click", openMainMenu);
   el.mainMenuClose && el.mainMenuClose.addEventListener("click", closeMainMenu);
+  el.trainingMenuClose && el.trainingMenuClose.addEventListener("click", () => {
+    closeTrainingMenu();
+    openMainMenu();
+  });
+  el.trainingMenu && el.trainingMenu.addEventListener("click", event => {
+    if (event.target === el.trainingMenu) {
+      closeTrainingMenu();
+      openMainMenu();
+    }
+  });
+  for (const item of document.querySelectorAll("[data-training-game]")) {
+    item.addEventListener("click", () => openTrainingGame(item.dataset.trainingGame));
+  }
+  el.gm02Start && el.gm02Start.addEventListener("click", () => startGm02().catch(error => {
+    setText(el.gm02Instruction, `Не удалось начать игру: ${error.message || error}`);
+  }));
+  el.gm02Restart && el.gm02Restart.addEventListener("click", () => startGm02().catch(error => {
+    setText(el.gm02Instruction, `Не удалось начать игру: ${error.message || error}`);
+  }));
+  el.gm02Close && el.gm02Close.addEventListener("click", closeGm02);
+  el.gm07Start && el.gm07Start.addEventListener("click", () => startGm07().catch(error => {
+    setText(el.gm07Instruction, `Не удалось начать игру: ${error.message || error}`);
+  }));
+  el.gm07Restart && el.gm07Restart.addEventListener("click", () => startGm07().catch(error => {
+    setText(el.gm07Instruction, `Не удалось начать игру: ${error.message || error}`);
+  }));
+  el.gm07Close && el.gm07Close.addEventListener("click", closeGm07);
+  el.gm07Absent && el.gm07Absent.addEventListener("click", () => {
+    submitGm07Answer(null).catch(error => {
+      setText(el.gm07Instruction, `Не удалось сохранить ответ: ${error.message || error}`);
+    });
+  });
+  el.gm14Start && el.gm14Start.addEventListener("click", () => startGm14().catch(error => {
+    setText(el.gm14Instruction, `Не удалось начать игру: ${error.message || error}`);
+    gm14.submitting = false;
+  }));
+  el.gm14Restart && el.gm14Restart.addEventListener("click", () => startGm14().catch(error => {
+    setText(el.gm14Instruction, `Не удалось начать игру: ${error.message || error}`);
+    gm14.submitting = false;
+  }));
+  el.gm14Close && el.gm14Close.addEventListener("click", closeGm14);
+  el.gm17Start && el.gm17Start.addEventListener("click", () => startGm17().catch(error => {
+    setText(el.gm17Instruction, `Не удалось начать игру: ${error.message || error}`);
+  }));
+  el.gm17Restart && el.gm17Restart.addEventListener("click", () => startGm17().catch(error => {
+    setText(el.gm17Instruction, `Не удалось начать игру: ${error.message || error}`);
+  }));
+  el.gm17Close && el.gm17Close.addEventListener("click", closeGm17);
+  el.gm20Start && el.gm20Start.addEventListener("click", () => startGm20().catch(error => {
+    setText(el.gm20Instruction, `Не удалось начать игру: ${error.message || error}`);
+  }));
+  el.gm20Restart && el.gm20Restart.addEventListener("click", () => startGm20().catch(error => {
+    setText(el.gm20Instruction, `Не удалось начать игру: ${error.message || error}`);
+  }));
+  el.gm20Close && el.gm20Close.addEventListener("click", closeGm20);
   el.mainMenu && el.mainMenu.addEventListener("click", (event) => {
     if (event.target === el.mainMenu) closeMainMenu();
   });
