@@ -420,11 +420,11 @@ async function setupLive2D() {
     setText(el.mascotNote, "Loading Live2D model...");
 
     const coreUrl = (state.config && state.config.live2d_cubism_core_url) || "";
-    await loadExternalScript("https://cdn.jsdelivr.net/npm/pixi.js@6.5.10/dist/browser/pixi.min.js", () => Boolean(window.PIXI && window.PIXI.Application));
+    await loadExternalScript("/static/vendor/pixi.min.js", () => Boolean(window.PIXI && window.PIXI.Application));
     if (coreUrl) {
       await loadExternalScript(coreUrl, () => Boolean(window.Live2DCubismCore));
     }
-    await loadExternalScript("https://cdn.jsdelivr.net/npm/pixi-live2d-display@0.4.0/dist/cubism4.min.js", () => Boolean(window.PIXI && window.PIXI.live2d && window.PIXI.live2d.Live2DModel));
+    await loadExternalScript("/static/vendor/cubism4.min.js", () => Boolean(window.PIXI && window.PIXI.live2d && window.PIXI.live2d.Live2DModel));
 
     if (!window.PIXI || !window.PIXI.live2d || !window.PIXI.live2d.Live2DModel) {
       throw new Error("Live2D runtime is unavailable");

@@ -27,3 +27,5 @@ runtime/models/gigaam/*.ckpt
 runtime/models/gigaam/*.model
 runtime/deidentified/
 runtime/dataset/
+runtime/models/tts/*.onnx
+runtime/models/tts/*.onnx.json
