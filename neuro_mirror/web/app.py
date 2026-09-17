@@ -410,7 +410,6 @@ def create_app() -> FastAPI:
                 "tts_voice": ctx.settings.tts_voice,
                 "live2d_model_url": ctx.settings.web_live2d_model_url,
                 "live2d_cubism_core_url": ctx.settings.web_live2d_cubism_core_url,
-                "weather_source_label": ctx.runtime.weather_source_label,
                 "assistant_backend_label": ctx.runtime.assistant_backend_label,
                 "app_version": APP_VERSION,
                 "scenario_versions": SCENARIO_VERSIONS,

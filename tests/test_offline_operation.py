@@ -114,3 +114,24 @@ def test_vision_translation_does_not_use_public_services():
     )
     assert "translate.googleapis.com" not in backends
     assert "mymemory" not in backends.lower()
+
+
+def test_runtime_actually_starts(tmp_path, monkeypatch):
+    """Сборка runtime с настройками по умолчанию.
+
+    Удаление настройки может оставить висячую ссылку в сборке приложения:
+    все модульные тесты при этом проходят, а программа не запускается.
+
+    Каталог подменяется: хранилища пишут файлы относительно текущего, и без
+    подмены тест затирал бы рабочие данные и мешал соседним тестам.
+    """
+    import asyncio
+
+    from neuro_mirror.app.runtime import create_runtime
+
+    monkeypatch.chdir(tmp_path)
+    handle = create_runtime(
+        Settings.from_env(), stop_event=asyncio.Event(), include_ai_plugin=False
+    )
+    assert handle.session_store is not None
+    assert handle.dataset_store is not None

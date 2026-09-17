@@ -39,7 +39,6 @@ class RuntimeHandle:
     plugin_manager: PluginManager
     stop_event: asyncio.Event
     assistant_backend_label: str
-    weather_source_label: str
     session_store: SessionStore
     dataset_store: DatasetStore
 
@@ -90,11 +89,6 @@ def create_runtime(
         f"{settings.ai_backend}:{settings.ollama_model}"
         if settings.enable_ai_assistant
         else "выключен"
-    )
-    weather_source_label = (
-        f"Фиксированная локация: {settings.weather_location}"
-        if settings.weather_location
-        else "Автоматическое определение по IP"
     )
     appearance_composer = AppearanceResponseComposer(
         enabled=settings.enable_ai_assistant,
@@ -157,7 +151,6 @@ def create_runtime(
         plugin_manager=plugin_manager,
         stop_event=stop_event,
         assistant_backend_label=assistant_backend_label,
-        weather_source_label=weather_source_label,
         session_store=session_store,
         dataset_store=dataset_store,
     )
