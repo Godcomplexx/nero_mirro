@@ -10,6 +10,7 @@ from neuro_mirror.core.session_store import SessionStore
 from neuro_mirror.core.settings import Settings
 from neuro_mirror.models.events import Event, Topics
 from neuro_mirror.plugins.ai_assistant.appearance_response import AppearanceResponseComposer
+from neuro_mirror.screening.training_plan import explain_plan, plan_session
 from neuro_mirror.version import session_version_manifest
 
 
@@ -766,6 +767,21 @@ class AggregatorPlugin(ProcessorPlugin):
             return
         self._fail_session("Неизвестный тип сценария при возобновлении.")
 
+    def _build_training_plan(self, profile: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Состав ближайшего занятия по когнитивному профилю.
+
+        Подбор курса не должен ронять отчёт: при пустом или неполном профиле
+        план просто не формируется.
+        """
+        if not profile:
+            return []
+        try:
+            plan = plan_session(profile)
+            return explain_plan(profile, plan)
+        except (ValueError, TypeError) as exc:
+            logger.warning("aggregator: не удалось составить план занятия: %s", exc)
+            return []
+
     def _conditions_limitation(self) -> str:
         """Пометка об ограничении результата условиями (ТЗ 6.3.10)."""
         conditions = self._session_conditions
@@ -903,6 +919,12 @@ class AggregatorPlugin(ProcessorPlugin):
                 "moca_score": moca.get("score"),
                 "moca_max_score": moca.get("max_score"),
                 "moca_percent": moca.get("percent"),
+                # Когнитивный профиль: балл, максимум и нормированный дефицит
+                # по каждому домену — на нём строится подбор тренировок.
+                "moca_domains": moca.get("domains", []),
+                # Состав ближайшего занятия: сколько заданий каждого домена
+                # назначено по величине недобора баллов.
+                "moca_training_plan": self._build_training_plan(moca.get("domains", [])),
                 "moca_tasks": moca.get("tasks", []),
                 "moca_task_count": moca.get("task_count", 0),
             },

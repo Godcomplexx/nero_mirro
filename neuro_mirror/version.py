@@ -21,7 +21,10 @@ ALGORITHM_VERSIONS: dict[str, str] = {
     "session_conditions": "1.0.0",
     "rppg_pipeline": "1.0.0",
     "hads_scoring": "1.0.0",
-    "voice_moca_scoring": "1.1.0",
+    # 1.2.0 — результат дополнен когнитивным профилем по четырём доменам
+    "voice_moca_scoring": "1.2.0",
+    # Состав занятия по недобору баллов домена
+    "training_plan": "1.0.0",
 }
 
 INTERPRETATION_RULES_VERSION = "1.0.0"

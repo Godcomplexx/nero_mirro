@@ -651,6 +651,8 @@ function renderReport(report) {
       rows.push(reportRow("MoCA voice score", `${domains.moca_score} / ${domains.moca_max_score}`));
     }
     if (domains.moca_percent != null) rows.push(reportRow("MoCA voice percent", `${Math.round(Number(domains.moca_percent) * 100)}%`));
+    pushDomainProfileRows(rows, domains.moca_domains);
+    pushTrainingPlanRows(rows, domains.moca_training_plan);
     if (domains.speech != null) rows.push(reportRow("Speech", formatNumber(domains.speech)));
     if (domains.reaction != null) rows.push(reportRow("Reaction", `${domains.reaction} ms`));
 
@@ -708,6 +710,30 @@ function renderReport(report) {
   }
 
   el.reportValue.innerHTML = `<pre>${escapeHtml(JSON.stringify(report, null, 2))}</pre>`;
+}
+
+function pushDomainProfileRows(rows, profile) {
+  // Когнитивный профиль: балл по домену и нормированный дефицит, по которому
+  // дальше подбирается тренировочный курс.
+  if (!Array.isArray(profile) || profile.length === 0) return;
+  rows.push('<div class="report-section">Когнитивный профиль</div>');
+  for (const item of profile) {
+    const deficit = item.deficit == null ? "" : ` · дефицит ${Math.round(Number(item.deficit) * 100)}%`;
+    rows.push(reportRow(item.domain || "-", `${item.score} / ${item.max_score}${deficit}`));
+  }
+}
+
+function pushTrainingPlanRows(rows, plan) {
+  // Состав ближайшего занятия: чем больше домен недобрал баллов,
+  // тем больше заданий на него назначено.
+  if (!Array.isArray(plan) || plan.length === 0) return;
+  const total = plan.reduce((sum, item) => sum + Number(item.tasks || 0), 0);
+  rows.push(`<div class="report-section">План занятия — ${total} заданий</div>`);
+  for (const item of plan) {
+    const missed = Number(item.shortfall || 0);
+    const reason = missed > 0 ? `не добрано ${missed}` : "домен сохранён";
+    rows.push(reportRow(item.domain || "-", `${item.tasks} зад. · ${reason}`));
+  }
 }
 
 function pushHadsRows(rows, domains, summary, sources) {
