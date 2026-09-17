@@ -16,8 +16,6 @@ from neuro_mirror.plugins.ai_assistant.backends import (
     detect_camera_vision_request,
     detect_start_screening_command,
     normalize_user_utterance,
-    should_prefer_internet_answer,
-    should_use_internet_fallback,
     _is_unsuccessful_assistant_reply,
     _sanitize_assistant_reply,
 )
@@ -32,7 +30,8 @@ class AssistantRulesTest(unittest.TestCase):
     def setUp(self) -> None:
         invalidate_rules_cache()
 
-    def test_stt_president_variants_normalize_to_current_us_president_query(self) -> None:
+    def test_stt_president_variants_are_normalized(self) -> None:
+        """Ошибки распознавания восстанавливаются до осмысленного вопроса."""
         samples = (
             "Президент… юрсци.",
             "кто президент USA",
@@ -41,11 +40,11 @@ class AssistantRulesTest(unittest.TestCase):
             with self.subTest(sample=sample):
                 normalized = normalize_user_utterance(sample)
                 self.assertEqual(normalized.rstrip("."), "Кто сейчас президент сша")
-                self.assertTrue(should_prefer_internet_answer(normalized))
 
-        normalized = normalize_user_utterance("кто последний президент юсей")
-        self.assertEqual(normalized, "Кто последний президент сша")
-        self.assertTrue(should_prefer_internet_answer(normalized))
+        self.assertEqual(
+            normalize_user_utterance("кто последний президент юсей"),
+            "Кто последний президент сша",
+        )
 
     def test_application_commands_still_route_before_general_chat(self) -> None:
         self.assertEqual(
@@ -65,7 +64,6 @@ class AssistantRulesTest(unittest.TestCase):
             "Я не понимаю ваш запрос. Пожалуйста, используйте команды приложения "
             "Нейро-зеркало: start_screening, analyze_appearance или camera_vision_query."
         )
-        self.assertTrue(should_use_internet_fallback("кто сейчас президент сша", bad_reply))
         self.assertTrue(_is_unsuccessful_assistant_reply(bad_reply))
         self.assertNotIn("используйте команды", _sanitize_assistant_reply(bad_reply).lower())
 

@@ -16,16 +16,19 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import edge_tts
 from fastapi import (
     FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect,
 )
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from neuro_mirror.app.runtime import RuntimeHandle, create_runtime
 from neuro_mirror.core.dataset_store import DatasetCaptureError
+from neuro_mirror.core.speech_synthesis import (
+    SpeechSynthesisUnavailable,
+    SpeechSynthesizer,
+)
 from neuro_mirror.core.settings import Settings
 from neuro_mirror.core.user_profiles import (
     CONSENT_TEXT,
@@ -39,6 +42,9 @@ from neuro_mirror.plugins.user_progress.plugin import UserProgressPlugin
 from neuro_mirror.version import APP_VERSION, SCENARIO_VERSIONS
 
 _log = logging.getLogger("neuro_mirror.web")
+
+# Одна модель на процесс: загрузка отложена до первой озвучки.
+_synthesizer = SpeechSynthesizer()
 
 
 # ---- Pydantic request models ----
@@ -961,24 +967,26 @@ def create_app() -> FastAPI:
     # ---- TTS (pure transport, no business logic) ----
 
     @app.post("/api/tts/speak")
-    async def tts_speak(payload: TTSRequest) -> StreamingResponse:
-        ctx: WebAppContext = app.state.context
+    async def tts_speak(payload: TTSRequest) -> Response:
+        """Озвучить текст локальной моделью.
+
+        Синтез выполняется на устройстве: текст инструкций никуда не
+        передаётся, и проведение теста не зависит от подключения к сети.
+        """
         if not payload.text.strip():
             raise HTTPException(status_code=400, detail="text is required")
-
-        async def _stream_tts():
-            communicate = edge_tts.Communicate(
-                text=payload.text.strip(),
-                voice=ctx.settings.tts_voice,
-                rate=ctx.settings.tts_rate,
+        try:
+            audio = await asyncio.to_thread(_synthesizer.synthesize_wav, payload.text)
+        except SpeechSynthesisUnavailable as exc:
+            _log.error("tts: синтез недоступен: %s", exc)
+            raise HTTPException(
+                status_code=503,
+                detail="Синтез речи недоступен: не установлен голос. "
+                       "Инструкции не будут озвучены.",
             )
-            async for item in communicate.stream():
-                if item["type"] == "audio":
-                    yield item["data"]
-
-        return StreamingResponse(
-            _stream_tts(),
-            media_type="audio/mpeg",
+        return Response(
+            content=audio,
+            media_type="audio/wav",
             headers={"Cache-Control": "no-cache"},
         )
 

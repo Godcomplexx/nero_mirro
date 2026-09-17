@@ -16,7 +16,7 @@ class Settings:
     web_host: str = "127.0.0.1"
     web_port: int = 8000
     web_live2d_model_url: str = ""
-    web_live2d_cubism_core_url: str = "https://cdn.jsdelivr.net/npm/live2dcubismcore@1.0.2/live2dcubismcore.min.js"
+    web_live2d_cubism_core_url: str = "/static/vendor/live2dcubismcore.min.js"
 
     ai_backend: str = "ollama"
     ollama_base_url: str = "http://127.0.0.1:11434"
@@ -27,14 +27,6 @@ class Settings:
     assistant_rules_path: str = ""
     appearance_memory_path: str = "runtime/appearance_memory.json"
     appearance_memory_limit: int = 20
-
-    weather_enabled: bool = True
-    weather_location: str = ""
-    weather_base_url: str = "https://wttr.in"
-    currency_enabled: bool = True
-    currency_base_url: str = "https://api.frankfurter.dev"
-    internet_fallback_enabled: bool = True
-    internet_fallback_base_url: str = "https://html.duckduckgo.com"
 
     # Global device flag: "auto" detects GPU, "cpu" forces CPU, "cuda" forces GPU
     device: str = "auto"
@@ -102,7 +94,7 @@ class Settings:
         ).strip()
         raw_web_live2d_cubism_core_url = os.getenv(
             "NEURO_MIRROR_WEB_LIVE2D_CUBISM_CORE_URL",
-            "https://cdn.jsdelivr.net/npm/live2dcubismcore@1.0.2/live2dcubismcore.min.js",
+            "/static/vendor/live2dcubismcore.min.js",
         ).strip()
 
         raw_ai_backend = os.getenv("NEURO_MIRROR_AI_BACKEND", "ollama").strip().lower()
@@ -119,20 +111,6 @@ class Settings:
             str(base_dir / "runtime" / "appearance_memory.json"),
         ).strip()
         raw_appearance_memory_limit = os.getenv("NEURO_MIRROR_APPEARANCE_MEMORY_LIMIT", "20").strip()
-
-        raw_weather_enabled = os.getenv("NEURO_MIRROR_WEATHER_ENABLED", "1").strip().lower()
-        raw_weather_location = os.getenv("NEURO_MIRROR_WEATHER_LOCATION", "").strip()
-        raw_weather_base_url = os.getenv("NEURO_MIRROR_WEATHER_BASE_URL", "https://wttr.in").strip()
-        raw_currency_enabled = os.getenv("NEURO_MIRROR_CURRENCY_ENABLED", "1").strip().lower()
-        raw_currency_base_url = os.getenv(
-            "NEURO_MIRROR_CURRENCY_BASE_URL", "https://api.frankfurter.dev"
-        ).strip()
-        raw_internet_fallback_enabled = os.getenv(
-            "NEURO_MIRROR_INTERNET_FALLBACK_ENABLED", "1"
-        ).strip().lower()
-        raw_internet_fallback_base_url = os.getenv(
-            "NEURO_MIRROR_INTERNET_FALLBACK_BASE_URL", "https://html.duckduckgo.com"
-        ).strip()
 
         # Global device: "auto" = detect CUDA at runtime, "cpu" = force CPU, "cuda" = force GPU
         raw_device = os.getenv("NEURO_MIRROR_DEVICE", "auto").strip().lower()
@@ -214,13 +192,6 @@ class Settings:
             assistant_rules_path=raw_assistant_rules_path,
             appearance_memory_path=raw_appearance_memory_path,
             appearance_memory_limit=max(1, int(raw_appearance_memory_limit)),
-            weather_enabled=raw_weather_enabled not in {"0", "false", "no"},
-            weather_location=raw_weather_location,
-            weather_base_url=raw_weather_base_url,
-            currency_enabled=raw_currency_enabled not in {"0", "false", "no"},
-            currency_base_url=raw_currency_base_url,
-            internet_fallback_enabled=raw_internet_fallback_enabled not in {"0", "false", "no"},
-            internet_fallback_base_url=raw_internet_fallback_base_url,
             device=raw_device,
             vision_worker_python=raw_vision_worker_python,
             vision_worker_script=raw_vision_worker_script,
