@@ -7,6 +7,36 @@ from typing import Any
 
 VOICE_MOCA_MAX_SCORE = 15
 
+# ── Когнитивные домены ─────────────────────────────────────────────────────────
+# Профиль строится по четырём доменам. Пробы заучивания (memory_1, memory_2)
+# в балл не входят и потому ни к какому домену не отнесены: их результат
+# фиксируется, но на профиль не влияет.
+DOMAIN_MEMORY = "Память"
+DOMAIN_ATTENTION = "Внимание"
+DOMAIN_SPEECH = "Речь"
+DOMAIN_ABSTRACTION = "Абстракция"
+
+# Порядок задаёт порядок вывода профиля в отчёте.
+COGNITIVE_DOMAINS: tuple[str, ...] = (
+    DOMAIN_MEMORY,
+    DOMAIN_ATTENTION,
+    DOMAIN_SPEECH,
+    DOMAIN_ABSTRACTION,
+)
+
+TASK_DOMAINS: dict[str, str] = {
+    # Серийный счёт относится к вниманию, как в исходной методике.
+    "attention_digits_forward": DOMAIN_ATTENTION,
+    "attention_digits_backward": DOMAIN_ATTENTION,
+    "attention_serial": DOMAIN_ATTENTION,
+    "language_sentence_1": DOMAIN_SPEECH,
+    "language_sentence_2": DOMAIN_SPEECH,
+    "language_fluency": DOMAIN_SPEECH,
+    "abstraction_1": DOMAIN_ABSTRACTION,
+    "abstraction_2": DOMAIN_ABSTRACTION,
+    "delayed_recall": DOMAIN_MEMORY,
+}
+
 MEMORY_WORDS = ("лицо", "бархат", "церковь", "фиалка", "красный")
 MEMORY_WORD_FORMS = {
     "лицо": ("лицо", "лица", "лицом", "лицу"),
@@ -96,6 +126,45 @@ def score_moca_task(task_id: str, transcript: str) -> dict[str, Any]:
     return _score_task({"task_id": task_id, "transcript": transcript})
 
 
+def domain_max_scores() -> dict[str, int]:
+    """Максимум каждого домена, выведенный из правил оценки заданий.
+
+    Значения не задаются вручную: иначе при изменении правила оценки любого
+    задания максимум домена молча разошёлся бы с фактически достижимым.
+    """
+    totals = dict.fromkeys(COGNITIVE_DOMAINS, 0)
+    for task_id, domain in TASK_DOMAINS.items():
+        totals[domain] += int(score_moca_task(task_id, "")["max_score"])
+    return totals
+
+
+def summarize_domains(scored_tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Когнитивный профиль: балл, максимум и нормированный дефицит по доменам.
+
+    Нормированный дефицит D = (M − S) / M, где M — максимум домена,
+    S — полученный балл. Значение лежит в диапазоне от 0 до 1: ноль
+    соответствует полному выполнению, единица — отсутствию верных ответов.
+    """
+    maxima = domain_max_scores()
+    earned = dict.fromkeys(COGNITIVE_DOMAINS, 0)
+    for task in scored_tasks:
+        domain = TASK_DOMAINS.get(str(task.get("task_id") or ""))
+        if domain is not None:
+            earned[domain] += int(task.get("score") or 0)
+
+    profile: list[dict[str, Any]] = []
+    for domain in COGNITIVE_DOMAINS:
+        maximum = maxima[domain]
+        score = max(0, min(earned[domain], maximum))
+        profile.append({
+            "domain": domain,
+            "score": score,
+            "max_score": maximum,
+            "deficit": round((maximum - score) / maximum, 3) if maximum else None,
+        })
+    return profile
+
+
 def summarize_moca_tasks(
     scored_tasks: list[dict[str, Any]],
 ) -> dict[str, Any]:
@@ -107,6 +176,7 @@ def summarize_moca_tasks(
         "max_score": VOICE_MOCA_MAX_SCORE,
         "percent": percent,
         "interpretation": _interpret(total),
+        "domains": summarize_domains(scored_tasks),
         "tasks": scored_tasks,
         "notes": (
             "Автоматический подсчет основан на распознанной речи и требует проверки специалистом. "

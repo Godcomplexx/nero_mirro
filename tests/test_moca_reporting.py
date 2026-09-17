@@ -488,3 +488,38 @@ class StoragePersistenceTest(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_report_carries_the_domain_profile_and_training_plan():
+    """Профиль и состав занятия должны доходить до отчёта, а не теряться."""
+    import asyncio
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from neuro_mirror.plugins.aggregator.plugin import AggregatorPlugin, SessionState
+    from neuro_mirror.screening.moca_scoring import score_moca_tasks
+
+    async def run():
+        moca = score_moca_tasks([
+            {"task_id": "delayed_recall", "transcript": "лицо бархат"},
+            {"task_id": "abstraction_1", "transcript": "транспорт"},
+        ])
+        bus = SimpleNamespace(publish=AsyncMock())
+        plugin = AggregatorPlugin(bus, appearance_composer=SimpleNamespace())
+        plugin.state = SessionState.MOCA
+        plugin._latest_results = {"moca": moca}
+
+        await plugin._finish_moca()
+
+        report = bus.publish.await_args_list[0].args[0].payload
+        profile = report["domains"]["moca_domains"]
+        plan = report["domains"]["moca_training_plan"]
+        assert [item["domain"] for item in profile] == [
+            "Память", "Внимание", "Речь", "Абстракция",
+        ]
+        assert sum(item["tasks"] for item in plan) == 10
+        # Внимание не отвечено вовсе, память частично — внимание нагружается сильнее
+        by_domain = {item["domain"]: item for item in plan}
+        assert by_domain["Внимание"]["tasks"] >= by_domain["Абстракция"]["tasks"]
+
+    asyncio.run(run())
