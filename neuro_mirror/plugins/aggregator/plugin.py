@@ -904,6 +904,7 @@ class AggregatorPlugin(ProcessorPlugin):
                 "moca_max_score": moca.get("max_score"),
                 "moca_percent": moca.get("percent"),
                 "moca_tasks": moca.get("tasks", []),
+                "moca_modules": moca.get("modules", []),
                 "moca_task_count": moca.get("task_count", 0),
             },
             "summary": {

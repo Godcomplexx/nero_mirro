@@ -1116,6 +1116,131 @@ pre {
   margin-top: 0;
 }
 
+.moca-total-score {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 8px 0 12px;
+  padding: 14px 16px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.moca-total-score strong {
+  font-size: 28px;
+}
+
+.moca-total-score small,
+.moca-module-score small {
+  color: var(--fg-dim);
+  font-size: 0.65em;
+  font-weight: 400;
+}
+
+.moca-module-scores {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.moca-module-score {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.moca-module-score span {
+  color: var(--fg-dim);
+  font-size: 12px;
+}
+
+.moca-module-score strong {
+  color: var(--fg);
+  font-size: 18px;
+  white-space: nowrap;
+}
+
+.moca-exercise-details {
+  margin-top: 14px;
+}
+
+.moca-exercise-details > summary {
+  display: inline-flex;
+  align-items: center;
+  padding: 9px 13px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  color: var(--fg);
+  background: rgba(255, 255, 255, 0.07);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  list-style: none;
+}
+
+.moca-exercise-details > summary::-webkit-details-marker {
+  display: none;
+}
+
+.moca-exercise-details > summary::after {
+  content: "▾";
+  margin-left: 8px;
+  color: var(--fg-dim);
+}
+
+.moca-exercise-details[open] > summary::after {
+  transform: rotate(180deg);
+}
+
+.moca-exercise-list {
+  display: grid;
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.moca-exercise-module h4 {
+  margin: 0 0 7px;
+  color: var(--fg);
+  font-size: 14px;
+}
+
+.moca-exercise-row {
+  padding: 10px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.moca-exercise-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--fg);
+}
+
+.moca-exercise-head span {
+  white-space: nowrap;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.moca-exercise-row p {
+  margin: 5px 0 0;
+  color: var(--fg-dim);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.moca-exercise-row p span {
+  color: rgba(231, 239, 250, 0.9);
+}
+
 .modules-list {
   display: grid;
   gap: 6px;
@@ -2435,6 +2560,16 @@ body {
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
+}
+
+.result-card .moca-module-scores {
+  margin-top: 14px;
+}
+
+@media (max-width: 620px) {
+  .moca-module-scores {
+    grid-template-columns: 1fr;
+  }
 }
 
 .result-metric {

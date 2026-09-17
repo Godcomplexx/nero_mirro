@@ -37,6 +37,12 @@ class MocaScoringTest(unittest.TestCase):
         self.assertEqual(result["score"], 2)
         self.assertEqual(result["max_score"], 15)
         self.assertEqual(result["tasks"], tasks)
+        self.assertEqual(
+            [module["label"] for module in result["modules"]],
+            ["Память", "Внимание", "Речь", "Абстракция"],
+        )
+        self.assertEqual(result["modules"][1]["score"], 2)
+        self.assertEqual(result["modules"][1]["max_score"], 5)
 
     def test_perfect_voice_moca_scores_15_points(self) -> None:
         result = score_moca_tasks(
@@ -69,6 +75,18 @@ class MocaScoringTest(unittest.TestCase):
 
         self.assertEqual(result["score"], 15)
         self.assertEqual(result["max_score"], 15)
+        self.assertEqual(
+            [module["score"] for module in result["modules"]],
+            [5, 5, 3, 2],
+        )
+        self.assertEqual(
+            [module["max_score"] for module in result["modules"]],
+            [5, 5, 3, 2],
+        )
+        self.assertEqual(
+            result["modules"][0]["tasks"][0]["transcript"],
+            "лицо бархат церковь фиалка красный",
+        )
 
     def test_serial_subtraction_uses_partial_credit(self) -> None:
         result = score_moca_tasks(
