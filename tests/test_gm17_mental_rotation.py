@@ -4,7 +4,7 @@ import asyncio
 
 from neuro_mirror.core.event_bus import EventBus
 from neuro_mirror.models.events import Event, Topics
-from neuro_mirror.plugins.gm17_mental_rotation.plugin import Gm17MentalRotationPlugin
+from neuro_mirror.plugins.games.gm17_mental_rotation.plugin import Gm17MentalRotationPlugin
 from neuro_mirror.screening.gm17_scoring import score_gm17_trials
 
 

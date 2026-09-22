@@ -37,6 +37,12 @@ from neuro_mirror.core.user_profiles import (
     UserProfileStore,
 )
 from neuro_mirror.models.events import Event, Topics
+from neuro_mirror.plugins.games.registry import (
+    all_game_definitions,
+    game_asset_path,
+    get_available_game_definition,
+    implemented_game_codes,
+)
 from neuro_mirror.plugins.ui.web_plugin import WebUIPlugin, WebUIStateStore
 from neuro_mirror.plugins.user_progress.plugin import UserProgressPlugin
 from neuro_mirror.version import APP_VERSION, SCENARIO_VERSIONS
@@ -104,41 +110,6 @@ class ClientLogIn(BaseModel):
 
 class SessionFrameIn(BaseModel):
     image_base64: str
-
-
-class Gm02ClickIn(BaseModel):
-    cell: int
-    timestamp_ms: float
-
-
-class Gm02AnswerIn(BaseModel):
-    session_id: str
-    clicks: list[Gm02ClickIn]
-
-
-class Gm07AnswerIn(BaseModel):
-    session_id: str
-    selected_id: str | None = None
-    timestamp_ms: float
-
-
-class Gm14AnswerIn(BaseModel):
-    session_id: str
-    assembled: str
-    placements: list[dict[str, Any]] = Field(default_factory=list)
-    timestamp_ms: float
-
-
-class Gm17AnswerIn(BaseModel):
-    session_id: str
-    selected_id: str
-    timestamp_ms: float
-
-
-class Gm20AnswerIn(BaseModel):
-    session_id: str
-    selected_reference: str
-    timestamp_ms: float
 
 
 # ---- Minimal application context ----
@@ -278,128 +249,58 @@ def create_app() -> FastAPI:
         ctx: WebAppContext = app.state.context
         return JSONResponse(await ctx.state_store.get_snapshot())
 
-    @app.post("/api/games/gm02/start")
-    async def gm02_start() -> JSONResponse:
+    async def _game_request(topic: str, source: str, payload: dict[str, Any] | None = None) -> JSONResponse:
         ctx: WebAppContext = app.state.context
-        reply = await ctx.runtime.bus.request(
-            Event(topic=Topics.REQ_GM02_START, source="web.game.gm02")
-        )
-        reply.pop("_reply_to", None)
-        return JSONResponse(reply)
-
-    @app.post("/api/games/gm02/answer")
-    async def gm02_answer(payload: Gm02AnswerIn) -> JSONResponse:
-        ctx: WebAppContext = app.state.context
-        reply = await ctx.runtime.bus.request(
-            Event(
-                topic=Topics.REQ_GM02_ANSWER,
-                source="web.game.gm02",
-                payload={
-                    "session_id": payload.session_id,
-                    "clicks": [click.model_dump() for click in payload.clicks],
-                },
-            )
-        )
+        reply = await ctx.runtime.bus.request(Event(topic=topic, source=source, payload=payload or {}))
         if not reply.get("ok"):
             raise HTTPException(status_code=400, detail=reply.get("message", "Ошибка игры."))
         reply.pop("_reply_to", None)
         return JSONResponse(reply)
 
-    @app.post("/api/games/gm07/start")
-    async def gm07_start() -> JSONResponse:
-        ctx: WebAppContext = app.state.context
-        reply = await ctx.runtime.bus.request(
-            Event(topic=Topics.REQ_GM07_START, source="web.game.gm07")
+    @app.get("/api/games/catalog")
+    async def game_catalog() -> JSONResponse:
+        implemented = implemented_game_codes()
+        return JSONResponse(
+            [item.to_public_dict(implemented=item.code in implemented) for item in all_game_definitions()]
         )
-        reply.pop("_reply_to", None)
-        return JSONResponse(reply)
 
-    @app.post("/api/games/gm07/answer")
-    async def gm07_answer(payload: Gm07AnswerIn) -> JSONResponse:
-        ctx: WebAppContext = app.state.context
-        reply = await ctx.runtime.bus.request(
-            Event(
-                topic=Topics.REQ_GM07_ANSWER,
-                source="web.game.gm07",
-                payload=payload.model_dump(),
-            )
-        )
-        if not reply.get("ok"):
-            raise HTTPException(status_code=400, detail=reply.get("message", "Ошибка игры."))
-        reply.pop("_reply_to", None)
-        return JSONResponse(reply)
+    @app.get("/api/games/{game_code}/renderer.js")
+    async def game_renderer(game_code: str) -> FileResponse:
+        try:
+            definition = get_available_game_definition(game_code)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        path = game_asset_path(definition.code, "web.js")
+        if path is None:
+            raise HTTPException(status_code=404, detail="У игры нет отдельного браузерного модуля.")
+        return FileResponse(path, media_type="text/javascript")
 
-    @app.post("/api/games/gm14/start")
-    async def gm14_start() -> JSONResponse:
-        ctx: WebAppContext = app.state.context
-        reply = await ctx.runtime.bus.request(
-            Event(topic=Topics.REQ_GM14_START, source="web.game.gm14")
+    @app.post("/api/games/{game_code}/start")
+    async def generic_game_start(game_code: str) -> JSONResponse:
+        try:
+            definition = get_available_game_definition(game_code)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        if definition.code not in implemented_game_codes():
+            raise HTTPException(status_code=501, detail="Игра присутствует в каталоге, но ещё не реализована.")
+        return await _game_request(
+            definition.start_request_topic,
+            f"web.game.{definition.topic_prefix}",
         )
-        reply.pop("_reply_to", None)
-        return JSONResponse(reply)
 
-    @app.post("/api/games/gm14/answer")
-    async def gm14_answer(payload: Gm14AnswerIn) -> JSONResponse:
-        ctx: WebAppContext = app.state.context
-        reply = await ctx.runtime.bus.request(
-            Event(
-                topic=Topics.REQ_GM14_ANSWER,
-                source="web.game.gm14",
-                payload=payload.model_dump(),
-            )
+    @app.post("/api/games/{game_code}/answer")
+    async def generic_game_answer(game_code: str, payload: dict[str, Any]) -> JSONResponse:
+        try:
+            definition = get_available_game_definition(game_code)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        if definition.code not in implemented_game_codes():
+            raise HTTPException(status_code=501, detail="Игра присутствует в каталоге, но ещё не реализована.")
+        return await _game_request(
+            definition.answer_request_topic,
+            f"web.game.{definition.topic_prefix}",
+            payload,
         )
-        if not reply.get("ok"):
-            raise HTTPException(status_code=400, detail=reply.get("message", "Ошибка игры."))
-        reply.pop("_reply_to", None)
-        return JSONResponse(reply)
-
-    @app.post("/api/games/gm17/start")
-    async def gm17_start() -> JSONResponse:
-        ctx: WebAppContext = app.state.context
-        reply = await ctx.runtime.bus.request(
-            Event(topic=Topics.REQ_GM17_START, source="web.game.gm17")
-        )
-        reply.pop("_reply_to", None)
-        return JSONResponse(reply)
-
-    @app.post("/api/games/gm17/answer")
-    async def gm17_answer(payload: Gm17AnswerIn) -> JSONResponse:
-        ctx: WebAppContext = app.state.context
-        reply = await ctx.runtime.bus.request(
-            Event(
-                topic=Topics.REQ_GM17_ANSWER,
-                source="web.game.gm17",
-                payload=payload.model_dump(),
-            )
-        )
-        if not reply.get("ok"):
-            raise HTTPException(status_code=400, detail=reply.get("message", "Ошибка игры."))
-        reply.pop("_reply_to", None)
-        return JSONResponse(reply)
-
-    @app.post("/api/games/gm20/start")
-    async def gm20_start() -> JSONResponse:
-        ctx: WebAppContext = app.state.context
-        reply = await ctx.runtime.bus.request(
-            Event(topic=Topics.REQ_GM20_START, source="web.game.gm20")
-        )
-        reply.pop("_reply_to", None)
-        return JSONResponse(reply)
-
-    @app.post("/api/games/gm20/answer")
-    async def gm20_answer(payload: Gm20AnswerIn) -> JSONResponse:
-        ctx: WebAppContext = app.state.context
-        reply = await ctx.runtime.bus.request(
-            Event(
-                topic=Topics.REQ_GM20_ANSWER,
-                source="web.game.gm20",
-                payload=payload.model_dump(),
-            )
-        )
-        if not reply.get("ok"):
-            raise HTTPException(status_code=400, detail=reply.get("message", "Ошибка игры."))
-        reply.pop("_reply_to", None)
-        return JSONResponse(reply)
 
     @app.get("/api/config")
     async def get_config() -> JSONResponse:

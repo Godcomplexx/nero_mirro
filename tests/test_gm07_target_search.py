@@ -4,7 +4,7 @@ import asyncio
 
 from neuro_mirror.core.event_bus import EventBus
 from neuro_mirror.models.events import Event, Topics
-from neuro_mirror.plugins.gm07_target_search.plugin import Gm07TargetSearchPlugin
+from neuro_mirror.plugins.games.gm07_target_search.plugin import Gm07TargetSearchPlugin
 from neuro_mirror.screening.gm07_scoring import score_gm07_trials
 
 

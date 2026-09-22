@@ -4,7 +4,7 @@ import asyncio
 
 from neuro_mirror.core.event_bus import EventBus
 from neuro_mirror.models.events import Event, Topics
-from neuro_mirror.plugins.gm14_word_builder.plugin import Gm14WordBuilderPlugin
+from neuro_mirror.plugins.games.gm14_word_builder.plugin import Gm14WordBuilderPlugin
 from neuro_mirror.screening.gm14_scoring import score_gm14_words
 
 

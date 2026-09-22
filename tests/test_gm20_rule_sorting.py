@@ -4,7 +4,7 @@ import asyncio
 
 from neuro_mirror.core.event_bus import EventBus
 from neuro_mirror.models.events import Event, Topics
-from neuro_mirror.plugins.gm20_rule_sorting.plugin import Gm20RuleSortingPlugin
+from neuro_mirror.plugins.games.gm20_rule_sorting.plugin import Gm20RuleSortingPlugin
 from neuro_mirror.screening.gm20_scoring import score_gm20_trials
 
 

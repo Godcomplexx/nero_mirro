@@ -143,6 +143,9 @@ const el = {
   mainMenuClose: $("main-menu-close"),
   trainingMenu: $("training-menu"),
   trainingMenuClose: $("training-menu-close"),
+  trainingGameList: $("training-game-list"),
+  dynamicGamePanel: $("dynamic-game-panel"),
+  dynamicGameHost: $("dynamic-game-host"),
   gm02Panel: $("gm02-panel"),
   gm02Grid: $("gm02-grid"),
   gm02Intro: $("gm02-intro"),
@@ -203,6 +206,11 @@ const el = {
   gm20Instruction: $("gm20-instruction"),
   gm20Result: $("gm20-result"),
   gm20ResultText: $("gm20-result-text"),
+  gm05Panel: $("gm05-panel"), gm05Intro: $("gm05-intro"), gm05Study: $("gm05-study"), gm05Choice: $("gm05-choice"), gm05Words: $("gm05-words"), gm05Start: $("gm05-start"), gm05Restart: $("gm05-restart"), gm05Submit: $("gm05-submit"), gm05Close: $("gm05-close"), gm05Progress: $("gm05-progress"), gm05Instruction: $("gm05-instruction"), gm05Result: $("gm05-result"), gm05ResultText: $("gm05-result-text"),
+  gm08Panel: $("gm08-panel"), gm08Intro: $("gm08-intro"), gm08Stimulus: $("gm08-stimulus"), gm08Start: $("gm08-start"), gm08Restart: $("gm08-restart"), gm08Close: $("gm08-close"), gm08Progress: $("gm08-progress"), gm08Instruction: $("gm08-instruction"), gm08Result: $("gm08-result"), gm08ResultText: $("gm08-result-text"),
+  gm12Panel: $("gm12-panel"), gm12Intro: $("gm12-intro"), gm12Play: $("gm12-play"), gm12Picture: $("gm12-picture"), gm12Options: $("gm12-options"), gm12Start: $("gm12-start"), gm12Restart: $("gm12-restart"), gm12Close: $("gm12-close"), gm12Progress: $("gm12-progress"), gm12Result: $("gm12-result"), gm12ResultText: $("gm12-result-text"),
+  gm23Panel: $("gm23-panel"), gm23Intro: $("gm23-intro"), gm23Play: $("gm23-play"), gm23Matrix: $("gm23-matrix"), gm23Options: $("gm23-options"), gm23Start: $("gm23-start"), gm23Restart: $("gm23-restart"), gm23Close: $("gm23-close"), gm23Progress: $("gm23-progress"), gm23Result: $("gm23-result"), gm23ResultText: $("gm23-result-text"),
+  gm19Panel: $("gm19-panel"), gm19Intro: $("gm19-intro"), gm19Canvas: $("gm19-canvas"), gm19Start: $("gm19-start"), gm19Restart: $("gm19-restart"), gm19Close: $("gm19-close"), gm19Progress: $("gm19-progress"), gm19Instruction: $("gm19-instruction"), gm19Result: $("gm19-result"), gm19ResultText: $("gm19-result-text"),
   resultsPanel: $("results-panel"),
   resultsList: $("results-list"),
   resultsSub: $("results-sub"),
@@ -2766,6 +2774,112 @@ function closeGm20() {
   openTrainingMenu();
 }
 
+const gm05 = { sessionId: "", selected: new Set(), token: 0 };
+async function showGm05Round(payload) {
+  const token = ++gm05.token; gm05.sessionId = payload.session_id; gm05.selected = new Set();
+  setText(el.gm05Progress, `Раунд ${payload.round} из ${payload.round_count}`);
+  setText(el.gm05Instruction, `${payload.category}: запомните слова.`);
+  el.gm05Study.replaceChildren(...payload.study_words.map(word => { const n=document.createElement("div"); n.className="gm05-study-word"; n.textContent=word; return n; }));
+  setHidden(el.gm05Intro,true); setHidden(el.gm05Choice,true); setHidden(el.gm05Result,true); setHidden(el.gm05Study,false);
+  await delay(payload.study_ms);
+  if (token !== gm05.token || el.gm05Panel.hidden) return;
+  el.gm05Words.replaceChildren(...payload.choices.map(word => { const b=document.createElement("button"); b.type="button"; b.className="gm05-word"; b.textContent=word; b.onclick=()=>{ b.classList.toggle("is-selected"); b.classList.contains("is-selected") ? gm05.selected.add(word) : gm05.selected.delete(word); }; return b; }));
+  setText(el.gm05Instruction,"Выберите все слова, которые были показаны."); setHidden(el.gm05Study,true); setHidden(el.gm05Choice,false);
+}
+async function startGm05(){ showGm05Round(await fetchJson("/api/games/gm05/start",{method:"POST"})); }
+async function submitGm05(){ const p=await fetchJson("/api/games/gm05/answer",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({session_id:gm05.sessionId,selected:[...gm05.selected],timestamp_ms:Date.now()})}); if(!p.finished){showGm05Round(p);return;} setHidden(el.gm05Choice,true);setHidden(el.gm05Result,false);setText(el.gm05ResultText,`Узнано целей: ${Math.round((p.metrics.m07_target_recognition_rate||0)*100)}%.`); }
+function openGm05(){gm05.token++;setHidden(el.gm05Study,true);setHidden(el.gm05Choice,true);setHidden(el.gm05Result,true);setHidden(el.gm05Intro,false);setHidden(el.gm05Panel,false);}
+function closeGm05(){gm05.token++;setHidden(el.gm05Panel,true);openTrainingMenu();}
+
+const gm08={sessionId:"",accepting:false,timer:null,shownAt:0,token:0};
+async function showGm08Trial(p){const token=++gm08.token;gm08.sessionId=p.session_id;gm08.accepting=false;setText(el.gm08Progress,`Стимул ${p.trial} из ${p.trial_count}`);setHidden(el.gm08Intro,true);setHidden(el.gm08Result,true);setHidden(el.gm08Stimulus,true);await delay(220);if(token!==gm08.token)return;el.gm08Stimulus.classList.toggle("is-mirrored",p.mirrored);setHidden(el.gm08Stimulus,false);gm08.shownAt=performance.now();gm08.accepting=true;gm08.timer=setTimeout(()=>respondGm08(false),p.display_ms);}
+async function respondGm08(responded){if(!gm08.accepting)return;gm08.accepting=false;clearTimeout(gm08.timer);const reaction=responded?performance.now()-gm08.shownAt:null;setHidden(el.gm08Stimulus,true);const p=await fetchJson("/api/games/gm08/answer",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({session_id:gm08.sessionId,responded,reaction_ms:reaction,timestamp_ms:Date.now()})});if(!p.finished){showGm08Trial(p);return;}setHidden(el.gm08Result,false);setText(el.gm08ResultText,`Ошибок: ${p.metrics.u07_error_count}.`);}
+async function startGm08(){showGm08Trial(await fetchJson("/api/games/gm08/start",{method:"POST"}));}
+function openGm08(){gm08.token++;setHidden(el.gm08Stimulus,true);setHidden(el.gm08Result,true);setHidden(el.gm08Intro,false);setHidden(el.gm08Panel,false);}
+function closeGm08(){gm08.token++;gm08.accepting=false;clearTimeout(gm08.timer);setHidden(el.gm08Panel,true);openTrainingMenu();}
+
+const gm12={sessionId:"",accepting:false};
+function renderGm12(p){gm12.sessionId=p.session_id;gm12.accepting=true;setText(el.gm12Progress,`Задание ${p.trial} из ${p.trial_count}`);setText(el.gm12Picture,p.picture);el.gm12Options.replaceChildren(...p.choices.map(word=>{const b=document.createElement("button");b.className="game-option-new";b.textContent=word;b.onclick=()=>answerGm12(word);return b;}));setHidden(el.gm12Intro,true);setHidden(el.gm12Result,true);setHidden(el.gm12Play,false);}
+async function answerGm12(word){if(!gm12.accepting)return;gm12.accepting=false;const p=await fetchJson("/api/games/gm12/answer",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({session_id:gm12.sessionId,selected_word:word,timestamp_ms:Date.now()})});if(!p.finished){renderGm12(p);return;}setHidden(el.gm12Play,true);setHidden(el.gm12Result,false);setText(el.gm12ResultText,`Правильных ответов: ${Math.round((p.metrics.u01_correct_action_rate||0)*100)}%.`);}
+async function startGm12(){renderGm12(await fetchJson("/api/games/gm12/start",{method:"POST"}));} function openGm12(){setHidden(el.gm12Play,true);setHidden(el.gm12Result,true);setHidden(el.gm12Intro,false);setHidden(el.gm12Panel,false);} function closeGm12(){setHidden(el.gm12Panel,true);openTrainingMenu();}
+
+const gm23={sessionId:"",accepting:false}; const gm23Chars={star:"★",triangle:"▲",heart:"♥"};
+function gm23Element(item){const n=document.createElement("span");if(!item){n.textContent="?";n.className="gm23-symbol is-missing";}else{n.textContent=gm23Chars[item.symbol];n.className=`gm23-symbol is-${item.style}`;}return n;}
+function renderGm23(p){gm23.sessionId=p.session_id;gm23.accepting=true;setText(el.gm23Progress,`Матрица ${p.trial} из ${p.trial_count}`);el.gm23Matrix.replaceChildren(...p.matrix.map(gm23Element));el.gm23Options.replaceChildren(...p.options.map(item=>{const b=document.createElement("button");b.className="gm23-option";b.appendChild(gm23Element(item));b.onclick=()=>answerGm23(item.id);return b;}));setHidden(el.gm23Intro,true);setHidden(el.gm23Result,true);setHidden(el.gm23Play,false);}
+async function answerGm23(id){if(!gm23.accepting)return;gm23.accepting=false;const p=await fetchJson("/api/games/gm23/answer",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({session_id:gm23.sessionId,selected_id:id,timestamp_ms:Date.now()})});if(!p.finished){renderGm23(p);return;}setHidden(el.gm23Play,true);setHidden(el.gm23Result,false);setText(el.gm23ResultText,`Правильных ответов: ${Math.round((p.metrics.u01_correct_action_rate||0)*100)}%.`);}
+async function startGm23(){renderGm23(await fetchJson("/api/games/gm23/start",{method:"POST"}));} function openGm23(){setHidden(el.gm23Play,true);setHidden(el.gm23Result,true);setHidden(el.gm23Intro,false);setHidden(el.gm23Panel,false);} function closeGm23(){setHidden(el.gm23Panel,true);openTrainingMenu();}
+
+const gm19={sessionId:"",maze:null,path:[],drawing:false,errors:0,shownAt:0,startedAt:0,lastRejected:""};
+function drawGm19(){const c=el.gm19Canvas,ctx=c.getContext("2d"),m=gm19.maze,size=m.size,cell=c.width/size;ctx.clearRect(0,0,c.width,c.height);ctx.fillStyle="#f7fafb";ctx.fillRect(0,0,c.width,c.height);ctx.strokeStyle="#17212b";ctx.lineWidth=4;ctx.beginPath();for(let y=0;y<size;y++)for(let x=0;x<size;x++){const w=m.walls[y][x],x0=x*cell,y0=y*cell;if(w.n){ctx.moveTo(x0,y0);ctx.lineTo(x0+cell,y0);}if(w.w){ctx.moveTo(x0,y0);ctx.lineTo(x0,y0+cell);}if(y===size-1&&w.s){ctx.moveTo(x0,y0+cell);ctx.lineTo(x0+cell,y0+cell);}if(x===size-1&&w.e){ctx.moveTo(x0+cell,y0);ctx.lineTo(x0+cell,y0+cell);}}ctx.stroke();if(gm19.path.length){ctx.strokeStyle="#38a9c7";ctx.lineWidth=8;ctx.lineCap="round";ctx.beginPath();gm19.path.forEach(([x,y],i)=>{const px=(x+.5)*cell,py=(y+.5)*cell;i?ctx.lineTo(px,py):ctx.moveTo(px,py);});ctx.stroke();}for(const [pos,color] of [[m.start,"#24a66f"],[m.finish,"#d83a48"]]){ctx.fillStyle=color;ctx.beginPath();ctx.arc((pos[0]+.5)*cell,(pos[1]+.5)*cell,cell*.22,0,Math.PI*2);ctx.fill();}}
+function renderGm19(p){gm19.sessionId=p.session_id;gm19.maze=p;gm19.path=[];gm19.drawing=false;gm19.errors=0;gm19.lastRejected="";gm19.shownAt=performance.now();el.gm19Canvas.width=720;el.gm19Canvas.height=720;setText(el.gm19Progress,`Лабиринт ${p.maze} из ${p.maze_count}`);setText(el.gm19Instruction,"Начните с зелёной точки и не отпускайте кнопку до финиша.");setHidden(el.gm19Intro,true);setHidden(el.gm19Result,true);setHidden(el.gm19Canvas,false);drawGm19();}
+function gm19Cell(event){const r=el.gm19Canvas.getBoundingClientRect();return [Math.max(0,Math.min(gm19.maze.size-1,Math.floor((event.clientX-r.left)/r.width*gm19.maze.size))),Math.max(0,Math.min(gm19.maze.size-1,Math.floor((event.clientY-r.top)/r.height*gm19.maze.size)))];}
+function gm19CanMove(a,b){const [x,y]=a,[nx,ny]=b,dx=nx-x,dy=ny-y;const d=dx===1&&dy===0?"e":dx===-1&&dy===0?"w":dx===0&&dy===1?"s":dx===0&&dy===-1?"n":null;return d&&!gm19.maze.walls[y][x][d];}
+async function finishGm19(){gm19.drawing=false;const execution=performance.now()-gm19.startedAt;const p=await fetchJson("/api/games/gm19/answer",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({session_id:gm19.sessionId,path:gm19.path,boundary_errors:gm19.errors,planning_ms:gm19.startedAt-gm19.shownAt,execution_ms:execution,timestamp_ms:Date.now()})});if(!p.finished){renderGm19(p);return;}setHidden(el.gm19Canvas,true);setHidden(el.gm19Result,false);setText(el.gm19ResultText,`Выходов за границы: ${p.metrics.v03_boundary_exits}.`);}
+async function startGm19(){renderGm19(await fetchJson("/api/games/gm19/start",{method:"POST"}));} function openGm19(){setHidden(el.gm19Canvas,true);setHidden(el.gm19Result,true);setHidden(el.gm19Intro,false);setHidden(el.gm19Panel,false);} function closeGm19(){gm19.drawing=false;setHidden(el.gm19Panel,true);openTrainingMenu();}
+
+const gameDomainLabels = {
+  memory: "Память",
+  attention: "Внимание",
+  speech: "Речь",
+  abstraction: "Абстракция",
+  executive: "Исполнительные навыки",
+};
+let gameCatalog = [];
+let dynamicGameCleanup = null;
+
+async function loadGameCatalog() {
+  if (!el.trainingGameList) return;
+  gameCatalog = await fetchJson("/api/games/catalog");
+  el.trainingGameList.replaceChildren();
+  for (const definition of gameCatalog.filter(item => item.implemented)) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "menu-item";
+    button.dataset.trainingGame = definition.code.toLowerCase().replace("-", "");
+    const title = document.createElement("strong");
+    title.textContent = `${definition.code} · ${definition.title}`;
+    const domain = document.createElement("span");
+    domain.textContent = gameDomainLabels[definition.primary_domain] || definition.primary_domain;
+    button.append(title, domain);
+    el.trainingGameList.append(button);
+  }
+}
+
+function closeDynamicGame() {
+  if (typeof dynamicGameCleanup === "function") dynamicGameCleanup();
+  dynamicGameCleanup = null;
+  if (el.dynamicGameHost) el.dynamicGameHost.replaceChildren();
+  setHidden(el.dynamicGamePanel, true);
+  openTrainingMenu();
+}
+
+async function openDynamicGame(game) {
+  const definition = gameCatalog.find(
+    item => item.code.toLowerCase().replace("-", "") === game
+  );
+  if (!definition || !el.dynamicGameHost || !el.dynamicGamePanel) return;
+  const renderer = await import(`/api/games/${encodeURIComponent(definition.code)}/renderer.js`);
+  if (typeof renderer.mount !== "function") {
+    throw new Error(`Модуль ${definition.code} не экспортирует mount()`);
+  }
+  el.dynamicGameHost.replaceChildren();
+  setHidden(el.dynamicGamePanel, false);
+  const api = {
+    start: () => fetchJson(`/api/games/${encodeURIComponent(definition.code)}/start`, { method: "POST" }),
+    answer: payload => fetchJson(`/api/games/${encodeURIComponent(definition.code)}/answer`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
+  };
+  dynamicGameCleanup = await renderer.mount({
+    container: el.dynamicGameHost,
+    definition,
+    api,
+    close: closeDynamicGame,
+  });
+}
+
 function openTrainingMenu() {
   setHidden(el.trainingMenu, false);
 }
@@ -2774,16 +2888,25 @@ function closeTrainingMenu() {
   setHidden(el.trainingMenu, true);
 }
 
-function openTrainingGame(game) {
+async function openTrainingGame(game) {
   closeTrainingMenu();
   const openers = {
     gm02: openGm02,
+    gm05: openGm05,
     gm07: openGm07,
+    gm08: openGm08,
+    gm12: openGm12,
     gm14: openGm14,
     gm17: openGm17,
+    gm19: openGm19,
     gm20: openGm20,
+    gm23: openGm23,
   };
-  if (openers[game]) openers[game]();
+  if (openers[game]) {
+    openers[game]();
+    return;
+  }
+  await openDynamicGame(game);
 }
 
 async function openMainMenu() {
@@ -2883,11 +3006,13 @@ function bindMainMenuEvents() {
     if (event.target === el.trainingMenu) {
       closeTrainingMenu();
       openMainMenu();
+      return;
     }
+    const item = event.target.closest("[data-training-game]");
+    if (item) openTrainingGame(item.dataset.trainingGame).catch(error => {
+      setText(el.messageValue, `Не удалось открыть игру: ${error.message || error}`);
+    });
   });
-  for (const item of document.querySelectorAll("[data-training-game]")) {
-    item.addEventListener("click", () => openTrainingGame(item.dataset.trainingGame));
-  }
   el.gm02Start && el.gm02Start.addEventListener("click", () => startGm02().catch(error => {
     setText(el.gm02Instruction, `Не удалось начать игру: ${error.message || error}`);
   }));
@@ -2930,6 +3055,21 @@ function bindMainMenuEvents() {
     setText(el.gm20Instruction, `Не удалось начать игру: ${error.message || error}`);
   }));
   el.gm20Close && el.gm20Close.addEventListener("click", closeGm20);
+  el.gm05Start && el.gm05Start.addEventListener("click", () => startGm05().catch(error => setText(el.gm05Instruction, error.message)));
+  el.gm05Restart && el.gm05Restart.addEventListener("click", () => startGm05().catch(error => setText(el.gm05Instruction, error.message)));
+  el.gm05Submit && el.gm05Submit.addEventListener("click", () => submitGm05().catch(error => setText(el.gm05Instruction, error.message)));
+  el.gm05Close && el.gm05Close.addEventListener("click", closeGm05);
+  el.gm08Start && el.gm08Start.addEventListener("click", () => startGm08().catch(error => setText(el.gm08Instruction, error.message)));
+  el.gm08Restart && el.gm08Restart.addEventListener("click", () => startGm08().catch(error => setText(el.gm08Instruction, error.message)));
+  el.gm08Stimulus && el.gm08Stimulus.addEventListener("click", () => respondGm08(true).catch(error => setText(el.gm08Instruction, error.message)));
+  el.gm08Close && el.gm08Close.addEventListener("click", closeGm08);
+  document.addEventListener("keydown", event => { if (event.code === "Space" && el.gm08Panel && !el.gm08Panel.hidden) { event.preventDefault(); respondGm08(true).catch(error => setText(el.gm08Instruction, error.message)); } });
+  el.gm12Start && el.gm12Start.addEventListener("click", () => startGm12()); el.gm12Restart && el.gm12Restart.addEventListener("click", () => startGm12()); el.gm12Close && el.gm12Close.addEventListener("click", closeGm12);
+  el.gm23Start && el.gm23Start.addEventListener("click", () => startGm23()); el.gm23Restart && el.gm23Restart.addEventListener("click", () => startGm23()); el.gm23Close && el.gm23Close.addEventListener("click", closeGm23);
+  el.gm19Start && el.gm19Start.addEventListener("click", () => startGm19()); el.gm19Restart && el.gm19Restart.addEventListener("click", () => startGm19()); el.gm19Close && el.gm19Close.addEventListener("click", closeGm19);
+  el.gm19Canvas && el.gm19Canvas.addEventListener("pointerdown", event => { const cell=gm19Cell(event); if(cell[0]!==0||cell[1]!==0)return; gm19.drawing=true;gm19.path=[[0,0]];gm19.startedAt=performance.now();el.gm19Canvas.setPointerCapture(event.pointerId);drawGm19(); });
+  el.gm19Canvas && el.gm19Canvas.addEventListener("pointermove", event => { if(!gm19.drawing)return;const cell=gm19Cell(event),last=gm19.path[gm19.path.length-1];if(cell[0]===last[0]&&cell[1]===last[1]){gm19.lastRejected="";return;}if(gm19CanMove(last,cell)){gm19.lastRejected="";gm19.path.push(cell);drawGm19();if(cell[0]===gm19.maze.size-1&&cell[1]===gm19.maze.size-1)finishGm19().catch(error=>setText(el.gm19Instruction,error.message));}else{const key=cell.join(",");if(key!==gm19.lastRejected){gm19.errors++;gm19.lastRejected=key;}} });
+  el.gm19Canvas && el.gm19Canvas.addEventListener("pointerup", () => { if(gm19.drawing){gm19.drawing=false;gm19.path=[];gm19.errors++;setText(el.gm19Instruction,"Кнопка отпущена до финиша. Начните снова с зелёной точки.");drawGm19();} });
   el.mainMenu && el.mainMenu.addEventListener("click", (event) => {
     if (event.target === el.mainMenu) closeMainMenu();
   });
@@ -4551,6 +4691,11 @@ async function bootstrap() {
   updateClockDisplay();
   window.setInterval(updateClockDisplay, 1000);
   await loadConfig();
+  try {
+    await loadGameCatalog();
+  } catch (error) {
+    appendLogLine(`[games] catalog unavailable: ${error.message || error}`);
+  }
   try {
     await loadDevices();
   } catch (error) {

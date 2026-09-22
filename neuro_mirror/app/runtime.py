@@ -25,11 +25,7 @@ from neuro_mirror.plugins.video_analysis.plugin import VisionWorkerPlugin
 from neuro_mirror.plugins.voice_test.plugin import VoiceTestPlugin
 from neuro_mirror.plugins.moca_test.plugin import MocaTestPlugin
 from neuro_mirror.plugins.hads_test.plugin import HadsTestPlugin
-from neuro_mirror.plugins.gm02_sequence.plugin import Gm02SequencePlugin
-from neuro_mirror.plugins.gm07_target_search.plugin import Gm07TargetSearchPlugin
-from neuro_mirror.plugins.gm14_word_builder.plugin import Gm14WordBuilderPlugin
-from neuro_mirror.plugins.gm17_mental_rotation.plugin import Gm17MentalRotationPlugin
-from neuro_mirror.plugins.gm20_rule_sorting.plugin import Gm20RuleSortingPlugin
+from neuro_mirror.plugins.games.registry import iter_game_plugins
 
 
 @dataclass(slots=True)
@@ -117,11 +113,8 @@ def create_runtime(
     plugin_manager.register(VoiceTestPlugin(bus, settings=settings))
     plugin_manager.register(MocaTestPlugin(bus, settings=settings, dataset_store=dataset_store))
     plugin_manager.register(HadsTestPlugin(bus, settings=settings, dataset_store=dataset_store))
-    plugin_manager.register(Gm02SequencePlugin(bus))
-    plugin_manager.register(Gm07TargetSearchPlugin(bus))
-    plugin_manager.register(Gm14WordBuilderPlugin(bus))
-    plugin_manager.register(Gm17MentalRotationPlugin(bus))
-    plugin_manager.register(Gm20RuleSortingPlugin(bus))
+    for game_plugin in iter_game_plugins(bus):
+        plugin_manager.register(game_plugin)
     plugin_manager.register(
         AggregatorPlugin(
             bus,
