@@ -13,6 +13,7 @@ import os
 import tempfile
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -43,6 +44,8 @@ from neuro_mirror.plugins.games.registry import (
     get_available_game_definition,
     implemented_game_codes,
 )
+from neuro_mirror.plugins.games.contracts import Domain, normalise_game_code
+from neuro_mirror.plugins.games.selector import NoEligibleGameError, select_game
 from neuro_mirror.plugins.ui.web_plugin import WebUIPlugin, WebUIStateStore
 from neuro_mirror.plugins.user_progress.plugin import UserProgressPlugin
 from neuro_mirror.version import APP_VERSION, SCENARIO_VERSIONS
@@ -112,6 +115,12 @@ class SessionFrameIn(BaseModel):
     image_base64: str
 
 
+class GameSelectionIn(BaseModel):
+    domain: str
+    session_game_codes: list[str] = Field(default_factory=list)
+    session_stimulus_sets: list[list[str]] = Field(default_factory=list)
+
+
 # ---- Minimal application context ----
 
 @dataclass(slots=True)
@@ -158,6 +167,7 @@ async def _wait_for_camera_release(
 
 def create_app() -> FastAPI:
     static_dir = Path(__file__).resolve().parent / "static"
+    game_assets_dir = Path(__file__).resolve().parents[1] / "plugins" / "games" / "assets"
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -194,6 +204,7 @@ def create_app() -> FastAPI:
 
     app = FastAPI(title="Neuro Mirror Web", lifespan=lifespan)
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+    app.mount("/game-assets", StaticFiles(directory=str(game_assets_dir)), name="game-assets")
 
     def _active_user_or_400() -> dict[str, Any]:
         ctx: WebAppContext = app.state.context
@@ -264,6 +275,42 @@ def create_app() -> FastAPI:
             [item.to_public_dict(implemented=item.code in implemented) for item in all_game_definitions()]
         )
 
+    @app.post("/api/games/select")
+    async def select_training_game(payload: GameSelectionIn) -> JSONResponse:
+        active_user = _active_user_or_400()
+        try:
+            domain = Domain(payload.domain.strip().lower())
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Неизвестный ведущий домен.") from exc
+
+        stimulus_sets = {
+            (normalise_game_code(item[0]), str(item[1]))
+            for item in payload.session_stimulus_sets
+            if len(item) == 2
+        }
+        try:
+            decision = select_game(
+                domain,
+                session_game_codes=frozenset(
+                    normalise_game_code(code) for code in payload.session_game_codes
+                ),
+                session_stimulus_sets=frozenset(stimulus_sets),
+                history=app.state.context.runtime.game_history_store.for_user(
+                    str(active_user.get("id") or "")
+                ),
+                available_codes=implemented_game_codes(),
+                definitions=all_game_definitions(),
+            )
+        except NoEligibleGameError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return JSONResponse(
+            {
+                "game": decision.game.to_public_dict(implemented=True),
+                "stimulus_set": decision.stimulus_set,
+                "reasons": list(decision.reasons),
+            }
+        )
+
     @app.get("/api/games/{game_code}/renderer.js")
     async def game_renderer(game_code: str) -> FileResponse:
         try:
@@ -283,9 +330,11 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         if definition.code not in implemented_game_codes():
             raise HTTPException(status_code=501, detail="Игра присутствует в каталоге, но ещё не реализована.")
+        active_user = _active_user_or_400()
         return await _game_request(
             definition.start_request_topic,
             f"web.game.{definition.topic_prefix}",
+            {"user_id": str(active_user.get("id") or "")},
         )
 
     @app.post("/api/games/{game_code}/answer")
@@ -477,6 +526,40 @@ def create_app() -> FastAPI:
         items = reply.get("items") or []
         items.sort(key=lambda item: str(item.get("stored_at") or ""), reverse=True)
         return JSONResponse({"user": _serialize_user(active), "items": items})
+
+    @app.get("/api/results/games/export")
+    async def export_game_results() -> JSONResponse:
+        """Download only training-game reports belonging to the active user."""
+        ctx: WebAppContext = app.state.context
+        active = _active_user_or_400()
+        try:
+            reply = await ctx.runtime.bus.request(
+                Event(
+                    topic=Topics.REQ_STORAGE_QUERY,
+                    source="web.results.games_export",
+                    payload={"user_id": active["id"]},
+                ),
+                timeout=10.0,
+            )
+        except asyncio.TimeoutError:
+            raise HTTPException(status_code=504, detail="Хранилище не ответило.")
+
+        games = [
+            item
+            for item in (reply.get("items") or [])
+            if item.get("report_type") == "training_game"
+        ]
+        games.sort(key=lambda item: str(item.get("stored_at") or ""), reverse=True)
+        return JSONResponse(
+            {
+                "user_id": str(active.get("id") or ""),
+                "exported_at": datetime.now(UTC).isoformat(),
+                "game_results": games,
+            },
+            headers={
+                "Content-Disposition": 'attachment; filename="game-results.json"',
+            },
+        )
 
     @app.get("/api/sessions/incomplete")
     async def incomplete_sessions() -> JSONResponse:
@@ -954,7 +1037,10 @@ def create_app() -> FastAPI:
         return JSONResponse({"reply": result.get("reply", ""), "backend": result.get("backend", "")})
 
     @app.post("/api/speech/transcribe")
-    async def speech_transcribe(audio: UploadFile = File(...)) -> JSONResponse:
+    async def speech_transcribe(
+        audio: UploadFile = File(...),
+        assistant: bool = True,
+    ) -> JSONResponse:
         ctx: WebAppContext = app.state.context
         _require_consent("audio")
         suffix = Path(audio.filename or "voice.webm").suffix or ".webm"
@@ -993,6 +1079,17 @@ def create_app() -> FastAPI:
             })
 
         transcript = stt_result.get("transcript", "")
+
+        if not assistant:
+            return JSONResponse(
+                {
+                    "accepted": True,
+                    "transcript": transcript,
+                    "raw_transcript": stt_result.get("raw_transcript", ""),
+                    "stt_model": stt_result.get("model", stt_result.get("stt_model", "")),
+                    "stt_device": stt_result.get("device", stt_result.get("stt_device", "")),
+                }
+            )
 
         # Step 2: feed transcript to AIAssistantPlugin
         try:

@@ -26,6 +26,8 @@ from neuro_mirror.plugins.voice_test.plugin import VoiceTestPlugin
 from neuro_mirror.plugins.moca_test.plugin import MocaTestPlugin
 from neuro_mirror.plugins.hads_test.plugin import HadsTestPlugin
 from neuro_mirror.plugins.games.registry import iter_game_plugins
+from neuro_mirror.plugins.games.coordinator import GameSessionCoordinator
+from neuro_mirror.plugins.games.history import GameHistoryStore
 
 
 @dataclass(slots=True)
@@ -37,6 +39,7 @@ class RuntimeHandle:
     assistant_backend_label: str
     session_store: SessionStore
     dataset_store: DatasetStore
+    game_history_store: GameHistoryStore
 
     async def start(self) -> None:
         await self.plugin_manager.start_all()
@@ -101,6 +104,7 @@ def create_runtime(
     )
     session_store = SessionStore()
     dataset_store = DatasetStore()
+    game_history_store = GameHistoryStore()
 
     plugin_manager.register(DeviceManager(bus, settings=settings))
     plugin_manager.register(StoragePlugin(bus))
@@ -115,6 +119,13 @@ def create_runtime(
     plugin_manager.register(HadsTestPlugin(bus, settings=settings, dataset_store=dataset_store))
     for game_plugin in iter_game_plugins(bus):
         plugin_manager.register(game_plugin)
+    plugin_manager.register(
+        GameSessionCoordinator(
+            bus,
+            session_store=session_store,
+            history_store=game_history_store,
+        )
+    )
     plugin_manager.register(
         AggregatorPlugin(
             bus,
@@ -146,4 +157,5 @@ def create_runtime(
         assistant_backend_label=assistant_backend_label,
         session_store=session_store,
         dataset_store=dataset_store,
+        game_history_store=game_history_store,
     )

@@ -11,7 +11,6 @@ class Domain(StrEnum):
     ATTENTION = "attention"
     SPEECH = "speech"
     ABSTRACTION = "abstraction"
-    EXECUTIVE = "executive"
 
 
 class Modality(StrEnum):

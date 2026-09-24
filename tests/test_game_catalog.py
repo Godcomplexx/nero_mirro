@@ -85,6 +85,26 @@ def test_selector_does_not_repeat_form_and_prefers_new_mechanic() -> None:
     assert "форма не повторяется в занятии" in decision.reasons
 
 
+def test_selector_accepts_future_game_definitions() -> None:
+    custom = GameDefinition(
+        code="GM-FUTURE-01",
+        slug="future_game",
+        title="Будущая игра",
+        domains=(Domain.MEMORY,),
+        mechanics=("new_mechanic",),
+        modalities=(Modality.VISUAL,),
+        response_type=ResponseType.CLICK,
+        stimulus_sets=("future-set",),
+    )
+    decision = select_game(
+        Domain.MEMORY,
+        available_codes=frozenset({custom.code}),
+        definitions=(custom,),
+    )
+    assert decision.game.code == custom.code
+    assert decision.stimulus_set == "future-set"
+
+
 def test_presentation_history_round_trip(tmp_path) -> None:
     store = GameHistoryStore(tmp_path / "history.json")
     store.record(

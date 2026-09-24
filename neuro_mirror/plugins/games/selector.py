@@ -35,6 +35,7 @@ def select_game(
     session_stimulus_sets: frozenset[tuple[str, str]] = frozenset(),
     history: tuple[Presentation, ...] = (),
     available_codes: frozenset[str] | None = None,
+    definitions: tuple[GameDefinition, ...] = GAME_CATALOG,
 ) -> SelectionDecision:
     """Select without repeating a form; preferences are compared lexicographically.
 
@@ -42,7 +43,7 @@ def select_game(
     Mechanic alternation, modality alternation and prior exposure are ordered,
     observable conditions with a stable game-code tie breaker.
     """
-    candidates = [item for item in GAME_CATALOG if item.primary_domain == primary_domain]
+    candidates = [item for item in definitions if item.primary_domain == primary_domain]
     if available_codes is not None:
         candidates = [item for item in candidates if item.code in available_codes]
     candidates = [item for item in candidates if item.code not in session_game_codes]

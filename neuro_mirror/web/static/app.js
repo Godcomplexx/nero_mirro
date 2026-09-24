@@ -1594,6 +1594,7 @@ async function _hadsPlayTts(text, ttsId) {
 // ---- «Мои результаты» ----
 
 const REPORT_TYPE_LABELS = {
+  training_game: "Тренировка",
   screening: "Базовая проверка",
   hads: "Тест на тревожность",
   moca: "Тест MoCA",
@@ -1687,15 +1688,34 @@ function renderResults(items) {
 
   // Only medically meaningful records (tests with numbers)
   const testItems = items.filter((item) => extractResultMetrics(item).length > 0);
+  const gameItems = items.filter((item) => item.report_type === "training_game");
 
-  if (testItems.length === 0) {
+  if (testItems.length === 0 && gameItems.length === 0) {
     el.resultsList.innerHTML =
       '<p class="placeholder-text">Результатов пока нет. Пройдите проверку — они появятся здесь.</p>';
     return;
   }
 
-  const cards = testItems.map((item, index) => {
-    const typeLabel = REPORT_TYPE_LABELS[item.report_type] || item.report_type || "Проверка";
+  const cards = [];
+  if (gameItems.length > 0) {
+    cards.push(`
+      <article class="result-card result-game-export">
+        <div class="result-card-head">
+          <strong>Результаты игр</strong>
+          <span class="result-date mono">Пройдено игр: ${gameItems.length}</span>
+        </div>
+        <p class="result-note">Подробные игровые попытки, ответы и показатели доступны в отдельном JSON-файле.</p>
+        <a class="icon-btn primary-btn" href="/api/results/games/export" download="game-results.json">
+          <span>Скачать результаты игр в JSON</span>
+        </a>
+      </article>`);
+  }
+
+  cards.push(...testItems.map((item, index) => {
+    const baseTypeLabel = REPORT_TYPE_LABELS[item.report_type] || item.report_type || "Проверка";
+    const typeLabel = item.report_type === "training_game" && item.game_title
+      ? `${baseTypeLabel}: ${item.game_title}`
+      : baseTypeLabel;
     const dateLabel = formatResultDate(item.stored_at);
     const metricTiles = extractResultMetrics(item).map((metric) => {
       const previous = findPreviousMetric(testItems, index, item.report_type, metric.key);
@@ -1718,7 +1738,7 @@ function renderResults(items) {
         <div class="result-metrics">${metricTiles}</div>
         ${note ? `<p class="result-note">${escapeHtml(note)}</p>` : ""}
       </article>`;
-  });
+  }));
 
   el.resultsList.innerHTML = cards.join("");
 }
@@ -2822,7 +2842,6 @@ const gameDomainLabels = {
   attention: "Внимание",
   speech: "Речь",
   abstraction: "Абстракция",
-  executive: "Исполнительные навыки",
 };
 let gameCatalog = [];
 let dynamicGameCleanup = null;
@@ -2837,7 +2856,7 @@ async function loadGameCatalog() {
     button.className = "menu-item";
     button.dataset.trainingGame = definition.code.toLowerCase().replace("-", "");
     const title = document.createElement("strong");
-    title.textContent = `${definition.code} · ${definition.title}`;
+    title.textContent = definition.title;
     const domain = document.createElement("span");
     domain.textContent = gameDomainLabels[definition.primary_domain] || definition.primary_domain;
     button.append(title, domain);

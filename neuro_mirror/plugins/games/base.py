@@ -35,7 +35,37 @@ class BrowserGamePlugin(Plugin):
         checkpoint = result.get("checkpoint")
         if isinstance(checkpoint, dict):
             await self.bus.publish(
-                Event(topic=Topics.SESSION_CHECKPOINT, source=self.name, payload=checkpoint)
+                Event(topic=Topics.GAME_SESSION_CHECKPOINT, source=self.name, payload=checkpoint)
+            )
+        if is_start and result.get("ok") and result.get("session_id"):
+            await self.bus.publish(
+                Event(
+                    topic=Topics.GAME_SESSION_STARTED,
+                    source=self.name,
+                    payload={
+                        "game_session_id": str(result["session_id"]),
+                        "game_code": self.definition.code,
+                        "user_id": str(event.payload.get("user_id") or ""),
+                        "stimulus_set": str(
+                            event.payload.get("stimulus_set")
+                            or (
+                                self.definition.stimulus_sets[0]
+                                if self.definition.stimulus_sets
+                                else ""
+                            )
+                        ),
+                        "difficulty_level": event.payload.get("difficulty_level"),
+                    },
+                )
+            )
+        report = result.get("report")
+        if isinstance(report, dict):
+            await self.bus.publish(
+                Event(
+                    topic=Topics.GAME_SESSION_COMPLETED,
+                    source=self.name,
+                    payload=deepcopy(report),
+                )
             )
         result["_reply_to"] = request_id
         result.setdefault("game_code", self.definition.code)
@@ -97,7 +127,21 @@ class BrowserGamePlugin(Plugin):
         answer_keys = {
             key for key in raw
             if key.startswith("selected")
-            or key in {"clicks", "assembled", "placements", "path", "responded", "boundary_errors"}
+            or key in {
+                "answer",
+                "assembled",
+                "boundary_errors",
+                "clicks",
+                "invalid_words",
+                "path",
+                "placements",
+                "recognized",
+                "repetitions",
+                "responded",
+                "tokens",
+                "transcript",
+                "valid_words",
+            }
         }
         time_keys = {
             key for key in raw

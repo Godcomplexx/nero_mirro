@@ -1,0 +1,8 @@
+"""Difficulty configuration for GM-04."""
+
+STIMULUS_SET_VERSION = "1"
+ROUNDS = 10
+GRID_SIZE = 4
+MIN_TARGETS = 3
+MAX_TARGETS = 5
+STUDY_SECONDS = 3
