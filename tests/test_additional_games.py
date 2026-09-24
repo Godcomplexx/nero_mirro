@@ -8,6 +8,7 @@ from neuro_mirror.models.events import Event, Topics
 from neuro_mirror.plugins.games.gm05_word_list.plugin import Gm05WordListPlugin
 from neuro_mirror.plugins.games.gm08_stop_signal.plugin import Gm08StopSignalPlugin
 from neuro_mirror.plugins.games.gm12_word_picture.plugin import Gm12WordPicturePlugin
+from neuro_mirror.plugins.games.gm12_word_picture.stimuli import ITEMS as GM12_ITEMS
 from neuro_mirror.plugins.games.gm19_maze.plugin import DIRS, Gm19MazePlugin
 from neuro_mirror.plugins.games.gm23_matrix_reasoning.plugin import Gm23MatrixReasoningPlugin
 
@@ -51,11 +52,11 @@ def test_new_game_plugins_complete() -> None:
             Gm12WordPicturePlugin(bus), Topics.REQ_GM12_START, Topics.REQ_GM12_ANSWER,
             lambda plugin, reply: {"session_id": reply["session_id"],
                                    "selected_word": plugin._sessions[reply["session_id"]].order[plugin._sessions[reply["session_id"]].index][1],
-                                   "timestamp_ms": 1}, 10,
+                                   "timestamp_ms": 1}, len(GM12_ITEMS),
         )
-        assert gm12_result["checkpoint"]["next_index"] == 10
-        assert len(gm12_result["report"]["trials"]) == 10
-        assert all(record["valid"] for record in gm12_result["report"]["trials"])
+        assert gm12_result["checkpoint"]["next_index"] == len(GM12_ITEMS)
+        assert len(gm12_result["report"]["trials"]) == len(GM12_ITEMS)
+        assert all(record["valid"] is None for record in gm12_result["report"]["trials"])
 
         bus = EventBus()
         await _run_plugin(

@@ -146,71 +146,6 @@ const el = {
   trainingGameList: $("training-game-list"),
   dynamicGamePanel: $("dynamic-game-panel"),
   dynamicGameHost: $("dynamic-game-host"),
-  gm02Panel: $("gm02-panel"),
-  gm02Grid: $("gm02-grid"),
-  gm02Intro: $("gm02-intro"),
-  gm02Start: $("gm02-start"),
-  gm02Restart: $("gm02-restart"),
-  gm02Close: $("gm02-close"),
-  gm02Round: $("gm02-round"),
-  gm02Instruction: $("gm02-instruction"),
-  gm02Result: $("gm02-result"),
-  gm02ResultTitle: $("gm02-result-title"),
-  gm02ResultText: $("gm02-result-text"),
-  gm07Panel: $("gm07-panel"),
-  gm07Grid: $("gm07-grid"),
-  gm07Intro: $("gm07-intro"),
-  gm07Play: $("gm07-play"),
-  gm07Start: $("gm07-start"),
-  gm07Restart: $("gm07-restart"),
-  gm07Close: $("gm07-close"),
-  gm07Absent: $("gm07-absent"),
-  gm07Progress: $("gm07-progress"),
-  gm07Instruction: $("gm07-instruction"),
-  gm07Result: $("gm07-result"),
-  gm07ResultText: $("gm07-result-text"),
-  gm14Panel: $("gm14-panel"),
-  gm14Slots: $("gm14-slots"),
-  gm14Bank: $("gm14-bank"),
-  gm14Intro: $("gm14-intro"),
-  gm14Play: $("gm14-play"),
-  gm14Start: $("gm14-start"),
-  gm14Restart: $("gm14-restart"),
-  gm14Close: $("gm14-close"),
-  gm14Progress: $("gm14-progress"),
-  gm14Instruction: $("gm14-instruction"),
-  gm14Result: $("gm14-result"),
-  gm14ResultText: $("gm14-result-text"),
-  gm17Panel: $("gm17-panel"),
-  gm17Sample: $("gm17-sample"),
-  gm17Choices: $("gm17-choices"),
-  gm17Intro: $("gm17-intro"),
-  gm17Play: $("gm17-play"),
-  gm17Start: $("gm17-start"),
-  gm17Restart: $("gm17-restart"),
-  gm17Close: $("gm17-close"),
-  gm17Progress: $("gm17-progress"),
-  gm17Instruction: $("gm17-instruction"),
-  gm17Result: $("gm17-result"),
-  gm17ResultText: $("gm17-result-text"),
-  gm20Panel: $("gm20-panel"),
-  gm20References: $("gm20-references"),
-  gm20Stimulus: $("gm20-stimulus"),
-  gm20Feedback: $("gm20-feedback"),
-  gm20Intro: $("gm20-intro"),
-  gm20Play: $("gm20-play"),
-  gm20Start: $("gm20-start"),
-  gm20Restart: $("gm20-restart"),
-  gm20Close: $("gm20-close"),
-  gm20Progress: $("gm20-progress"),
-  gm20Instruction: $("gm20-instruction"),
-  gm20Result: $("gm20-result"),
-  gm20ResultText: $("gm20-result-text"),
-  gm05Panel: $("gm05-panel"), gm05Intro: $("gm05-intro"), gm05Study: $("gm05-study"), gm05Choice: $("gm05-choice"), gm05Words: $("gm05-words"), gm05Start: $("gm05-start"), gm05Restart: $("gm05-restart"), gm05Submit: $("gm05-submit"), gm05Close: $("gm05-close"), gm05Progress: $("gm05-progress"), gm05Instruction: $("gm05-instruction"), gm05Result: $("gm05-result"), gm05ResultText: $("gm05-result-text"),
-  gm08Panel: $("gm08-panel"), gm08Intro: $("gm08-intro"), gm08Stimulus: $("gm08-stimulus"), gm08Start: $("gm08-start"), gm08Restart: $("gm08-restart"), gm08Close: $("gm08-close"), gm08Progress: $("gm08-progress"), gm08Instruction: $("gm08-instruction"), gm08Result: $("gm08-result"), gm08ResultText: $("gm08-result-text"),
-  gm12Panel: $("gm12-panel"), gm12Intro: $("gm12-intro"), gm12Play: $("gm12-play"), gm12Picture: $("gm12-picture"), gm12Options: $("gm12-options"), gm12Start: $("gm12-start"), gm12Restart: $("gm12-restart"), gm12Close: $("gm12-close"), gm12Progress: $("gm12-progress"), gm12Result: $("gm12-result"), gm12ResultText: $("gm12-result-text"),
-  gm23Panel: $("gm23-panel"), gm23Intro: $("gm23-intro"), gm23Play: $("gm23-play"), gm23Matrix: $("gm23-matrix"), gm23Options: $("gm23-options"), gm23Start: $("gm23-start"), gm23Restart: $("gm23-restart"), gm23Close: $("gm23-close"), gm23Progress: $("gm23-progress"), gm23Result: $("gm23-result"), gm23ResultText: $("gm23-result-text"),
-  gm19Panel: $("gm19-panel"), gm19Intro: $("gm19-intro"), gm19Canvas: $("gm19-canvas"), gm19Start: $("gm19-start"), gm19Restart: $("gm19-restart"), gm19Close: $("gm19-close"), gm19Progress: $("gm19-progress"), gm19Instruction: $("gm19-instruction"), gm19Result: $("gm19-result"), gm19ResultText: $("gm19-result-text"),
   resultsPanel: $("results-panel"),
   resultsList: $("results-list"),
   resultsSub: $("results-sub"),
@@ -2184,659 +2119,6 @@ function bindSessionCheckEvents() {
 
 // ---- Main menu ----
 
-const gm02 = {
-  sessionId: "",
-  sequence: [],
-  clicks: [],
-  acceptingInput: false,
-  playbackToken: 0,
-};
-
-function delay(ms) {
-  return new Promise(resolve => window.setTimeout(resolve, ms));
-}
-
-function buildGm02Grid() {
-  if (!el.gm02Grid || el.gm02Grid.children.length) return;
-  for (let cell = 0; cell < 9; cell += 1) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "gm02-cell";
-    button.dataset.cell = String(cell);
-    button.setAttribute("aria-label", `Клетка ${cell + 1}`);
-    button.addEventListener("click", () => handleGm02Cell(cell, button));
-    el.gm02Grid.appendChild(button);
-  }
-}
-
-async function showGm02Sequence() {
-  const token = ++gm02.playbackToken;
-  gm02.acceptingInput = false;
-  gm02.clicks = [];
-  setText(el.gm02Instruction, "Смотрите и запоминайте…");
-  await delay(500);
-  for (const cell of gm02.sequence) {
-    if (token !== gm02.playbackToken || !el.gm02Panel || el.gm02Panel.hidden) return;
-    const node = el.gm02Grid.children[cell];
-    node.classList.add("is-active");
-    await delay(430);
-    node.classList.remove("is-active");
-    await delay(180);
-  }
-  if (token !== gm02.playbackToken) return;
-  gm02.acceptingInput = true;
-  setText(el.gm02Instruction, "Теперь повторите последовательность.");
-}
-
-function applyGm02Round(payload) {
-  gm02.sessionId = payload.session_id;
-  gm02.sequence = payload.sequence || [];
-  gm02.clicks = [];
-  setText(el.gm02Round, `Раунд ${payload.round} из ${payload.max_rounds}`);
-  setHidden(el.gm02Intro, true);
-  setHidden(el.gm02Result, true);
-  setHidden(el.gm02Grid, false);
-  showGm02Sequence();
-}
-
-async function startGm02() {
-  gm02.playbackToken += 1;
-  gm02.acceptingInput = false;
-  const payload = await fetchJson("/api/games/gm02/start", { method: "POST" });
-  applyGm02Round(payload);
-}
-
-async function submitGm02Answer() {
-  gm02.acceptingInput = false;
-  const payload = await fetchJson("/api/games/gm02/answer", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ session_id: gm02.sessionId, clicks: gm02.clicks }),
-  });
-  if (!payload.finished) {
-    await delay(450);
-    applyGm02Round(payload);
-    return;
-  }
-
-  setHidden(el.gm02Grid, true);
-  setHidden(el.gm02Result, false);
-  const length = Number(payload.metrics?.m01_max_sequence_length || 0);
-  const completed = payload.reason === "level_complete";
-  setText(el.gm02ResultTitle, completed ? "Уровень пройден" : "Последовательность прервана");
-  setText(
-    el.gm02ResultText,
-    completed
-      ? "Вы успешно прошли все 10 раундов."
-      : `Максимальная длина последовательности: ${length}.`,
-  );
-  setText(el.gm02Instruction, completed ? "Задание выполнено." : "Первый неверный выбор завершает попытку.");
-}
-
-async function handleGm02Cell(cell, node) {
-  if (!gm02.acceptingInput) return;
-  const position = gm02.clicks.length;
-  gm02.clicks.push({ cell, timestamp_ms: Date.now() });
-  node.classList.add("is-pressed");
-  window.setTimeout(() => node.classList.remove("is-pressed"), 160);
-
-  if (cell !== gm02.sequence[position] || gm02.clicks.length === gm02.sequence.length) {
-    await submitGm02Answer();
-  }
-}
-
-function openGm02() {
-  buildGm02Grid();
-  gm02.playbackToken += 1;
-  gm02.acceptingInput = false;
-  gm02.sessionId = "";
-  gm02.sequence = [];
-  gm02.clicks = [];
-  setText(el.gm02Round, "Раунд 1 из 10");
-  setText(el.gm02Instruction, "Запомните порядок подсвечивания клеток и повторите его.");
-  setHidden(el.gm02Grid, true);
-  setHidden(el.gm02Result, true);
-  setHidden(el.gm02Intro, false);
-  setHidden(el.gm02Panel, false);
-}
-
-function closeGm02() {
-  gm02.playbackToken += 1;
-  gm02.acceptingInput = false;
-  setHidden(el.gm02Panel, true);
-  openTrainingMenu();
-}
-
-const gm07 = {
-  sessionId: "",
-  acceptingInput: false,
-  renderToken: 0,
-};
-
-function renderGm07Stimuli(stimuli) {
-  if (!el.gm07Grid) return;
-  el.gm07Grid.replaceChildren();
-  for (const stimulus of stimuli) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = `gm07-stimulus is-${stimulus.color}`;
-    button.dataset.stimulusId = stimulus.id;
-    button.setAttribute("aria-label", `${stimulus.color === "red" ? "Красная" : "Чёрная"} буква Т`);
-    const symbol = document.createElement("span");
-    symbol.textContent = stimulus.symbol;
-    symbol.style.transform = `rotate(${Number(stimulus.rotation) || 0}deg)`;
-    button.appendChild(symbol);
-    button.addEventListener("click", () => submitGm07Answer(stimulus.id).catch(error => {
-      setText(el.gm07Instruction, `Не удалось сохранить ответ: ${error.message || error}`);
-      gm07.acceptingInput = true;
-    }));
-    el.gm07Grid.appendChild(button);
-  }
-}
-
-async function applyGm07Trial(payload) {
-  const token = ++gm07.renderToken;
-  gm07.sessionId = payload.session_id;
-  gm07.acceptingInput = false;
-  setText(el.gm07Progress, `Проба ${payload.trial} из ${payload.trial_count}`);
-  setText(el.gm07Instruction, "Приготовьтесь…");
-  setHidden(el.gm07Intro, true);
-  setHidden(el.gm07Result, true);
-  setHidden(el.gm07Play, true);
-  await delay(400);
-  if (token !== gm07.renderToken || !el.gm07Panel || el.gm07Panel.hidden) return;
-  renderGm07Stimuli(payload.stimuli || []);
-  setHidden(el.gm07Play, false);
-  setText(el.gm07Instruction, "Нажмите на цель или выберите «Цели нет».");
-  gm07.acceptingInput = true;
-}
-
-async function startGm07() {
-  gm07.renderToken += 1;
-  gm07.acceptingInput = false;
-  const payload = await fetchJson("/api/games/gm07/start", { method: "POST" });
-  await applyGm07Trial(payload);
-}
-
-async function submitGm07Answer(selectedId) {
-  if (!gm07.acceptingInput) return;
-  gm07.acceptingInput = false;
-  const payload = await fetchJson("/api/games/gm07/answer", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      session_id: gm07.sessionId,
-      selected_id: selectedId,
-      timestamp_ms: Date.now(),
-    }),
-  });
-  if (!payload.finished) {
-    await applyGm07Trial(payload);
-    return;
-  }
-
-  setHidden(el.gm07Play, true);
-  setHidden(el.gm07Result, false);
-  const accuracy = Math.round(Number(payload.metrics?.u01_correct_action_rate || 0) * 100);
-  setText(el.gm07ResultText, `Правильных ответов: ${accuracy}%.`);
-  setText(el.gm07Instruction, "Все 10 проб завершены.");
-}
-
-function openGm07() {
-  gm07.renderToken += 1;
-  gm07.acceptingInput = false;
-  gm07.sessionId = "";
-  setText(el.gm07Progress, "Проба 1 из 10");
-  setText(el.gm07Instruction, "Запомните цель, которую нужно будет найти.");
-  setHidden(el.gm07Play, true);
-  setHidden(el.gm07Result, true);
-  setHidden(el.gm07Intro, false);
-  setHidden(el.gm07Panel, false);
-}
-
-function closeGm07() {
-  gm07.renderToken += 1;
-  gm07.acceptingInput = false;
-  setHidden(el.gm07Panel, true);
-  openTrainingMenu();
-}
-
-const gm14 = {
-  sessionId: "",
-  placementEvents: [],
-  submitting: false,
-  selectedTile: null,
-  renderToken: 0,
-};
-
-function gm14Location(tile) {
-  const parent = tile && tile.parentElement;
-  return parent?.classList.contains("gm14-slot")
-    ? `slot-${parent.dataset.slotIndex}`
-    : "bank";
-}
-
-function recordGm14Placement(tile, from, to) {
-  gm14.placementEvents.push({
-    tile_id: tile.dataset.tileId,
-    letter: tile.dataset.letter,
-    from,
-    to,
-    timestamp_ms: Date.now(),
-  });
-}
-
-function selectGm14Tile(tile) {
-  if (gm14.selectedTile) gm14.selectedTile.classList.remove("is-selected");
-  gm14.selectedTile = tile;
-  if (tile) tile.classList.add("is-selected");
-}
-
-function moveGm14Tile(tile, destination) {
-  if (!tile || !destination || gm14.submitting) return;
-  const source = tile.parentElement;
-  if (source === destination) return;
-  const from = gm14Location(tile);
-  const occupant = destination.classList.contains("gm14-slot")
-    ? destination.querySelector(".gm14-tile")
-    : null;
-  if (occupant && occupant !== tile) {
-    if (source?.classList.contains("gm14-slot")) source.appendChild(occupant);
-    else el.gm14Bank.appendChild(occupant);
-  }
-  destination.appendChild(tile);
-  recordGm14Placement(tile, from, gm14Location(tile));
-  selectGm14Tile(null);
-  maybeSubmitGm14Word();
-}
-
-function makeGm14Tile(item) {
-  const tile = document.createElement("button");
-  tile.type = "button";
-  tile.className = "gm14-tile";
-  tile.draggable = true;
-  tile.dataset.tileId = item.id;
-  tile.dataset.letter = item.letter;
-  tile.textContent = item.letter.toUpperCase();
-  tile.addEventListener("dragstart", event => {
-    event.dataTransfer.setData("text/plain", item.id);
-    event.dataTransfer.effectAllowed = "move";
-    selectGm14Tile(tile);
-  });
-  tile.addEventListener("click", () => selectGm14Tile(tile));
-  return tile;
-}
-
-function bindGm14DropZone(zone) {
-  if (zone.dataset.dropBound === "true") return;
-  zone.dataset.dropBound = "true";
-  zone.addEventListener("dragover", event => {
-    event.preventDefault();
-    event.dataTransfer.dropEffect = "move";
-    zone.classList.add("is-drop-target");
-  });
-  zone.addEventListener("dragleave", () => zone.classList.remove("is-drop-target"));
-  zone.addEventListener("drop", event => {
-    event.preventDefault();
-    zone.classList.remove("is-drop-target");
-    const tileId = event.dataTransfer.getData("text/plain");
-    moveGm14Tile(document.querySelector(`.gm14-tile[data-tile-id="${CSS.escape(tileId)}"]`), zone);
-  });
-  zone.addEventListener("click", event => {
-    if (event.target === zone && gm14.selectedTile) moveGm14Tile(gm14.selectedTile, zone);
-  });
-}
-
-function renderGm14Word(payload) {
-  gm14.sessionId = payload.session_id;
-  gm14.placementEvents = [];
-  gm14.submitting = false;
-  selectGm14Tile(null);
-  el.gm14Slots.replaceChildren();
-  el.gm14Bank.replaceChildren();
-  for (let index = 0; index < payload.letters.length; index += 1) {
-    const slot = document.createElement("div");
-    slot.className = "gm14-slot";
-    slot.dataset.slotIndex = String(index);
-    slot.setAttribute("aria-label", `Позиция ${index + 1}`);
-    bindGm14DropZone(slot);
-    el.gm14Slots.appendChild(slot);
-  }
-  bindGm14DropZone(el.gm14Bank);
-  for (const item of payload.letters) el.gm14Bank.appendChild(makeGm14Tile(item));
-  setText(el.gm14Progress, `Слово ${payload.word_number} из ${payload.word_count}`);
-  setText(el.gm14Instruction, payload.correct ? "Верно! Соберите следующее слово." : "Перетащите буквы в ячейки в правильном порядке.");
-  setHidden(el.gm14Intro, true);
-  setHidden(el.gm14Result, true);
-  setHidden(el.gm14Play, false);
-}
-
-async function maybeSubmitGm14Word() {
-  if (gm14.submitting || !el.gm14Slots) return;
-  const slots = [...el.gm14Slots.querySelectorAll(".gm14-slot")];
-  const tiles = slots.map(slot => slot.querySelector(".gm14-tile"));
-  if (tiles.some(tile => !tile)) return;
-  gm14.submitting = true;
-  const assembled = tiles.map(tile => tile.dataset.letter).join("");
-  try {
-    const payload = await fetchJson("/api/games/gm14/answer", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        session_id: gm14.sessionId,
-        assembled,
-        placements: gm14.placementEvents,
-        timestamp_ms: Date.now(),
-      }),
-    });
-    if (payload.finished) {
-      setHidden(el.gm14Play, true);
-      setHidden(el.gm14Result, false);
-      const accuracy = Math.round(Number(payload.metrics?.u01_first_attempt_word_accuracy || 0) * 100);
-      setText(el.gm14ResultText, `С первой попытки собрано правильно: ${accuracy}%.`);
-      setText(el.gm14Instruction, "Все 10 слов собраны.");
-      return;
-    }
-    if (payload.correct === false) {
-      setText(el.gm14Instruction, "Пока неверно. Переставьте буквы и попробуйте ещё раз.");
-      el.gm14Slots.classList.add("is-error");
-      window.setTimeout(() => el.gm14Slots.classList.remove("is-error"), 350);
-      gm14.submitting = false;
-      return;
-    }
-    await delay(450);
-    renderGm14Word(payload);
-  } catch (error) {
-    setText(el.gm14Instruction, `Не удалось проверить слово: ${error.message || error}`);
-    gm14.submitting = false;
-  }
-}
-
-async function startGm14() {
-  gm14.renderToken += 1;
-  gm14.submitting = true;
-  const payload = await fetchJson("/api/games/gm14/start", { method: "POST" });
-  renderGm14Word(payload);
-}
-
-function openGm14() {
-  gm14.renderToken += 1;
-  gm14.submitting = false;
-  gm14.sessionId = "";
-  selectGm14Tile(null);
-  setText(el.gm14Progress, "Слово 1 из 10");
-  setText(el.gm14Instruction, "Перетащите буквы в ячейки в правильном порядке.");
-  setHidden(el.gm14Play, true);
-  setHidden(el.gm14Result, true);
-  setHidden(el.gm14Intro, false);
-  setHidden(el.gm14Panel, false);
-}
-
-function closeGm14() {
-  gm14.renderToken += 1;
-  gm14.submitting = true;
-  setHidden(el.gm14Panel, true);
-  openTrainingMenu();
-}
-
-const gm17 = {
-  sessionId: "",
-  acceptingInput: false,
-};
-
-function createGm17Svg(shape) {
-  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  svg.setAttribute("viewBox", "0 0 100 100");
-  svg.setAttribute("aria-hidden", "true");
-  const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
-  group.setAttribute("transform", `rotate(${Number(shape.rotation) || 0} 50 50)`);
-  const polygon = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
-  polygon.setAttribute("points", (shape.points || []).map(point => point.join(",")).join(" "));
-  group.appendChild(polygon);
-  svg.appendChild(group);
-  return svg;
-}
-
-function renderGm17Trial(payload) {
-  gm17.sessionId = payload.session_id;
-  gm17.acceptingInput = true;
-  el.gm17Sample.replaceChildren(createGm17Svg(payload.sample));
-  el.gm17Choices.replaceChildren();
-  for (const choice of payload.choices || []) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "gm17-choice";
-    button.setAttribute("aria-label", "Вариант фигуры");
-    button.appendChild(createGm17Svg(choice));
-    button.addEventListener("click", () => submitGm17Answer(choice.id, button));
-    el.gm17Choices.appendChild(button);
-  }
-  setText(el.gm17Progress, `Проба ${payload.trial} из ${payload.trial_count}`);
-  setText(el.gm17Instruction, "Выберите фигуру, которая совпадает с образцом после поворота.");
-  setHidden(el.gm17Intro, true);
-  setHidden(el.gm17Result, true);
-  setHidden(el.gm17Play, false);
-}
-
-async function startGm17() {
-  gm17.acceptingInput = false;
-  const payload = await fetchJson("/api/games/gm17/start", { method: "POST" });
-  renderGm17Trial(payload);
-}
-
-async function submitGm17Answer(selectedId, button) {
-  if (!gm17.acceptingInput) return;
-  gm17.acceptingInput = false;
-  button.classList.add("is-selected");
-  try {
-    const payload = await fetchJson("/api/games/gm17/answer", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        session_id: gm17.sessionId,
-        selected_id: selectedId,
-        timestamp_ms: Date.now(),
-      }),
-    });
-    await delay(250);
-    if (!payload.finished) {
-      renderGm17Trial(payload);
-      return;
-    }
-    setHidden(el.gm17Play, true);
-    setHidden(el.gm17Result, false);
-    const accuracy = Math.round(Number(payload.metrics?.u01_correct_action_rate || 0) * 100);
-    setText(el.gm17ResultText, `Правильных ответов: ${accuracy}%.`);
-    setText(el.gm17Instruction, "Все 10 проб завершены.");
-  } catch (error) {
-    button.classList.remove("is-selected");
-    gm17.acceptingInput = true;
-    setText(el.gm17Instruction, `Не удалось сохранить ответ: ${error.message || error}`);
-  }
-}
-
-function openGm17() {
-  gm17.acceptingInput = false;
-  gm17.sessionId = "";
-  setText(el.gm17Progress, "Проба 1 из 10");
-  setText(el.gm17Instruction, "Выберите фигуру, которая совпадает с образцом после поворота.");
-  setHidden(el.gm17Play, true);
-  setHidden(el.gm17Result, true);
-  setHidden(el.gm17Intro, false);
-  setHidden(el.gm17Panel, false);
-}
-
-function closeGm17() {
-  gm17.acceptingInput = false;
-  setHidden(el.gm17Panel, true);
-  openTrainingMenu();
-}
-
-const gm20 = {
-  sessionId: "",
-  acceptingInput: false,
-};
-
-function createGm20Shape(shape, color) {
-  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  svg.setAttribute("viewBox", "0 0 100 100");
-  svg.setAttribute("aria-hidden", "true");
-  let node;
-  if (shape === "circle") {
-    node = document.createElementNS(svg.namespaceURI, "circle");
-    node.setAttribute("cx", "50"); node.setAttribute("cy", "50"); node.setAttribute("r", "34");
-  } else if (shape === "triangle") {
-    node = document.createElementNS(svg.namespaceURI, "polygon");
-    node.setAttribute("points", "50,12 90,84 10,84");
-  } else if (shape === "star") {
-    node = document.createElementNS(svg.namespaceURI, "polygon");
-    node.setAttribute("points", "50,7 61,36 93,37 68,56 77,88 50,69 23,88 32,56 7,37 39,36");
-  } else {
-    node = document.createElementNS(svg.namespaceURI, "rect");
-    node.setAttribute("x", "16"); node.setAttribute("y", "16"); node.setAttribute("width", "68"); node.setAttribute("height", "68"); node.setAttribute("rx", "5");
-  }
-  node.classList.add(`is-${color}`);
-  svg.appendChild(node);
-  return svg;
-}
-
-function createGm20Card(card, interactive = false) {
-  const root = document.createElement(interactive ? "button" : "div");
-  if (interactive) root.type = "button";
-  root.className = `${interactive ? "gm20-card gm20-reference" : "gm20-card"} gm20-card-count-${card.count}`;
-  const symbols = document.createElement("div");
-  symbols.className = `gm20-symbols count-${card.count}`;
-  for (let index = 0; index < card.count; index += 1) {
-    symbols.appendChild(createGm20Shape(card.shape, card.color));
-  }
-  root.appendChild(symbols);
-  return root;
-}
-
-function renderGm20Trial(payload) {
-  gm20.sessionId = payload.session_id;
-  gm20.acceptingInput = true;
-  el.gm20References.replaceChildren();
-  const referenceOrder = { 1: 0, 4: 1, 2: 2, 3: 3 };
-  const references = [...(payload.references || [])].sort(
-    (left, right) => referenceOrder[left.count] - referenceOrder[right.count],
-  );
-  for (const reference of references) {
-    const card = createGm20Card(reference, true);
-    card.setAttribute("aria-label", `Эталонная карточка ${reference.count}`);
-    card.addEventListener("click", () => submitGm20Answer(reference.id, card));
-    el.gm20References.appendChild(card);
-  }
-  el.gm20Stimulus.replaceChildren(createGm20Card(payload.stimulus));
-  setText(el.gm20Progress, `Карточка ${payload.trial} из ${payload.trial_count}`);
-  setText(el.gm20Instruction, "Выберите эталонную карточку по предполагаемому правилу.");
-  setHidden(el.gm20Feedback, true);
-  setHidden(el.gm20Intro, true);
-  setHidden(el.gm20Result, true);
-  setHidden(el.gm20Play, false);
-}
-
-async function startGm20() {
-  gm20.acceptingInput = false;
-  const payload = await fetchJson("/api/games/gm20/start", { method: "POST" });
-  renderGm20Trial(payload);
-}
-
-async function submitGm20Answer(selectedReference, card) {
-  if (!gm20.acceptingInput) return;
-  gm20.acceptingInput = false;
-  card.classList.add("is-selected");
-  try {
-    const payload = await fetchJson("/api/games/gm20/answer", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        session_id: gm20.sessionId,
-        selected_reference: selectedReference,
-        timestamp_ms: Date.now(),
-      }),
-    });
-    const correct = payload.feedback === "correct";
-    el.gm20Feedback.className = `gm20-feedback ${correct ? "is-correct" : "is-incorrect"}`;
-    setText(el.gm20Feedback, correct ? "Верно" : "Неверно");
-    setHidden(el.gm20Feedback, false);
-    await delay(650);
-    if (!payload.finished) {
-      renderGm20Trial(payload);
-      return;
-    }
-    setHidden(el.gm20Play, true);
-    setHidden(el.gm20Result, false);
-    const accuracy = Math.round(Number(payload.metrics?.u01_correct_action_rate || 0) * 100);
-    setText(el.gm20ResultText, `Правильных ответов: ${accuracy}%.`);
-    setText(el.gm20Instruction, "Все 60 карточек распределены.");
-  } catch (error) {
-    card.classList.remove("is-selected");
-    gm20.acceptingInput = true;
-    setText(el.gm20Instruction, `Не удалось сохранить ответ: ${error.message || error}`);
-  }
-}
-
-function openGm20() {
-  gm20.acceptingInput = false;
-  gm20.sessionId = "";
-  setText(el.gm20Progress, "Карточка 1 из 60");
-  setText(el.gm20Instruction, "Определите правило по обратной связи и выберите подходящую карточку.");
-  setHidden(el.gm20Play, true);
-  setHidden(el.gm20Result, true);
-  setHidden(el.gm20Intro, false);
-  setHidden(el.gm20Panel, false);
-}
-
-function closeGm20() {
-  gm20.acceptingInput = false;
-  setHidden(el.gm20Panel, true);
-  openTrainingMenu();
-}
-
-const gm05 = { sessionId: "", selected: new Set(), token: 0 };
-async function showGm05Round(payload) {
-  const token = ++gm05.token; gm05.sessionId = payload.session_id; gm05.selected = new Set();
-  setText(el.gm05Progress, `Раунд ${payload.round} из ${payload.round_count}`);
-  setText(el.gm05Instruction, `${payload.category}: запомните слова.`);
-  el.gm05Study.replaceChildren(...payload.study_words.map(word => { const n=document.createElement("div"); n.className="gm05-study-word"; n.textContent=word; return n; }));
-  setHidden(el.gm05Intro,true); setHidden(el.gm05Choice,true); setHidden(el.gm05Result,true); setHidden(el.gm05Study,false);
-  await delay(payload.study_ms);
-  if (token !== gm05.token || el.gm05Panel.hidden) return;
-  el.gm05Words.replaceChildren(...payload.choices.map(word => { const b=document.createElement("button"); b.type="button"; b.className="gm05-word"; b.textContent=word; b.onclick=()=>{ b.classList.toggle("is-selected"); b.classList.contains("is-selected") ? gm05.selected.add(word) : gm05.selected.delete(word); }; return b; }));
-  setText(el.gm05Instruction,"Выберите все слова, которые были показаны."); setHidden(el.gm05Study,true); setHidden(el.gm05Choice,false);
-}
-async function startGm05(){ showGm05Round(await fetchJson("/api/games/gm05/start",{method:"POST"})); }
-async function submitGm05(){ const p=await fetchJson("/api/games/gm05/answer",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({session_id:gm05.sessionId,selected:[...gm05.selected],timestamp_ms:Date.now()})}); if(!p.finished){showGm05Round(p);return;} setHidden(el.gm05Choice,true);setHidden(el.gm05Result,false);setText(el.gm05ResultText,`Узнано целей: ${Math.round((p.metrics.m07_target_recognition_rate||0)*100)}%.`); }
-function openGm05(){gm05.token++;setHidden(el.gm05Study,true);setHidden(el.gm05Choice,true);setHidden(el.gm05Result,true);setHidden(el.gm05Intro,false);setHidden(el.gm05Panel,false);}
-function closeGm05(){gm05.token++;setHidden(el.gm05Panel,true);openTrainingMenu();}
-
-const gm08={sessionId:"",accepting:false,timer:null,shownAt:0,token:0};
-async function showGm08Trial(p){const token=++gm08.token;gm08.sessionId=p.session_id;gm08.accepting=false;setText(el.gm08Progress,`Стимул ${p.trial} из ${p.trial_count}`);setHidden(el.gm08Intro,true);setHidden(el.gm08Result,true);setHidden(el.gm08Stimulus,true);await delay(220);if(token!==gm08.token)return;el.gm08Stimulus.classList.toggle("is-mirrored",p.mirrored);setHidden(el.gm08Stimulus,false);gm08.shownAt=performance.now();gm08.accepting=true;gm08.timer=setTimeout(()=>respondGm08(false),p.display_ms);}
-async function respondGm08(responded){if(!gm08.accepting)return;gm08.accepting=false;clearTimeout(gm08.timer);const reaction=responded?performance.now()-gm08.shownAt:null;setHidden(el.gm08Stimulus,true);const p=await fetchJson("/api/games/gm08/answer",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({session_id:gm08.sessionId,responded,reaction_ms:reaction,timestamp_ms:Date.now()})});if(!p.finished){showGm08Trial(p);return;}setHidden(el.gm08Result,false);setText(el.gm08ResultText,`Ошибок: ${p.metrics.u07_error_count}.`);}
-async function startGm08(){showGm08Trial(await fetchJson("/api/games/gm08/start",{method:"POST"}));}
-function openGm08(){gm08.token++;setHidden(el.gm08Stimulus,true);setHidden(el.gm08Result,true);setHidden(el.gm08Intro,false);setHidden(el.gm08Panel,false);}
-function closeGm08(){gm08.token++;gm08.accepting=false;clearTimeout(gm08.timer);setHidden(el.gm08Panel,true);openTrainingMenu();}
-
-const gm12={sessionId:"",accepting:false};
-function renderGm12(p){gm12.sessionId=p.session_id;gm12.accepting=true;setText(el.gm12Progress,`Задание ${p.trial} из ${p.trial_count}`);setText(el.gm12Picture,p.picture);el.gm12Options.replaceChildren(...p.choices.map(word=>{const b=document.createElement("button");b.className="game-option-new";b.textContent=word;b.onclick=()=>answerGm12(word);return b;}));setHidden(el.gm12Intro,true);setHidden(el.gm12Result,true);setHidden(el.gm12Play,false);}
-async function answerGm12(word){if(!gm12.accepting)return;gm12.accepting=false;const p=await fetchJson("/api/games/gm12/answer",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({session_id:gm12.sessionId,selected_word:word,timestamp_ms:Date.now()})});if(!p.finished){renderGm12(p);return;}setHidden(el.gm12Play,true);setHidden(el.gm12Result,false);setText(el.gm12ResultText,`Правильных ответов: ${Math.round((p.metrics.u01_correct_action_rate||0)*100)}%.`);}
-async function startGm12(){renderGm12(await fetchJson("/api/games/gm12/start",{method:"POST"}));} function openGm12(){setHidden(el.gm12Play,true);setHidden(el.gm12Result,true);setHidden(el.gm12Intro,false);setHidden(el.gm12Panel,false);} function closeGm12(){setHidden(el.gm12Panel,true);openTrainingMenu();}
-
-const gm23={sessionId:"",accepting:false}; const gm23Chars={star:"★",triangle:"▲",heart:"♥"};
-function gm23Element(item){const n=document.createElement("span");if(!item){n.textContent="?";n.className="gm23-symbol is-missing";}else{n.textContent=gm23Chars[item.symbol];n.className=`gm23-symbol is-${item.style}`;}return n;}
-function renderGm23(p){gm23.sessionId=p.session_id;gm23.accepting=true;setText(el.gm23Progress,`Матрица ${p.trial} из ${p.trial_count}`);el.gm23Matrix.replaceChildren(...p.matrix.map(gm23Element));el.gm23Options.replaceChildren(...p.options.map(item=>{const b=document.createElement("button");b.className="gm23-option";b.appendChild(gm23Element(item));b.onclick=()=>answerGm23(item.id);return b;}));setHidden(el.gm23Intro,true);setHidden(el.gm23Result,true);setHidden(el.gm23Play,false);}
-async function answerGm23(id){if(!gm23.accepting)return;gm23.accepting=false;const p=await fetchJson("/api/games/gm23/answer",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({session_id:gm23.sessionId,selected_id:id,timestamp_ms:Date.now()})});if(!p.finished){renderGm23(p);return;}setHidden(el.gm23Play,true);setHidden(el.gm23Result,false);setText(el.gm23ResultText,`Правильных ответов: ${Math.round((p.metrics.u01_correct_action_rate||0)*100)}%.`);}
-async function startGm23(){renderGm23(await fetchJson("/api/games/gm23/start",{method:"POST"}));} function openGm23(){setHidden(el.gm23Play,true);setHidden(el.gm23Result,true);setHidden(el.gm23Intro,false);setHidden(el.gm23Panel,false);} function closeGm23(){setHidden(el.gm23Panel,true);openTrainingMenu();}
-
-const gm19={sessionId:"",maze:null,path:[],drawing:false,errors:0,shownAt:0,startedAt:0,lastRejected:""};
-function drawGm19(){const c=el.gm19Canvas,ctx=c.getContext("2d"),m=gm19.maze,size=m.size,cell=c.width/size;ctx.clearRect(0,0,c.width,c.height);ctx.fillStyle="#f7fafb";ctx.fillRect(0,0,c.width,c.height);ctx.strokeStyle="#17212b";ctx.lineWidth=4;ctx.beginPath();for(let y=0;y<size;y++)for(let x=0;x<size;x++){const w=m.walls[y][x],x0=x*cell,y0=y*cell;if(w.n){ctx.moveTo(x0,y0);ctx.lineTo(x0+cell,y0);}if(w.w){ctx.moveTo(x0,y0);ctx.lineTo(x0,y0+cell);}if(y===size-1&&w.s){ctx.moveTo(x0,y0+cell);ctx.lineTo(x0+cell,y0+cell);}if(x===size-1&&w.e){ctx.moveTo(x0+cell,y0);ctx.lineTo(x0+cell,y0+cell);}}ctx.stroke();if(gm19.path.length){ctx.strokeStyle="#38a9c7";ctx.lineWidth=8;ctx.lineCap="round";ctx.beginPath();gm19.path.forEach(([x,y],i)=>{const px=(x+.5)*cell,py=(y+.5)*cell;i?ctx.lineTo(px,py):ctx.moveTo(px,py);});ctx.stroke();}for(const [pos,color] of [[m.start,"#24a66f"],[m.finish,"#d83a48"]]){ctx.fillStyle=color;ctx.beginPath();ctx.arc((pos[0]+.5)*cell,(pos[1]+.5)*cell,cell*.22,0,Math.PI*2);ctx.fill();}}
-function renderGm19(p){gm19.sessionId=p.session_id;gm19.maze=p;gm19.path=[];gm19.drawing=false;gm19.errors=0;gm19.lastRejected="";gm19.shownAt=performance.now();el.gm19Canvas.width=720;el.gm19Canvas.height=720;setText(el.gm19Progress,`Лабиринт ${p.maze} из ${p.maze_count}`);setText(el.gm19Instruction,"Начните с зелёной точки и не отпускайте кнопку до финиша.");setHidden(el.gm19Intro,true);setHidden(el.gm19Result,true);setHidden(el.gm19Canvas,false);drawGm19();}
-function gm19Cell(event){const r=el.gm19Canvas.getBoundingClientRect();return [Math.max(0,Math.min(gm19.maze.size-1,Math.floor((event.clientX-r.left)/r.width*gm19.maze.size))),Math.max(0,Math.min(gm19.maze.size-1,Math.floor((event.clientY-r.top)/r.height*gm19.maze.size)))];}
-function gm19CanMove(a,b){const [x,y]=a,[nx,ny]=b,dx=nx-x,dy=ny-y;const d=dx===1&&dy===0?"e":dx===-1&&dy===0?"w":dx===0&&dy===1?"s":dx===0&&dy===-1?"n":null;return d&&!gm19.maze.walls[y][x][d];}
-async function finishGm19(){gm19.drawing=false;const execution=performance.now()-gm19.startedAt;const p=await fetchJson("/api/games/gm19/answer",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({session_id:gm19.sessionId,path:gm19.path,boundary_errors:gm19.errors,planning_ms:gm19.startedAt-gm19.shownAt,execution_ms:execution,timestamp_ms:Date.now()})});if(!p.finished){renderGm19(p);return;}setHidden(el.gm19Canvas,true);setHidden(el.gm19Result,false);setText(el.gm19ResultText,`Выходов за границы: ${p.metrics.v03_boundary_exits}.`);}
-async function startGm19(){renderGm19(await fetchJson("/api/games/gm19/start",{method:"POST"}));} function openGm19(){setHidden(el.gm19Canvas,true);setHidden(el.gm19Result,true);setHidden(el.gm19Intro,false);setHidden(el.gm19Panel,false);} function closeGm19(){gm19.drawing=false;setHidden(el.gm19Panel,true);openTrainingMenu();}
-
 const gameDomainLabels = {
   memory: "Память",
   attention: "Внимание",
@@ -2850,18 +2132,64 @@ async function loadGameCatalog() {
   if (!el.trainingGameList) return;
   gameCatalog = await fetchJson("/api/games/catalog");
   el.trainingGameList.replaceChildren();
-  for (const definition of gameCatalog.filter(item => item.implemented)) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "menu-item";
-    button.dataset.trainingGame = definition.code.toLowerCase().replace("-", "");
-    const title = document.createElement("strong");
-    title.textContent = definition.title;
-    const domain = document.createElement("span");
-    domain.textContent = gameDomainLabels[definition.primary_domain] || definition.primary_domain;
-    button.append(title, domain);
-    el.trainingGameList.append(button);
+  const definitions = gameCatalog.filter(item => item.implemented);
+  const domainOrder = ["memory", "attention", "speech", "abstraction"];
+  const tabs = document.createElement("div");
+  tabs.className = "training-domain-tabs";
+  tabs.setAttribute("role", "tablist");
+  tabs.setAttribute("aria-label", "Категории тренировок");
+  const panels = document.createElement("div");
+  panels.className = "training-domain-panels";
+
+  const selectDomain = (selectedDomain) => {
+    tabs.querySelectorAll("[data-training-domain]").forEach((tab) => {
+      const selected = tab.dataset.trainingDomain === selectedDomain;
+      tab.classList.toggle("is-active", selected);
+      tab.setAttribute("aria-selected", String(selected));
+      tab.tabIndex = selected ? 0 : -1;
+    });
+    panels.querySelectorAll("[data-training-domain-panel]").forEach((panel) => {
+      panel.hidden = panel.dataset.trainingDomainPanel !== selectedDomain;
+    });
+  };
+
+  for (const domainCode of domainOrder) {
+    const games = definitions.filter(item => item.primary_domain === domainCode);
+    if (!games.length) continue;
+    const label = gameDomainLabels[domainCode] || domainCode;
+    const tab = document.createElement("button");
+    tab.type = "button";
+    tab.className = "training-domain-tab";
+    tab.dataset.trainingDomain = domainCode;
+    tab.setAttribute("role", "tab");
+    tab.innerHTML = `<strong>${label}</strong><span>${games.length}</span>`;
+    tab.onclick = () => selectDomain(domainCode);
+    tabs.append(tab);
+
+    const panel = document.createElement("section");
+    panel.className = "training-domain-panel";
+    panel.dataset.trainingDomainPanel = domainCode;
+    panel.setAttribute("role", "tabpanel");
+    const heading = document.createElement("h3");
+    heading.textContent = `Игры: ${label.toLowerCase()}`;
+    const grid = document.createElement("div");
+    grid.className = "menu-grid training-domain-grid";
+    for (const definition of games) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "menu-item";
+      button.dataset.trainingGame = definition.code.toLowerCase().replace("-", "");
+      const title = document.createElement("strong");
+      title.textContent = definition.title;
+      button.append(title);
+      grid.append(button);
+    }
+    panel.append(heading, grid);
+    panels.append(panel);
   }
+  el.trainingGameList.append(tabs, panels);
+  const firstDomain = domainOrder.find(domain => definitions.some(item => item.primary_domain === domain));
+  if (firstDomain) selectDomain(firstDomain);
 }
 
 function closeDynamicGame() {
@@ -2877,7 +2205,8 @@ async function openDynamicGame(game) {
     item => item.code.toLowerCase().replace("-", "") === game
   );
   if (!definition || !el.dynamicGameHost || !el.dynamicGamePanel) return;
-  const renderer = await import(`/api/games/${encodeURIComponent(definition.code)}/renderer.js`);
+  const rendererUrl = `/api/games/${encodeURIComponent(definition.code)}/renderer.js?v=${Date.now()}`;
+  const renderer = await import(rendererUrl);
   if (typeof renderer.mount !== "function") {
     throw new Error(`Модуль ${definition.code} не экспортирует mount()`);
   }
@@ -2909,22 +2238,6 @@ function closeTrainingMenu() {
 
 async function openTrainingGame(game) {
   closeTrainingMenu();
-  const openers = {
-    gm02: openGm02,
-    gm05: openGm05,
-    gm07: openGm07,
-    gm08: openGm08,
-    gm12: openGm12,
-    gm14: openGm14,
-    gm17: openGm17,
-    gm19: openGm19,
-    gm20: openGm20,
-    gm23: openGm23,
-  };
-  if (openers[game]) {
-    openers[game]();
-    return;
-  }
   await openDynamicGame(game);
 }
 
@@ -2963,19 +2276,11 @@ async function handleMenuAction(item) {
         openTrainingMenu();
         break;
       case "gm02":
-        openGm02();
-        break;
       case "gm07":
-        openGm07();
-        break;
       case "gm14":
-        openGm14();
-        break;
       case "gm17":
-        openGm17();
-        break;
       case "gm20":
-        openGm20();
+        await openTrainingGame(item);
         break;
       case "report":
         await openResults();
@@ -3032,63 +2337,6 @@ function bindMainMenuEvents() {
       setText(el.messageValue, `Не удалось открыть игру: ${error.message || error}`);
     });
   });
-  el.gm02Start && el.gm02Start.addEventListener("click", () => startGm02().catch(error => {
-    setText(el.gm02Instruction, `Не удалось начать игру: ${error.message || error}`);
-  }));
-  el.gm02Restart && el.gm02Restart.addEventListener("click", () => startGm02().catch(error => {
-    setText(el.gm02Instruction, `Не удалось начать игру: ${error.message || error}`);
-  }));
-  el.gm02Close && el.gm02Close.addEventListener("click", closeGm02);
-  el.gm07Start && el.gm07Start.addEventListener("click", () => startGm07().catch(error => {
-    setText(el.gm07Instruction, `Не удалось начать игру: ${error.message || error}`);
-  }));
-  el.gm07Restart && el.gm07Restart.addEventListener("click", () => startGm07().catch(error => {
-    setText(el.gm07Instruction, `Не удалось начать игру: ${error.message || error}`);
-  }));
-  el.gm07Close && el.gm07Close.addEventListener("click", closeGm07);
-  el.gm07Absent && el.gm07Absent.addEventListener("click", () => {
-    submitGm07Answer(null).catch(error => {
-      setText(el.gm07Instruction, `Не удалось сохранить ответ: ${error.message || error}`);
-    });
-  });
-  el.gm14Start && el.gm14Start.addEventListener("click", () => startGm14().catch(error => {
-    setText(el.gm14Instruction, `Не удалось начать игру: ${error.message || error}`);
-    gm14.submitting = false;
-  }));
-  el.gm14Restart && el.gm14Restart.addEventListener("click", () => startGm14().catch(error => {
-    setText(el.gm14Instruction, `Не удалось начать игру: ${error.message || error}`);
-    gm14.submitting = false;
-  }));
-  el.gm14Close && el.gm14Close.addEventListener("click", closeGm14);
-  el.gm17Start && el.gm17Start.addEventListener("click", () => startGm17().catch(error => {
-    setText(el.gm17Instruction, `Не удалось начать игру: ${error.message || error}`);
-  }));
-  el.gm17Restart && el.gm17Restart.addEventListener("click", () => startGm17().catch(error => {
-    setText(el.gm17Instruction, `Не удалось начать игру: ${error.message || error}`);
-  }));
-  el.gm17Close && el.gm17Close.addEventListener("click", closeGm17);
-  el.gm20Start && el.gm20Start.addEventListener("click", () => startGm20().catch(error => {
-    setText(el.gm20Instruction, `Не удалось начать игру: ${error.message || error}`);
-  }));
-  el.gm20Restart && el.gm20Restart.addEventListener("click", () => startGm20().catch(error => {
-    setText(el.gm20Instruction, `Не удалось начать игру: ${error.message || error}`);
-  }));
-  el.gm20Close && el.gm20Close.addEventListener("click", closeGm20);
-  el.gm05Start && el.gm05Start.addEventListener("click", () => startGm05().catch(error => setText(el.gm05Instruction, error.message)));
-  el.gm05Restart && el.gm05Restart.addEventListener("click", () => startGm05().catch(error => setText(el.gm05Instruction, error.message)));
-  el.gm05Submit && el.gm05Submit.addEventListener("click", () => submitGm05().catch(error => setText(el.gm05Instruction, error.message)));
-  el.gm05Close && el.gm05Close.addEventListener("click", closeGm05);
-  el.gm08Start && el.gm08Start.addEventListener("click", () => startGm08().catch(error => setText(el.gm08Instruction, error.message)));
-  el.gm08Restart && el.gm08Restart.addEventListener("click", () => startGm08().catch(error => setText(el.gm08Instruction, error.message)));
-  el.gm08Stimulus && el.gm08Stimulus.addEventListener("click", () => respondGm08(true).catch(error => setText(el.gm08Instruction, error.message)));
-  el.gm08Close && el.gm08Close.addEventListener("click", closeGm08);
-  document.addEventListener("keydown", event => { if (event.code === "Space" && el.gm08Panel && !el.gm08Panel.hidden) { event.preventDefault(); respondGm08(true).catch(error => setText(el.gm08Instruction, error.message)); } });
-  el.gm12Start && el.gm12Start.addEventListener("click", () => startGm12()); el.gm12Restart && el.gm12Restart.addEventListener("click", () => startGm12()); el.gm12Close && el.gm12Close.addEventListener("click", closeGm12);
-  el.gm23Start && el.gm23Start.addEventListener("click", () => startGm23()); el.gm23Restart && el.gm23Restart.addEventListener("click", () => startGm23()); el.gm23Close && el.gm23Close.addEventListener("click", closeGm23);
-  el.gm19Start && el.gm19Start.addEventListener("click", () => startGm19()); el.gm19Restart && el.gm19Restart.addEventListener("click", () => startGm19()); el.gm19Close && el.gm19Close.addEventListener("click", closeGm19);
-  el.gm19Canvas && el.gm19Canvas.addEventListener("pointerdown", event => { const cell=gm19Cell(event); if(cell[0]!==0||cell[1]!==0)return; gm19.drawing=true;gm19.path=[[0,0]];gm19.startedAt=performance.now();el.gm19Canvas.setPointerCapture(event.pointerId);drawGm19(); });
-  el.gm19Canvas && el.gm19Canvas.addEventListener("pointermove", event => { if(!gm19.drawing)return;const cell=gm19Cell(event),last=gm19.path[gm19.path.length-1];if(cell[0]===last[0]&&cell[1]===last[1]){gm19.lastRejected="";return;}if(gm19CanMove(last,cell)){gm19.lastRejected="";gm19.path.push(cell);drawGm19();if(cell[0]===gm19.maze.size-1&&cell[1]===gm19.maze.size-1)finishGm19().catch(error=>setText(el.gm19Instruction,error.message));}else{const key=cell.join(",");if(key!==gm19.lastRejected){gm19.errors++;gm19.lastRejected=key;}} });
-  el.gm19Canvas && el.gm19Canvas.addEventListener("pointerup", () => { if(gm19.drawing){gm19.drawing=false;gm19.path=[];gm19.errors++;setText(el.gm19Instruction,"Кнопка отпущена до финиша. Начните снова с зелёной точки.");drawGm19();} });
   el.mainMenu && el.mainMenu.addEventListener("click", (event) => {
     if (event.target === el.mainMenu) closeMainMenu();
   });

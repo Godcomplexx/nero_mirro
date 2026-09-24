@@ -25,7 +25,24 @@ def test_gm02_scoring_keeps_metrics_separate() -> None:
     assert result["m02_position_accuracy"] == 1 / 3
     assert result["m03_order_errors"] == 2
     assert result["u04_duration_ms"] == 250.0
+    assert result["u06_complete"] is False
     assert result["u06_technically_valid"] is True
+
+
+def test_gm02_scoring_rejects_non_monotonic_click_timestamps() -> None:
+    result = score_gm02_attempt(
+        [2, 5],
+        [
+            {"cell": 2, "timestamp_ms": 250.0},
+            {"cell": 5, "timestamp_ms": 100.0},
+        ],
+        successful_rounds=1,
+        started_at_ms=50.0,
+        finished_at_ms=300.0,
+    )
+
+    assert result["u06_complete"] is True
+    assert result["u06_technically_valid"] is False
 
 
 def test_gm02_plugin_stops_on_first_incorrect_round() -> None:

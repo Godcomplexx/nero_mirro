@@ -65,8 +65,8 @@ class Gm22TowerPlugin(BrowserGamePlugin):
         source_rod = session.rods[source]
         target_rod = session.rods[target]
         disk = source_rod[-1] if source_rod else None
-        valid = disk is not None and (not target_rod or disk < target_rod[-1])
-        if valid:
+        legal_move = disk is not None and (not target_rod or disk < target_rod[-1])
+        if legal_move:
             target_rod.append(source_rod.pop())
             session.level_valid_moves += 1
         else:
@@ -80,8 +80,10 @@ class Gm22TowerPlugin(BrowserGamePlugin):
             "selected_source": source,
             "selected_target": target,
             "disk": disk,
-            "valid": valid,
-            "correct": valid,
+            # The response was captured correctly; move legality is a game outcome.
+            "valid": True,
+            "legal_move": legal_move,
+            "correct": legal_move,
             "level_complete": solved,
             "elapsed_ms": max(0.0, time.time() * 1000 - session.level_started_at_ms),
         }
@@ -97,7 +99,7 @@ class Gm22TowerPlugin(BrowserGamePlugin):
 
         if not solved:
             result = self._payload(session)
-            result["move_valid"] = valid
+            result["move_valid"] = legal_move
             return result
 
         session.level_index += 1

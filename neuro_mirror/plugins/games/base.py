@@ -101,12 +101,23 @@ class BrowserGamePlugin(Plugin):
             "trials": deepcopy(journal),
         }
         if result.get("finished"):
+            metrics = result.get("metrics") or {}
+            complete = metrics.get("u06_complete")
+            technically_valid = metrics.get("u06_technically_valid")
             result["report"] = {
                 "type": "training_game",
                 "game_code": self.definition.code,
                 "session_id": session_id,
-                "completion_status": "completed",
-                "technical_validity": "valid",
+                "completion_status": (
+                    "completed" if complete is True
+                    else "incomplete" if complete is False
+                    else "unknown"
+                ),
+                "technical_validity": (
+                    "valid" if technically_valid is True
+                    else "invalid" if technically_valid is False
+                    else "unknown"
+                ),
                 "metrics": deepcopy(result.get("metrics") or {}),
                 "trials": deepcopy(journal),
             }
@@ -155,7 +166,7 @@ class BrowserGamePlugin(Plugin):
             "stimulus": stimulus,
             "answer": answer,
             "elapsed_ms": max(0.0, float(elapsed)),
-            "valid": bool(raw.get("valid", True)),
+            "valid": raw.get("valid"),
             "correct": raw.get("correct"),
             "raw": raw,
         }

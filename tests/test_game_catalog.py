@@ -47,13 +47,40 @@ def test_plugin_can_define_a_game_outside_initial_catalog() -> None:
     assert plugin.definition.code == "GM-CUSTOM-99"
 
 
+def test_base_report_uses_metrics_and_keeps_undeclared_validity_unknown() -> None:
+    class ReportingGame(BrowserGamePlugin):
+        game_code = "GM-REPORT-01"
+        game_definition = GameDefinition(
+            code=game_code,
+            slug="reporting_game",
+            title="Reporting game",
+            domains=(Domain.MEMORY,),
+            mechanics=("reporting",),
+            modalities=(Modality.VISUAL,),
+            response_type=ResponseType.CLICK,
+            stimulus_sets=("set-1",),
+        )
+
+        def _answer(self, payload):
+            return {
+                "ok": True,
+                "finished": True,
+                "metrics": {"u06_complete": False},
+                "events": [{"answer": "x", "elapsed_ms": 10}],
+            }
+
+    result = ReportingGame(EventBus()).answer_game({"session_id": "session-1"})
+    assert result["report"]["completion_status"] == "incomplete"
+    assert result["report"]["technical_validity"] == "unknown"
+    assert result["report"]["trials"][0]["valid"] is None
+
+
 def test_registry_discovers_current_plugins_without_runtime_imports() -> None:
     registrations = discover_game_registrations()
-    assert len(registrations) == 10
+    assert len(registrations) == len(GAME_CATALOG)
     assert all(issubclass(item.plugin_class, BrowserGamePlugin) for item in registrations)
     assert implemented_game_codes() == {
-        "GM-02", "GM-05", "GM-07", "GM-08", "GM-12",
-        "GM-14", "GM-17", "GM-19", "GM-20", "GM-23",
+        definition.code for definition in GAME_CATALOG
     }
     for registration in registrations:
         package = __import__(registration.package_name, fromlist=["__path__"])

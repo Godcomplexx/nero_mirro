@@ -18,6 +18,10 @@ def score_gm02_attempt(
         1 for index in range(compared) if clicked_cells[index] == expected[index]
     )
     exact = clicked_cells == expected
+    timestamps = [float(click["timestamp_ms"]) for click in clicks]
+    technically_valid = bool(clicks) and all(
+        later >= earlier for earlier, later in zip(timestamps, timestamps[1:])
+    )
 
     return {
         "m08_series_accuracy": 1.0 if exact else 0.0,
@@ -31,6 +35,6 @@ def score_gm02_attempt(
             if clicked_cells[index] != expected[index]
         ) + abs(len(expected) - len(clicked_cells)),
         "u04_duration_ms": max(0.0, finished_at_ms - started_at_ms),
-        "u06_complete": True,
-        "u06_technically_valid": True,
+        "u06_complete": len(clicked_cells) == len(expected),
+        "u06_technically_valid": technically_valid,
     }

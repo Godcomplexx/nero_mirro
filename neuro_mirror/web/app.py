@@ -320,7 +320,11 @@ def create_app() -> FastAPI:
         path = game_asset_path(definition.code, "web.js")
         if path is None:
             raise HTTPException(status_code=404, detail="У игры нет отдельного браузерного модуля.")
-        return FileResponse(path, media_type="text/javascript")
+        return FileResponse(
+            path,
+            media_type="text/javascript",
+            headers={"Cache-Control": "no-store"},
+        )
 
     @app.post("/api/games/{game_code}/start")
     async def generic_game_start(game_code: str) -> JSONResponse:
