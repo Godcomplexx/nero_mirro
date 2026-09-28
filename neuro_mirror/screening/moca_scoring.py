@@ -110,10 +110,6 @@ FLUENCY_EXCLUDED_NAMES = {
     "леха",
     "людмила",
 }
-SENTENCE_ASR_WORD_REPLACEMENTS = {
-    "диан": "диван",
-    "зеваном": "диваном",
-}
 DIGITS_FORWARD_EXPECTED = (2, 1, 8, 5, 4)
 DIGITS_BACKWARD_EXPECTED = (2, 4, 7)
 
@@ -290,21 +286,11 @@ def _score_task(task: dict[str, Any]) -> dict[str, Any]:
 
     if task_id == "language_sentence_1":
         expected = "я знаю только одно что иван это тот кто может сегодня помочь"
-        return _score_sentence_words(
-            base,
-            transcript,
-            expected,
-            optional_asr_words=("это",),
-        )
+        return _score_sentence_words(base, transcript, expected)
 
     if task_id == "language_sentence_2":
         expected = "кошка всегда пряталась под диваном когда собаки были в комнате"
-        return _score_sentence_words(
-            base,
-            transcript,
-            expected,
-            optional_asr_words=("под", "в"),
-        )
+        return _score_sentence_words(base, transcript, expected)
 
     if task_id == "language_fluency":
         return _score_fluency(base, transcript)
@@ -313,36 +299,33 @@ def _score_task(task: dict[str, Any]) -> dict[str, Any]:
         return _score_abstraction(
             base,
             transcript,
-            expected="транспорт / средство передвижения",
-            word_stems=("транспорт", "передвиж", "перемещ", "езд", "ехать"),
+            expected=(
+                "средства передвижения / транспорт / на них можно ездить / "
+                "средства для путешествия"
+            ),
+            word_stems=("транспорт", "передвиж", "путешеств", "езд", "ехать"),
         )
 
     if task_id == "abstraction_2":
         return _score_abstraction(
             base,
             transcript,
-            expected="измерительные предметы",
+            expected=(
+                "измерительные приборы / используются для измерения / "
+                "измерение"
+            ),
             word_stems=(
                 "измер",
-                "замер",
                 "мерить",
-                "прибор",
-                "инструмент",
-                "шкал",
             ),
-            exact_phrases=(
-                "смирение",
-                "извинени",
-                "это время",
-                "меры времени и длины",
-                "меру времени и длины",
-                "цифр блат",
-                "тут циферблат а тут цифры",
-                "циферблат общий",
-                "сантиметр миллиметр",
-                "сантиметрах миллиметр",
+            rejected_phrase_groups=(("часы это", "линейка это"),),
+            rejection_override_phrases=(
+                "оба измер",
+                "обе измер",
+                "общее измер",
+                "общая измер",
+                "замер измер",
             ),
-            fuzzy_phrases=("измерительный прибор",),
         )
 
     if task_id == "delayed_recall":
@@ -567,55 +550,20 @@ def _score_sentence_words(
     base: dict[str, Any],
     transcript: str,
     expected: str,
-    *,
-    optional_asr_words: tuple[str, ...] = (),
 ) -> dict[str, Any]:
-    """Найти нужное предложение в непрерывной последовательности слов."""
+    """Проверить дословное совпадение всего ответа с предложением."""
     expected_words = _normalize_text(expected).split()
     actual_words = _normalize_text(transcript).split()
-    expected_length = len(expected_words)
-    matching_start: int | None = None
-    for start in range(len(actual_words) - expected_length + 1):
-        candidate = actual_words[start : start + expected_length]
-        if all(
-            _same_word_with_different_ending(expected_word, actual_word)
-            for expected_word, actual_word in zip(expected_words, candidate)
-        ):
-            matching_start = start
-            break
-
-    matched_with_asr_tolerance = (
-        matching_start is None
-        and _sentence_matches_after_asr_correction(
-            expected_words,
-            actual_words,
-            optional_asr_words,
-        )
-    )
-    correct = matching_start is not None or matched_with_asr_tolerance
-    if matching_start is not None:
-        ignored_before = matching_start or 0
-        ignored_after = len(actual_words) - ignored_before - expected_length
-        details = (
-            "Найдена непрерывная последовательность слов; "
-            f"пропущено комментариев до: {ignored_before}, "
-            f"после: {ignored_after}."
-        )
-    elif matched_with_asr_tolerance:
-        details = (
-            "Предложение совпало после коррекции типичных ошибок ASR "
-            "в служебных словах, окончаниях или известных заменах."
-        )
-    elif len(actual_words) < expected_length:
+    correct = actual_words == expected_words
+    if correct:
+        details = "Ответ дословно совпал с предложением."
+    elif len(actual_words) != len(expected_words):
         details = (
             "Количество слов не совпало: "
             f"ожидалось {len(expected_words)}, распознано {len(actual_words)}."
         )
     else:
-        details = (
-            "Не совпали слова: нужная непрерывная "
-            "последовательность не найдена."
-        )
+        details = "Не совпали слова или их порядок."
     return {
         **base,
         "score": 1 if correct else 0,
@@ -624,70 +572,6 @@ def _score_sentence_words(
         "expected": expected,
         "details": details,
     }
-
-
-def _sentence_matches_after_asr_correction(
-    expected_words: list[str],
-    actual_words: list[str],
-    optional_words: tuple[str, ...],
-) -> bool:
-    """Проверить всё предложение после узких исправлений ошибок ASR.
-
-    В этом резервном режиме комментарии внутри или снаружи не пропускаются:
-    после удаления разрешённых служебных слов длина и порядок остальных слов
-    должны полностью совпасть.
-    """
-    optional = set(optional_words)
-    expected_content = [
-        word for word in expected_words if word not in optional
-    ]
-    actual_content = [
-        SENTENCE_ASR_WORD_REPLACEMENTS.get(word, word)
-        for word in actual_words
-        if word not in optional
-    ]
-    if len(expected_content) != len(actual_content):
-        return False
-    return all(
-        _same_word_with_asr_tolerance(expected_word, actual_word)
-        for expected_word, actual_word in zip(
-            expected_content,
-            actual_content,
-        )
-    )
-
-
-def _same_word_with_asr_tolerance(expected: str, actual: str) -> bool:
-    """Сравнить слово с дополнительным допуском для коротких окончаний."""
-    if _same_word_with_different_ending(expected, actual):
-        return True
-    common_prefix_length = 0
-    for expected_char, actual_char in zip(expected, actual):
-        if expected_char != actual_char:
-            break
-        common_prefix_length += 1
-    return (
-        common_prefix_length >= 3
-        and len(expected) - common_prefix_length <= 2
-        and len(actual) - common_prefix_length <= 2
-    )
-
-
-def _same_word_with_different_ending(expected: str, actual: str) -> bool:
-    """Сравнить слова, допуская замену не более трёх букв окончания."""
-    if expected == actual:
-        return True
-    common_prefix_length = 0
-    for expected_char, actual_char in zip(expected, actual):
-        if expected_char != actual_char:
-            break
-        common_prefix_length += 1
-    return (
-        common_prefix_length >= 4
-        and len(expected) - common_prefix_length <= 3
-        and len(actual) - common_prefix_length <= 3
-    )
-
 
 def _score_fluency(base: dict[str, Any], transcript: str) -> dict[str, Any]:
     # Длительность здесь намеренно не проверяется: оценщик обрабатывает весь
@@ -718,11 +602,31 @@ def _score_abstraction(
     *,
     expected: str,
     word_stems: tuple[str, ...],
-    exact_phrases: tuple[str, ...] = (),
-    fuzzy_phrases: tuple[str, ...] = (),
+    rejected_phrase_groups: tuple[tuple[str, ...], ...] = (),
+    rejection_override_phrases: tuple[str, ...] = (),
 ) -> dict[str, Any]:
     normalized = _normalize_text(transcript)
     words = normalized.split()
+    describes_separately = any(
+        all(_normalize_text(phrase) in normalized for phrase in group)
+        for group in rejected_phrase_groups
+    )
+    has_category_override = any(
+        _normalize_text(phrase) in normalized
+        for phrase in rejection_override_phrases
+    )
+    if describes_separately and not has_category_override:
+        return {
+            **base,
+            "score": 0,
+            "max_score": 1,
+            "status": "incorrect",
+            "expected": expected,
+            "details": (
+                "Предметы описаны по отдельности, но общая категория "
+                "не названа."
+            ),
+        }
     matched_rule = next(
         (
             stem
@@ -732,17 +636,6 @@ def _score_abstraction(
         ),
         "",
     )
-    if not matched_rule:
-        matched_rule = next(
-            (
-                phrase
-                for phrase in exact_phrases
-                if _normalize_text(phrase) in normalized
-            ),
-            "",
-        )
-    if not matched_rule:
-        matched_rule = _find_fuzzy_phrase(words, fuzzy_phrases)
     correct = bool(matched_rule)
     return {
         **base,
@@ -756,31 +649,6 @@ def _score_abstraction(
             else "Категория не найдена автоматически."
         ),
     }
-
-
-def _find_fuzzy_phrase(
-    words: list[str],
-    expected_phrases: tuple[str, ...],
-) -> str:
-    """Найти фразу с типичными небольшими ошибками ASR."""
-    for expected in expected_phrases:
-        normalized_expected = _normalize_text(expected)
-        expected_length = len(normalized_expected.split())
-        for window_length in range(
-            max(1, expected_length - 1),
-            expected_length + 2,
-        ):
-            for start in range(len(words) - window_length + 1):
-                candidate = " ".join(words[start : start + window_length])
-                similarity = SequenceMatcher(
-                    None,
-                    candidate,
-                    normalized_expected,
-                ).ratio()
-                if similarity >= 0.75:
-                    return candidate
-    return ""
-
 
 def _score_delayed_recall(base: dict[str, Any], transcript: str) -> dict[str, Any]:
     recalled = [
@@ -1065,19 +933,20 @@ def _abstraction_task_analysis(
     normalized = _normalize_text(transcript)
     if task_id == "abstraction_1":
         concepts = {
-            "transport": ("транспорт", "передвиж", "перемещ", "езд", "ехать"),
+            "transport": (
+                "транспорт",
+                "передвиж",
+                "путешеств",
+                "езд",
+                "ехать",
+            ),
         }
     else:
         concepts = {
             "measurement": (
                 "измер",
-                "замер",
                 "мерить",
-                "прибор",
-                "инструмент",
-                "шкал",
             ),
-            "time_and_length": ("врем", "длин", "сантиметр", "миллиметр"),
         }
     matched = {
         concept: [stem for stem in stems if stem in normalized]
