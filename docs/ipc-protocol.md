@@ -139,6 +139,75 @@ core.onEvent(payload => render(payload));
 нумерует запросы, складывает ответы по `id` и раздаёт события подписчикам.
 Экраны правятся по одному, заменой вызова.
 
+## Образец обёртки
+
+Такого объекта в ядре нет — он пишется на стороне интерфейса, один раз, в слое
+связи с вычислительной частью. Ниже минимальный рабочий вариант; при желании
+замените на свой.
+
+```js
+const readline = require("node:readline");
+
+function connectCore(child) {
+  const pending = new Map();
+  const listeners = [];
+  let nextId = 0;
+  let readyResolve;
+  const ready = new Promise(resolve => { readyResolve = resolve; });
+
+  readline.createInterface({ input: child.stdout }).on("line", line => {
+    let message;
+    try { message = JSON.parse(line); } catch { return; }
+
+    if (message.type === "ready") { readyResolve(message); return; }
+
+    if (message.type === "response") {
+      const waiting = pending.get(message.id);
+      if (!waiting) return;
+      pending.delete(message.id);
+      if (message.status >= 400) {
+        const error = new Error((message.body && message.body.detail) || "Ошибка ядра");
+        error.status = message.status;
+        waiting.reject(error);
+      } else {
+        waiting.resolve(message.body);
+      }
+      return;
+    }
+
+    if (message.type === "event") {
+      for (const fn of listeners) fn(message.payload, message.event);
+    }
+  });
+
+  return {
+    ready,
+    request(method, path, body) {
+      const id = String(++nextId);
+      return new Promise((resolve, reject) => {
+        pending.set(id, { resolve, reject });
+        child.stdin.write(JSON.stringify({ type: "request", id, method, path, body }) + "
+");
+      });
+    },
+    onEvent(fn) { listeners.push(fn); },
+  };
+}
+```
+
+Применение:
+
+```js
+const core = connectCore(child);
+await core.ready;
+
+core.onEvent(snapshot => render(snapshot));
+const session = await core.request("GET", "/api/training/session");
+```
+
+Ответы с кодом 400 и выше приходят как отклонённое обещание, а текст для показа
+человеку лежит в `body.detail` — именно он попадает в `error.message`.
+
 ## Перечень обращений
 
 | Путь | Метод | Назначение |
