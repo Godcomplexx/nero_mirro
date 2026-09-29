@@ -54,6 +54,27 @@ class MocaTtsFlowTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(await asyncio.wait_for(speak_task, timeout=1))
 
+    async def test_speak_receives_failed_playback_status(self) -> None:
+        bus = EventBus()
+        plugin = MocaTestPlugin(bus, settings=Settings())
+        ui_updates = bus.subscribe(Topics.UI_UPDATE)
+
+        speak_task = asyncio.create_task(plugin._speak("Тестовое задание."))
+        update = await asyncio.wait_for(ui_updates.queue.get(), timeout=1)
+        await plugin.handle_event(
+            Event(
+                topic=Topics.UI_ACTION,
+                source="test",
+                payload={
+                    "action": "moca_tts_finished",
+                    "moca_tts_id": update.payload["moca_tts_id"],
+                    "tts_ok": False,
+                },
+            )
+        )
+
+        self.assertFalse(await asyncio.wait_for(speak_task, timeout=1))
+
 
 class MocaMissingSpeechTest(unittest.IsolatedAsyncioTestCase):
     async def test_failed_transcription_becomes_empty_answer_instead_of_error(self) -> None:

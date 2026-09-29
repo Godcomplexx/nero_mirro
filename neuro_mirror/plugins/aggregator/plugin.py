@@ -926,6 +926,7 @@ class AggregatorPlugin(ProcessorPlugin):
                 # назначено по величине недобора баллов.
                 "moca_training_plan": self._build_training_plan(moca.get("domains", [])),
                 "moca_tasks": moca.get("tasks", []),
+                "moca_modules": moca.get("modules", []),
                 "moca_task_count": moca.get("task_count", 0),
             },
             "summary": {

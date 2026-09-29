@@ -37,6 +37,12 @@ class MocaScoringTest(unittest.TestCase):
         self.assertEqual(result["score"], 2)
         self.assertEqual(result["max_score"], 15)
         self.assertEqual(result["tasks"], tasks)
+        self.assertEqual(
+            [module["label"] for module in result["modules"]],
+            ["Память", "Внимание", "Речь", "Абстракция"],
+        )
+        self.assertEqual(result["modules"][1]["score"], 2)
+        self.assertEqual(result["modules"][1]["max_score"], 5)
 
     def test_perfect_voice_moca_scores_15_points(self) -> None:
         result = score_moca_tasks(
@@ -69,6 +75,18 @@ class MocaScoringTest(unittest.TestCase):
 
         self.assertEqual(result["score"], 15)
         self.assertEqual(result["max_score"], 15)
+        self.assertEqual(
+            [module["score"] for module in result["modules"]],
+            [5, 5, 3, 2],
+        )
+        self.assertEqual(
+            [module["max_score"] for module in result["modules"]],
+            [5, 5, 3, 2],
+        )
+        self.assertEqual(
+            result["modules"][0]["tasks"][0]["transcript"],
+            "лицо бархат церковь фиалка красный",
+        )
 
     def test_serial_subtraction_uses_partial_credit(self) -> None:
         result = score_moca_tasks(
@@ -399,7 +417,7 @@ class MocaScoringTest(unittest.TestCase):
 
         self.assertEqual(result["tasks"][0]["score"], 1)
 
-    def test_sentence_ignores_comments_before_and_after_exact_answer(self) -> None:
+    def test_sentence_rejects_comments_before_and_after_exact_answer(self) -> None:
         result = score_moca_tasks(
             [
                 {
@@ -412,11 +430,7 @@ class MocaScoringTest(unittest.TestCase):
                 }
             ]
         )
-        task = result["tasks"][0]
-
-        self.assertEqual(task["score"], 1)
-        self.assertIn("до: 2", task["details"])
-        self.assertIn("после: 1", task["details"])
+        self.assertEqual(result["tasks"][0]["score"], 0)
 
     def test_sentence_rejects_comment_inside_expected_sequence(self) -> None:
         result = score_moca_tasks(
@@ -434,7 +448,7 @@ class MocaScoringTest(unittest.TestCase):
 
         self.assertEqual(result["tasks"][0]["score"], 0)
 
-    def test_sentence_accepts_changed_word_endings(self) -> None:
+    def test_sentence_rejects_changed_word_endings(self) -> None:
         result = score_moca_tasks(
             [
                 {
@@ -448,9 +462,9 @@ class MocaScoringTest(unittest.TestCase):
             ]
         )
 
-        self.assertEqual(result["tasks"][0]["score"], 1)
+        self.assertEqual(result["tasks"][0]["score"], 0)
 
-    def test_sentence_accepts_known_asr_word_errors(self) -> None:
+    def test_sentence_rejects_changed_number_even_with_asr_word_error(self) -> None:
         result = score_moca_tasks(
             [
                 {
@@ -465,10 +479,9 @@ class MocaScoringTest(unittest.TestCase):
         )
         task = result["tasks"][0]
 
-        self.assertEqual(task["score"], 1)
-        self.assertIn("типичных ошибок ASR", task["details"])
+        self.assertEqual(task["score"], 0)
 
-    def test_sentence_accepts_asr_omission_of_eto(self) -> None:
+    def test_sentence_rejects_omission_of_eto(self) -> None:
         result = score_moca_tasks(
             [
                 {
@@ -482,9 +495,9 @@ class MocaScoringTest(unittest.TestCase):
             ]
         )
 
-        self.assertEqual(result["tasks"][0]["score"], 1)
+        self.assertEqual(result["tasks"][0]["score"], 0)
 
-    def test_sentence_accepts_asr_preposition_confusion(self) -> None:
+    def test_sentence_rejects_preposition_confusion(self) -> None:
         result = score_moca_tasks(
             [
                 {
@@ -498,7 +511,39 @@ class MocaScoringTest(unittest.TestCase):
             ]
         )
 
-        self.assertEqual(result["tasks"][0]["score"], 1)
+        self.assertEqual(result["tasks"][0]["score"], 0)
+
+    def test_sentence_rejects_single_changed_preposition(self) -> None:
+        result = score_moca_tasks(
+            [
+                {
+                    "task_id": "language_sentence_2",
+                    "domain": "Речь",
+                    "transcript": (
+                        "кошка всегда пряталась на диваном когда "
+                        "собаки были в комнате"
+                    ),
+                }
+            ]
+        )
+
+        self.assertEqual(result["tasks"][0]["score"], 0)
+
+    def test_sentence_rejects_changed_noun_number(self) -> None:
+        result = score_moca_tasks(
+            [
+                {
+                    "task_id": "language_sentence_2",
+                    "domain": "Речь",
+                    "transcript": (
+                        "кошка всегда пряталась под диваном когда "
+                        "собака были в комнате"
+                    ),
+                }
+            ]
+        )
+
+        self.assertEqual(result["tasks"][0]["score"], 0)
 
     def test_sentence_rejects_different_content_word(self) -> None:
         result = score_moca_tasks(
@@ -582,27 +627,27 @@ class MocaScoringTest(unittest.TestCase):
 
         self.assertEqual(result["tasks"][0]["score"], 0)
 
-    def test_abstraction_accepts_scale_and_asr_phrase_error(self) -> None:
+    def test_abstraction_accepts_train_bicycle_answer_pool(self) -> None:
         tasks = [
             {
-                "task_id": "abstraction_2",
+                "task_id": "abstraction_1",
                 "domain": "Абстракция",
-                "transcript": "шкала цифр",
+                "transcript": "это средства передвижения",
             },
             {
-                "task_id": "abstraction_2",
+                "task_id": "abstraction_1",
                 "domain": "Абстракция",
-                "transcript": "смирительный припод",
+                "transcript": "транспорт",
             },
             {
-                "task_id": "abstraction_2",
+                "task_id": "abstraction_1",
                 "domain": "Абстракция",
-                "transcript": "часы линейка замерять замер делать",
+                "transcript": "на обоих можно ездить",
             },
             {
-                "task_id": "abstraction_2",
+                "task_id": "abstraction_1",
                 "domain": "Абстракция",
-                "transcript": "ими можно мерить величины",
+                "transcript": "средства для путешествия",
             },
         ]
         result = score_moca_tasks(tasks)
@@ -610,6 +655,56 @@ class MocaScoringTest(unittest.TestCase):
         self.assertEqual(
             [task["score"] for task in result["tasks"]],
             [1, 1, 1, 1],
+        )
+
+    def test_abstraction_rejects_train_bicycle_non_categories(self) -> None:
+        tasks = [
+            {
+                "task_id": "abstraction_1",
+                "domain": "Абстракция",
+                "transcript": "движение",
+            },
+            {
+                "task_id": "abstraction_1",
+                "domain": "Абстракция",
+                "transcript": "техника",
+            },
+            {
+                "task_id": "abstraction_1",
+                "domain": "Абстракция",
+                "transcript": "у них есть колеса",
+            },
+        ]
+        result = score_moca_tasks(tasks)
+
+        self.assertEqual(
+            [task["score"] for task in result["tasks"]],
+            [0, 0, 0],
+        )
+
+    def test_abstraction_accepts_watch_ruler_answer_pool(self) -> None:
+        tasks = [
+            {
+                "task_id": "abstraction_2",
+                "domain": "Абстракция",
+                "transcript": "измерительные приборы",
+            },
+            {
+                "task_id": "abstraction_2",
+                "domain": "Абстракция",
+                "transcript": "используются для измерения",
+            },
+            {
+                "task_id": "abstraction_2",
+                "domain": "Абстракция",
+                "transcript": "измерение",
+            },
+        ]
+        result = score_moca_tasks(tasks)
+
+        self.assertEqual(
+            [task["score"] for task in result["tasks"]],
+            [1, 1, 1],
         )
 
     def test_abstraction_rejects_generic_digits_and_time(self) -> None:
@@ -640,44 +735,69 @@ class MocaScoringTest(unittest.TestCase):
             [0, 0, 0],
         )
 
-    def test_abstraction_accepts_known_short_asr_variants(self) -> None:
+    def test_abstraction_rejects_separate_object_descriptions(self) -> None:
+        result = score_moca_tasks(
+            [
+                {
+                    "task_id": "abstraction_2",
+                    "domain": "Абстракция",
+                    "transcript": (
+                        "часы это наше время а линейка это измерять "
+                        "сантиметры"
+                    ),
+                },
+                {
+                    "task_id": "abstraction_2",
+                    "domain": "Абстракция",
+                    "transcript": (
+                        "часы это время а линейка это длина, "
+                        "оба измерительные приборы"
+                    ),
+                },
+                {
+                    "task_id": "abstraction_2",
+                    "domain": "Абстракция",
+                    "transcript": (
+                        "часы это время линейка это длина, "
+                        "замер измерений"
+                    ),
+                },
+            ]
+        )
+
+        self.assertEqual(
+            [task["score"] for task in result["tasks"]],
+            [0, 1, 1],
+        )
+
+    def test_abstraction_rejects_answers_outside_watch_ruler_pool(self) -> None:
         tasks = [
             {
                 "task_id": "abstraction_2",
                 "domain": "Абстракция",
-                "transcript": "извинени",
+                "transcript": "на них есть цифры",
             },
             {
                 "task_id": "abstraction_2",
                 "domain": "Абстракция",
-                "transcript": "это и смирение время и расстояние",
+                "transcript": "шкала цифр",
             },
             {
                 "task_id": "abstraction_2",
                 "domain": "Абстракция",
-                "transcript": "тут цифр блат а тут цифры",
+                "transcript": "приборы",
             },
             {
                 "task_id": "abstraction_2",
                 "domain": "Абстракция",
-                "transcript": "тут циферблат а тут цифры",
-            },
-            {
-                "task_id": "abstraction_2",
-                "domain": "Абстракция",
-                "transcript": "деления в сантиметрах миллиметр",
-            },
-            {
-                "task_id": "abstraction_2",
-                "domain": "Абстракция",
-                "transcript": "меру времени и длины",
+                "transcript": "замер",
             },
         ]
         result = score_moca_tasks(tasks)
 
         self.assertEqual(
             [task["score"] for task in result["tasks"]],
-            [1, 1, 1, 1, 1, 1],
+            [0, 0, 0, 0],
         )
 
     def test_delayed_recall_accepts_word_forms(self) -> None:
