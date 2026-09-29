@@ -24,11 +24,6 @@ const state = {
   cameraActive: false,
   recording: false,
   busy: false,
-  live2dScriptsLoaded: false,
-  live2dReady: false,
-  live2dApp: null,
-  live2dModel: null,
-  live2dResizeHandler: null,
   // Wake-word activation
   wakeWordEnabled: false,
   wakeWordRecognition: null,
@@ -98,7 +93,6 @@ const el = {
   mascotSpeech: $("mascot-speech"),
   mascotSpeechText: $("mascot-speech-text"),
   mascotImage: $("mascot-image"),
-  mascotLive2d: $("mascot-live2d"),
   wakeWordToggle: $("wake-word-toggle"),
   wakeWordIndicator: $("wake-word-indicator"),
   wakeWordHint: $("wake-word-hint"),
@@ -327,10 +321,6 @@ function setMascotState(name) {
   el.mascotMouth.style.opacity = `${values[2]}`;
 }
 
-function setMascotLive2dStatus(status) {
-  if (el.mascot) el.mascot.dataset.live2d = status;
-}
-
 function formatClockDate(value) {
   return value.toLocaleDateString("ru-RU", {
     day: "numeric",
@@ -361,119 +351,6 @@ function updateClockDisplay() {
       el.currentGreeting,
       state.activeUser ? `${greeting}, ${state.activeUser.name}` : greeting
     );
-  }
-}
-
-async function loadExternalScript(url, test) {
-  if (!url) throw new Error("script URL is empty");
-  if (typeof test === "function" && test()) return;
-
-  const existing = document.querySelector(`script[data-external-script="${url}"]`);
-  if (existing) {
-    await new Promise((resolve, reject) => {
-      if (existing.dataset.loaded === "1") {
-        resolve();
-        return;
-      }
-      existing.addEventListener("load", resolve, { once: true });
-      existing.addEventListener("error", () => reject(new Error(`failed to load ${url}`)), { once: true });
-    });
-    return;
-  }
-
-  await new Promise((resolve, reject) => {
-    const script = document.createElement("script");
-    script.src = url;
-    script.async = true;
-    script.dataset.externalScript = url;
-    script.addEventListener("load", () => {
-      script.dataset.loaded = "1";
-      resolve();
-    }, { once: true });
-    script.addEventListener("error", () => reject(new Error(`failed to load ${url}`)), { once: true });
-    document.head.appendChild(script);
-  });
-}
-
-function fitLive2DModel() {
-  if (!state.live2dModel || !state.live2dApp || !el.mascotLive2d) return;
-
-  const width = Math.max(220, el.mascotLive2d.clientWidth || 280);
-  const height = Math.max(280, el.mascotLive2d.clientHeight || 380);
-  state.live2dApp.renderer.resize(width, height);
-
-  const localBounds = state.live2dModel.getLocalBounds();
-  const baseWidth = Math.max(1, localBounds.width);
-  const baseHeight = Math.max(1, localBounds.height);
-  const scale = Math.min(width / baseWidth, height / baseHeight) * 1.2;
-
-  state.live2dModel.scale.set(scale);
-  state.live2dModel.anchor.set(0.5, 0.0);
-  state.live2dModel.x = width * 0.5;
-  state.live2dModel.y = -height * 0.08;
-}
-
-async function setupLive2D() {
-  const modelUrl = state.config && state.config.live2d_model_url;
-  if (!modelUrl || !el.mascotLive2d || !el.mascot) {
-    setMascotLive2dStatus("preview");
-    return;
-  }
-
-  try {
-    setMascotLive2dStatus("loading");
-    setText(el.mascotNote, "Loading Live2D model...");
-
-    const coreUrl = (state.config && state.config.live2d_cubism_core_url) || "";
-    await loadExternalScript("/static/vendor/pixi.min.js", () => Boolean(window.PIXI && window.PIXI.Application));
-    if (coreUrl) {
-      await loadExternalScript(coreUrl, () => Boolean(window.Live2DCubismCore));
-    }
-    await loadExternalScript("/static/vendor/cubism4.min.js", () => Boolean(window.PIXI && window.PIXI.live2d && window.PIXI.live2d.Live2DModel));
-
-    if (!window.PIXI || !window.PIXI.live2d || !window.PIXI.live2d.Live2DModel) {
-      throw new Error("Live2D runtime is unavailable");
-    }
-
-    const app = new window.PIXI.Application({
-      width: Math.max(220, el.mascotLive2d.clientWidth || 280),
-      height: Math.max(280, el.mascotLive2d.clientHeight || 380),
-      autoStart: true,
-      transparent: true,
-      antialias: true,
-    });
-
-    el.mascotLive2d.innerHTML = "";
-    el.mascotLive2d.appendChild(app.view);
-
-    const model = await window.PIXI.live2d.Live2DModel.from(modelUrl, {
-      autoInteract: false,
-    });
-
-    app.stage.addChild(model);
-    state.live2dApp = app;
-    state.live2dModel = model;
-    state.live2dReady = true;
-    state.live2dScriptsLoaded = true;
-
-    fitLive2DModel();
-    if (!state.live2dResizeHandler) {
-      state.live2dResizeHandler = () => fitLive2DModel();
-      window.addEventListener("resize", state.live2dResizeHandler);
-    }
-
-    setHidden(el.mascotLive2d, false);
-    setHidden(el.mascotImage, true);
-    setMascotLive2dStatus("ready");
-    setText(el.mascotNote, "AIRI Hiyori Live2D model is active.");
-    appendLogLine(`[client] live2d ready: ${modelUrl}`);
-  } catch (error) {
-    state.live2dReady = false;
-    setHidden(el.mascotLive2d, true);
-    setHidden(el.mascotImage, false);
-    setMascotLive2dStatus("fallback");
-    setText(el.mascotNote, `Live2D fallback: ${error.message || error}`);
-    appendLogLine(`[client] live2d error: ${error.message || error}`);
   }
 }
 
@@ -583,11 +460,7 @@ async function loadConfig() {
   setText(el.backendLabel, state.config.assistant_backend_label || "web");
   setText(el.telemetryBackend, state.config.assistant_backend_label || "web");
 
-  if (state.config.live2d_model_url) {
-    setText(el.mascotNote, "AIRI Hiyori Live2D URL is configured.");
-  } else {
-    setText(el.mascotNote, "AIRI Hiyori preview is loaded.");
-  }
+  setText(el.mascotNote, "AIRI Hiyori preview is loaded.");
 }
 
 async function loadDevices() {
@@ -4152,18 +4025,6 @@ async function bootstrap() {
     await loadDevices();
   } catch (error) {
     appendLogLine(`[client] loadDevices failed (continuing): ${error.message || error}`);
-  }
-  // Live2D грузится с внешнего CDN — без интернета он не должен
-  // блокировать запуск зеркала (останется статичная картинка маскота)
-  try {
-    await Promise.race([
-      setupLive2D(),
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new Error("live2d load timeout")), 8000)
-      ),
-    ]);
-  } catch (error) {
-    appendLogLine(`[client] live2d unavailable (continuing): ${error.message || error}`);
   }
   setButtonLabel(el.cameraToggle, "Turn camera on");
   setButtonLabel(el.appearanceButton, "Analyze appearance");

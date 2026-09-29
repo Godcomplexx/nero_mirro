@@ -411,8 +411,6 @@ def create_app() -> FastAPI:
             {
                 "assistant_enabled": ctx.settings.enable_ai_assistant,
                 "tts_voice": ctx.settings.tts_voice,
-                "live2d_model_url": ctx.settings.web_live2d_model_url,
-                "live2d_cubism_core_url": ctx.settings.web_live2d_cubism_core_url,
                 "assistant_backend_label": ctx.runtime.assistant_backend_label,
                 "app_version": APP_VERSION,
                 "scenario_versions": SCENARIO_VERSIONS,

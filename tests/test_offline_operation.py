@@ -96,15 +96,26 @@ def test_interface_loads_fonts_and_scripts_from_the_project():
     assert "fonts.gstatic.com" not in markup
     assert "/static/fonts/fonts.css" in markup
     assert "cdn.jsdelivr.net" not in script
-    assert "/static/vendor/" in script
+
+
+def test_animated_avatar_runtime_is_not_bundled():
+    """Анимация аватара удалена: библиотеки и модель не поставляются.
+
+    Проверка оставлена, потому что эти файлы весили 27 МБ и тянули за собой
+    отдельные лицензионные условия.
+    """
+    static = SOURCE_ROOT / "web" / "static"
+    assert not (static / "vendor").exists()
+    assert not (static / "assets" / "live2d").exists()
+    for source in (static / "index.html", static / "app.js", static / "styles.css"):
+        text = source.read_text(encoding="utf-8").lower()
+        assert "live2d" not in text and "cubism" not in text, source.name
 
 
 def test_bundled_assets_exist():
     static = SOURCE_ROOT / "web" / "static"
     assert (static / "fonts" / "fonts.css").is_file()
     assert list((static / "fonts").glob("*.woff2")), "нет файлов шрифтов"
-    for name in ("pixi.min.js", "cubism4.min.js", "live2dcubismcore.min.js"):
-        assert (static / "vendor" / name).is_file(), f"нет {name}"
 
 
 def test_vision_translation_does_not_use_public_services():
