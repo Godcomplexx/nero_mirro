@@ -46,6 +46,7 @@ from neuro_mirror.plugins.games.registry import (
 )
 from neuro_mirror.plugins.games.contracts import Domain, normalise_game_code
 from neuro_mirror.plugins.games.selector import NoEligibleGameError, select_game
+from neuro_mirror.screening.training_session import build_training_session
 from neuro_mirror.plugins.ui.web_plugin import WebUIPlugin, WebUIStateStore
 from neuro_mirror.plugins.user_progress.plugin import UserProgressPlugin
 from neuro_mirror.version import APP_VERSION, SCENARIO_VERSIONS
@@ -274,6 +275,54 @@ def create_app() -> FastAPI:
         return JSONResponse(
             [item.to_public_dict(implemented=item.code in implemented) for item in all_game_definitions()]
         )
+
+    @app.get("/api/training/session")
+    async def training_session() -> JSONResponse:
+        """Готовое занятие по последнему результату MoCA.
+
+        Интерфейс получает упорядоченный список игр и просто проигрывает его:
+        расчёт плана, перевод доменов в коды игр и защита от повторов остаются
+        в ядре.
+        """
+        ctx: WebAppContext = app.state.context
+        active = _active_user_or_400()
+        user_id = str(active.get("id") or "")
+        try:
+            reply = await ctx.runtime.bus.request(
+                Event(
+                    topic=Topics.REQ_STORAGE_QUERY,
+                    source="web.training",
+                    payload={"user_id": user_id},
+                ),
+                timeout=10.0,
+            )
+        except asyncio.TimeoutError:
+            raise HTTPException(status_code=504, detail="Хранилище не ответило.")
+
+        items = list(reply.get("items") or [])
+        items.sort(key=lambda item: str(item.get("stored_at") or ""), reverse=True)
+        profile: list[dict[str, Any]] = []
+        source_session = ""
+        for item in items:
+            candidate = ((item.get("domains") or {}).get("moca_domains")) or []
+            if candidate:
+                profile = list(candidate)
+                source_session = str(item.get("session_id") or "")
+                break
+        if not profile:
+            raise HTTPException(
+                status_code=409,
+                detail="Сначала пройдите когнитивный тест: занятие подбирается по его результату.",
+            )
+
+        session = build_training_session(
+            profile,
+            history=ctx.runtime.game_history_store.for_user(user_id),
+            available_codes=implemented_game_codes(),
+        )
+        if not session["games"]:
+            raise HTTPException(status_code=409, detail="Не удалось подобрать ни одного задания.")
+        return JSONResponse({**session, "profile": profile, "source_session_id": source_session})
 
     @app.post("/api/games/select")
     async def select_training_game(payload: GameSelectionIn) -> JSONResponse:
