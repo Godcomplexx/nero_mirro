@@ -15,6 +15,9 @@ from neuro_mirror.screening.gm03_scoring import score_gm03
 class LocationSession:
     session_id: str
     rooms: list[dict[str, Any]]
+    stimulus_set: str
+    difficulty_level: int
+    missing_items: int
     room_index: int = 0
     object_index: int = 0
     phase: str = "study"
@@ -33,15 +36,35 @@ class Gm03ChangedObjectPlugin(BrowserGamePlugin):
         self._sessions: dict[str, LocationSession] = {}
         self._random = secrets.SystemRandom()
 
-    def _start(self) -> dict[str, Any]:
+    def start_game(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._start(stimulus_set=str(payload.get("stimulus_set") or ""), difficulty_level=payload.get("difficulty_level"))
+
+    def _start(self, *, stimulus_set: str = "", difficulty_level: object = None) -> dict[str, Any]:
+        try:
+            level = min(3, max(1, int(difficulty_level or 1)))
+        except (TypeError, ValueError):
+            level = 1
+        missing_items = (5, 7, 10)[level - 1]
+        rooms_by_set = {str(room["name"]).casefold(): room for room in ROOMS}
+        available_sets = tuple(
+            set_name
+            for set_name in self.definition.stimulus_sets
+            if set_name.casefold() in rooms_by_set
+        ) or tuple(rooms_by_set)
+        requested_set = stimulus_set.casefold()
+        selected_set = next(
+            (set_name for set_name in available_sets if set_name.casefold() == requested_set),
+            available_sets[0],
+        )
+        selected_room = rooms_by_set[selected_set.casefold()]
         rooms = []
-        for source in ROOMS:
-            cells = self._random.sample(range(16), 5)
+        for source in (selected_room,):
+            cells = self._random.sample(range(16), missing_items)
             rooms.append({"name": source["name"], "objects": [
                 {"name": name, "symbol": symbol, "cell": cell}
-                for (name, symbol), cell in zip(source["objects"], cells)
+                for (name, symbol), cell in zip(self._random.sample(list(source["objects"]), missing_items), cells)
             ]})
-        session = LocationSession(uuid.uuid4().hex, rooms)
+        session = LocationSession(uuid.uuid4().hex, rooms, selected_set, level, missing_items)
         self._sessions[session.session_id] = session
         return self._payload(session)
 
@@ -90,6 +113,9 @@ class Gm03ChangedObjectPlugin(BrowserGamePlugin):
         payload = {
             "ok": True, "finished": False, "session_id": session.session_id,
             "phase": session.phase, "room": room["name"],
+            "stimulus_set": session.stimulus_set,
+            "difficulty_level": session.difficulty_level,
+            "difficulty_parameters": {"missing_items": session.missing_items},
             "room_number": session.room_index + 1, "room_count": len(session.rooms),
         }
         if session.phase == "study":

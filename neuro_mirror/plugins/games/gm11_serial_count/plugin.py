@@ -36,6 +36,8 @@ def parse_number(text: str) -> int | None:
 @dataclass(slots=True)
 class CountSession:
     session_id: str
+    rules: list[dict[str, Any]]
+    stimulus_set: str
     rule_index: int = 0
     current: int = 0
     correct_in_rule: int = 0
@@ -52,8 +54,15 @@ class Gm11SerialCountPlugin(BrowserGamePlugin):
         super().__init__(bus)
         self._sessions = {}
 
-    def _start(self):
-        session = CountSession(uuid.uuid4().hex, current=RULES[0]["start"])
+    def start_game(self, payload):
+        return self._start(stimulus_set=str(payload.get("stimulus_set") or ""))
+
+    def _start(self, *, stimulus_set=""):
+        rules_by_name = {str(rule["stimulus_set"]): rule for rule in RULES}
+        available = tuple(name for name in self.definition.stimulus_sets if name in rules_by_name) or tuple(rules_by_name)
+        selected = stimulus_set if stimulus_set in available else available[0]
+        rules = [rules_by_name[selected]]
+        session = CountSession(uuid.uuid4().hex, rules, selected, current=rules[0]["start"])
         self._sessions[session.session_id] = session
         return self._payload(session)
 
@@ -63,7 +72,7 @@ class Gm11SerialCountPlugin(BrowserGamePlugin):
             return {"ok": False, "message": "Игровая сессия не найдена."}
         now = time.time() * 1000
         value = parse_number(str(payload.get("transcript") or ""))
-        rule = RULES[session.rule_index]
+        rule = session.rules[session.rule_index]
         expected = session.current + rule["step"]
         correct = value == expected
         session.round_events.append(
@@ -83,7 +92,7 @@ class Gm11SerialCountPlugin(BrowserGamePlugin):
             if session.correct_in_rule >= CORRECT_PER_RULE:
                 session.rule_index += 1
                 session.correct_in_rule = 0
-                if session.rule_index >= len(RULES):
+                if session.rule_index >= len(session.rules):
                     events = list(session.round_events)
                     self._sessions.pop(session.session_id, None)
                     return {
@@ -93,19 +102,20 @@ class Gm11SerialCountPlugin(BrowserGamePlugin):
                         "events": events,
                         "metrics": score_gm11(events),
                     }
-                session.current = RULES[session.rule_index]["start"]
+                session.current = session.rules[session.rule_index]["start"]
         result = self._payload(session)
         result.update({"correct": correct, "recognized": value, "expected": expected})
         return result
 
     def _payload(self, session):
-        rule = RULES[session.rule_index]
+        rule = session.rules[session.rule_index]
         return {
             "ok": True,
             "finished": False,
             "session_id": session.session_id,
+            "stimulus_set": session.stimulus_set,
             "rule_number": session.rule_index + 1,
-            "rule_count": len(RULES),
+            "rule_count": len(session.rules),
             "instruction": rule["label"],
             "current": session.current,
             "correct_in_rule": session.correct_in_rule,

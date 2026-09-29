@@ -21,6 +21,7 @@ def response_matches(transcript: str, answers: tuple[str, ...]) -> bool:
 class CategoryNamingSession:
     session_id: str
     trials: list[dict[str, Any]]
+    stimulus_set: str
     trial_index: int = 0
     shown_at_ms: float = field(default_factory=lambda: time.time() * 1000)
     round_events: list[dict[str, Any]] = field(default_factory=list)
@@ -35,20 +36,22 @@ class Gm24CategoryNamingPlugin(BrowserGamePlugin):
         self._sessions: dict[str, CategoryNamingSession] = {}
         self._random = secrets.SystemRandom()
 
-    def _start(self) -> dict[str, Any]:
+    def start_game(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._start(stimulus_set=str(payload.get("stimulus_set") or ""))
+
+    def _start(self, *, stimulus_set: str = "") -> dict[str, Any]:
+        groups_by_name = {item["category"].casefold(): item for item in CATEGORY_GROUPS}
+        available = tuple(name for name in self.definition.stimulus_sets if name.casefold() in groups_by_name)
+        selected = next((name for name in available if name.casefold() == stimulus_set.casefold()), available[0])
+        selected_group = groups_by_name[selected.casefold()]
         trials: list[dict[str, Any]] = []
         for group_index in range(2):
-            cycle = [
-                {
-                    "category": item["category"],
-                    "answers": item["answers"],
-                    "words": item["groups"][group_index],
-                }
-                for item in CATEGORY_GROUPS
-            ]
-            self._random.shuffle(cycle)
-            trials.extend(cycle)
-        session = CategoryNamingSession(uuid.uuid4().hex, trials)
+            trials.append({
+                "category": selected_group["category"],
+                "answers": selected_group["answers"],
+                "words": selected_group["groups"][group_index],
+            })
+        session = CategoryNamingSession(uuid.uuid4().hex, trials, selected)
         self._sessions[session.session_id] = session
         return self._payload(session)
 
@@ -96,6 +99,7 @@ class Gm24CategoryNamingPlugin(BrowserGamePlugin):
             "ok": True,
             "finished": False,
             "session_id": session.session_id,
+            "stimulus_set": session.stimulus_set,
             "trial_number": session.trial_index + 1,
             "trial_count": len(session.trials),
             "words": list(trial["words"]),

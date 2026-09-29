@@ -6,4 +6,8 @@ OBJECT_COUNT = 9
 TARGET_COUNT = 2
 PREVIEW_MS = 1800
 MOVEMENT_MS = 4200
-STIMULUS_SHAPES = ("circle", "triangle", "balloon")
+STIMULUS_SHAPES = {
+    "треугольники": "triangle",
+    "воздушные шары": "balloon",
+    "силуэты птиц": "bird",
+}

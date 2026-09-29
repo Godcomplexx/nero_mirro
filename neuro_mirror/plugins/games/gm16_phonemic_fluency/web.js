@@ -1,181 +1,28 @@
-export function mount({ container, definition, api, close }) {
-  container.innerHTML = `
-    <header class="game-header-new">
-      <div>
-        <p class="game-kicker-new mono">РЕЧЬ</p>
-        <h2>${definition.title}</h2>
-        <p>Назовите как можно больше разных слов, начинающихся с указанной буквы.</p>
-      </div>
-    </header>
-    <main class="game-stage-new gm16">
-      <p class="gm16-label mono">ВАША БУКВА</p>
-      <strong data-letter></strong>
-      <p>После сигнала говорите до автоматического завершения записи.</p>
-      <button type="button" class="icon-btn primary-btn" data-start>
-        <span>Начать задание</span>
-      </button>
-      <div class="gm16-recording" data-recording hidden aria-label="Идёт запись">
-        <span></span><span></span><span></span><span></span><span></span>
-      </div>
-      <p class="gm16-status" data-status aria-live="polite"></p>
-    </main>
-    <footer class="game-actions-new">
-      <button type="button" class="icon-btn" data-close><span>К выбору игр</span></button>
-    </footer>`;
+export function mount({container,definition,api,close}){
+  container.innerHTML=`
+    <header class="game-header-new"><div><p class="game-kicker-new mono">РЕЧЬ</p><h2>${definition.title}</h2><p data-instruction>Назовите как можно больше разных слов, начинающихся с указанной буквы.</p></div><div class="game-progress-new" data-header-progress>1. Инструкция</div></header>
+    <main class="game-stage-new gm16-stage is-instruction-stage" data-stage>
+      <section class="gm16-intro" data-intro><h3>Как выполнять задание</h3><ol><li>Запомните показанную букву.</li><li>Нажмите кнопку начала записи и дождитесь сигнала.</li><li>Называйте разные слова, которые начинаются с этой буквы.</li></ol><p class="gm16-example-title">Посмотрите пример</p><div class="gm16-media-placeholder"><span aria-hidden="true">▶</span><strong>Здесь будет GIF с примером</strong><small>Визуальная инструкция будет добавлена позже</small></div><button type="button" class="icon-btn primary-btn" data-start-training><span>Перейти к тренировке</span></button></section>
+      <section class="gm16-training" data-training hidden><p class="gm16-label mono">ТРЕНИРОВОЧНАЯ БУКВА</p><strong class="gm16-letter">К</strong><p>Назовите хотя бы одно слово на букву «К».</p><button type="button" class="icon-btn primary-btn" data-training-record><span>Начать запись</span></button><div class="gm16-recording" data-training-recording hidden><span></span><span></span><span></span><span></span><span></span></div><p class="gm16-status" data-training-status aria-live="polite"></p></section>
+      <section class="game-intro-new gm16-training-complete" data-training-complete hidden><h3>Обучение завершено</h3><p>Вы назвали слово на указанную букву.</p><div class="gm16-training-actions"><button type="button" class="icon-btn gm16-training-repeat" data-repeat-training><span>Повторить тренировку</span></button><button type="button" class="icon-btn primary-btn" data-confirm-start><span>Начать игру</span></button></div></section>
+      <section class="gm16-game" data-game hidden><p class="gm16-label mono">ВАША БУКВА</p><strong class="gm16-letter" data-letter></strong><p>После сигнала говорите до автоматического завершения записи.</p><button type="button" class="icon-btn primary-btn" data-start><span>Начать задание</span></button><div class="gm16-recording" data-recording hidden><span></span><span></span><span></span><span></span><span></span></div><p class="gm16-status" data-status aria-live="polite"></p></section>
+    </main><footer class="game-actions-new"><button type="button" class="icon-btn" data-close><span>К выбору игр</span></button></footer>`;
+  const stage=container.querySelector('[data-stage]'),instruction=container.querySelector('[data-instruction]'),headerProgress=container.querySelector('[data-header-progress]');
+  const intro=container.querySelector('[data-intro]'),training=container.querySelector('[data-training]'),trainingRecord=container.querySelector('[data-training-record]'),trainingRecording=container.querySelector('[data-training-recording]'),trainingStatus=container.querySelector('[data-training-status]'),trainingComplete=container.querySelector('[data-training-complete]');
+  const game=container.querySelector('[data-game]'),letter=container.querySelector('[data-letter]'),start=container.querySelector('[data-start]'),recording=container.querySelector('[data-recording]'),status=container.querySelector('[data-status]');
+  let state=null,stream=null,recorder=null,active=true,busy=false,token=0;const timers=new Set();const showOnly=target=>[intro,training,trainingComplete,game].forEach(section=>{section.hidden=section!==target});
+  function stopStream(){if(stream)stream.getTracks().forEach(track=>track.stop());stream=null}async function beep(){const AudioContextClass=window.AudioContext||window.webkitAudioContext,context=new AudioContextClass(),oscillator=context.createOscillator(),gain=context.createGain();oscillator.frequency.value=700;gain.gain.value=.15;oscillator.connect(gain).connect(context.destination);oscillator.start();oscillator.stop(context.currentTime+.16);await new Promise(resolve=>setTimeout(resolve,220));await context.close()}
+  async function capture(durationMs,statusNode,indicator){statusNode.textContent='Подготавливаю микрофон…';stream=await navigator.mediaDevices.getUserMedia({audio:true});const mime=MediaRecorder.isTypeSupported('audio/webm;codecs=opus')?'audio/webm;codecs=opus':'audio/webm',chunks=[];recorder=new MediaRecorder(stream,{mimeType:mime});return new Promise(async(resolve,reject)=>{recorder.ondataavailable=event=>{if(event.data.size)chunks.push(event.data)};recorder.onerror=event=>reject(event.error||new Error('Ошибка записи'));recorder.onstop=async()=>{stopStream();indicator.hidden=true;if(!active){resolve({transcript:'',recognized:false});return}statusNode.textContent='Распознаю ответы…';try{const form=new FormData();form.append('audio',new Blob(chunks,{type:mime}),'phonemic-fluency.webm');const response=await fetch('/api/speech/transcribe?assistant=false',{method:'POST',body:form}),speech=await response.json(),transcript=String(speech.transcript||'');resolve({transcript,recognized:Boolean(speech.accepted&&transcript)})}catch(error){reject(error)}};recorder.start();await beep();if(!active||recorder.state!=='recording')return;indicator.hidden=false;statusNode.textContent='Говорите';const id=setTimeout(()=>{timers.delete(id);if(recorder&&recorder.state==='recording')recorder.stop()},durationMs);timers.add(id)})}
 
-  const letter = container.querySelector("[data-letter]");
-  const start = container.querySelector("[data-start]");
-  const recording = container.querySelector("[data-recording]");
-  const status = container.querySelector("[data-status]");
-  let state = null;
-  let stream = null;
-  let recorder = null;
-  let active = true;
-  let busy = false;
+  function beginTraining(){token+=1;stage.classList.remove('is-instruction-stage');showOnly(training);headerProgress.textContent='2. Тренировка';instruction.textContent='Назовите слово на букву «К» после сигнала.';trainingRecord.disabled=false;trainingRecording.hidden=true;trainingStatus.textContent='';busy=false}
+  trainingRecord.onclick=async()=>{if(busy||!active)return;busy=true;trainingRecord.disabled=true;const currentToken=token;try{const speech=await capture(5000,trainingStatus,trainingRecording);if(!active||currentToken!==token)return;const words=speech.transcript.toLowerCase().match(/[а-яё-]+/g)||[],correct=speech.recognized&&words.some(word=>word.startsWith('к'));if(!correct){trainingStatus.textContent=speech.recognized?`Распознано «${speech.transcript}». Назовите слово на букву «К».`:'Ответ не распознан. Повторите.';trainingRecord.disabled=false;busy=false;return}trainingStatus.textContent=`Принято: ${speech.transcript}`;setTimeout(()=>{if(!active||currentToken!==token)return;showOnly(trainingComplete);headerProgress.textContent='Обучение завершено';instruction.textContent='Тренировочный пример выполнен правильно.'},500)}catch(error){stopStream();trainingStatus.textContent=`Не удалось записать ответ: ${error.message}`;trainingRecord.disabled=false;busy=false}};
+  async function beginGame(){token+=1;showOnly(game);headerProgress.textContent='Игра';instruction.textContent='Называйте слова на указанную букву.';try{state=await api.start();letter.textContent=state.letter;start.disabled=false;start.hidden=false;status.textContent='';busy=false}catch(error){status.textContent=`Не удалось начать игру: ${error.message}`}}
+  start.onclick=async()=>{if(busy||!active)return;busy=true;start.disabled=true;start.hidden=true;try{const speech=await capture(state.recording_ms,status,recording);if(!active)return;await api.answer({session_id:state.session_id,transcript:speech.transcript,recognized:speech.recognized,duration_ms:state.recording_ms});if(!active)return;letter.textContent='Готово';status.textContent=speech.recognized?'Задание завершено. Ответы сохранены.':'Задание завершено, но речь не была распознана.';busy=false}catch(error){stopStream();status.textContent=error.message;start.disabled=false;start.hidden=false;busy=false}};
 
-  async function beep() {
-    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-    const context = new AudioContextClass();
-    const oscillator = context.createOscillator();
-    const gain = context.createGain();
-    oscillator.frequency.value = 700;
-    gain.gain.value = 0.15;
-    oscillator.connect(gain).connect(context.destination);
-    oscillator.start();
-    oscillator.stop(context.currentTime + 0.16);
-    await new Promise((resolve) => setTimeout(resolve, 220));
-    await context.close();
-  }
-
-  function stopStream() {
-    if (stream) stream.getTracks().forEach((track) => track.stop());
-    stream = null;
-  }
-
-  async function submit(chunks, mime) {
-    stopStream();
-    if (!active) return;
-    recording.hidden = true;
-    status.textContent = "Распознаю ответы…";
-    let transcript = "";
-    let recognized = false;
-    try {
-      const form = new FormData();
-      form.append("audio", new Blob(chunks, { type: mime }), "phonemic-fluency.webm");
-      const response = await fetch("/api/speech/transcribe?assistant=false", {
-        method: "POST",
-        body: form,
-      });
-      const speech = await response.json();
-      transcript = String(speech.transcript || "");
-      recognized = Boolean(speech.accepted && transcript);
-    } catch (error) {
-      status.textContent = `Не удалось распознать запись: ${error.message}`;
-    }
-
-    try {
-      await api.answer({
-        session_id: state.session_id,
-        transcript,
-        recognized,
-        duration_ms: state.recording_ms,
-      });
-      if (!active) return;
-      letter.textContent = "Готово";
-      status.textContent = recognized
-        ? "Задание завершено. Ответы сохранены."
-        : "Задание завершено, но речь не была распознана.";
-      busy = false;
-    } catch (error) {
-      status.textContent = error.message;
-      start.disabled = false;
-      start.hidden = false;
-      busy = false;
-    }
-  }
-
-  start.onclick = async () => {
-    if (busy || !active) return;
-    busy = true;
-    start.disabled = true;
-    status.textContent = "Подготавливаю микрофон…";
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
-        ? "audio/webm;codecs=opus"
-        : "audio/webm";
-      const chunks = [];
-      recorder = new MediaRecorder(stream, { mimeType: mime });
-      recorder.ondataavailable = (event) => {
-        if (event.data.size) chunks.push(event.data);
-      };
-      recorder.onstop = () => submit(chunks, mime);
-      recorder.start();
-      start.hidden = true;
-      await beep();
-      if (!active || recorder.state !== "recording") return;
-      recording.hidden = false;
-      status.textContent = "Говорите до окончания записи";
-      setTimeout(() => {
-        if (recorder && recorder.state === "recording") recorder.stop();
-      }, state.recording_ms);
-    } catch (error) {
-      stopStream();
-      status.textContent = `Не удалось включить микрофон: ${error.message}`;
-      start.disabled = false;
-      start.hidden = false;
-      busy = false;
-    }
-  };
-
-  container.querySelector("[data-close]").onclick = () => {
-    active = false;
-    if (recorder && recorder.state === "recording") recorder.stop();
-    stopStream();
-    close();
-  };
-
-  const style = document.createElement("style");
-  style.textContent = `
-    .gm16 { text-align: center; }
-    .gm16-label { color: #587180; letter-spacing: .16em; }
-    .gm16 [data-letter] {
-      display: grid;
-      place-items: center;
-      width: min(250px, 30vh, 58vw);
-      aspect-ratio: 1;
-      margin: clamp(10px, 2vh, 22px) auto;
-      border: 2px solid #bfd0d8;
-      border-radius: 30px;
-      background: #fff;
-      color: #17212b;
-      font-size: clamp(90px, 18vh, 180px);
-      line-height: 1;
-    }
-    .gm16-status { min-height: 1.5em; }
-    .gm16-recording { height: 44px; margin: 12px auto; color: #2fa6bd; }
-    .gm16-recording span {
-      display: inline-block;
-      width: 8px;
-      height: 32px;
-      margin: 0 4px;
-      border-radius: 8px;
-      background: currentColor;
-      animation: gm16-wave .8s ease-in-out infinite alternate;
-    }
-    .gm16-recording span:nth-child(2), .gm16-recording span:nth-child(4) { animation-delay: -.3s; }
-    .gm16-recording span:nth-child(3) { animation-delay: -.55s; }
-    @keyframes gm16-wave { to { transform: scaleY(.3); opacity: .5; } }
-  `;
-  container.append(style);
-  api.start().then((payload) => {
-    state = payload;
-    letter.textContent = payload.letter;
-  });
-
-  return () => {
-    active = false;
-    if (recorder && recorder.state === "recording") recorder.stop();
-    stopStream();
-  };
+  container.querySelector('[data-start-training]').onclick=beginTraining;container.querySelector('[data-repeat-training]').onclick=beginTraining;container.querySelector('[data-confirm-start]').onclick=beginGame;container.querySelector('[data-close]').onclick=()=>{active=false;token+=1;if(recorder&&recorder.state==='recording')recorder.stop();stopStream();timers.forEach(id=>clearTimeout(id));timers.clear();close()};
+  const style=document.createElement('style');style.textContent=`
+    .gm16-stage{text-align:center}.gm16-stage.is-instruction-stage{align-items:start;padding-top:clamp(14px,2.4vh,30px)}.gm16-intro,.gm16-training,.gm16-game{width:min(800px,100%)}.gm16-intro h3{margin:0 0 10px;font-size:clamp(19px,2.3vw,25px)}.gm16-intro ol{width:min(700px,100%);margin:0 auto 16px;padding-left:28px;color:#52606d;text-align:left;font-size:clamp(14px,1.6vw,18px);line-height:1.4}.gm16-intro li+li{margin-top:5px}.gm16-example-title{margin:0 0 7px;font-weight:700}.gm16-media-placeholder{box-sizing:border-box;display:flex;width:min(620px,100%);height:clamp(130px,22vh,230px);margin:0 auto 18px;flex-direction:column;align-items:center;justify-content:center;gap:7px;border:2px dashed #b8cbd5;border-radius:16px;background:#eaf1f4;color:#52606d}.gm16-media-placeholder>span{display:grid;width:46px;height:46px;place-items:center;border-radius:50%;background:#d3e2e9;color:#168ba8}.gm16-media-placeholder strong{color:#263744}
+    .gm16-label{color:#587180;letter-spacing:.16em}.gm16-letter{display:grid;place-items:center;width:min(250px,30vh,58vw);aspect-ratio:1;margin:clamp(10px,2vh,22px) auto;border:2px solid #bfd0d8;border-radius:30px;background:#fff;color:#17212b;font-size:clamp(90px,18vh,180px);line-height:1}.gm16-status{min-height:1.5em}.gm16-recording{height:44px;margin:12px auto;color:#2fa6bd}.gm16-recording span{display:inline-block;width:8px;height:32px;margin:0 4px;border-radius:8px;background:currentColor;animation:gm16-wave .8s ease-in-out infinite alternate}.gm16-recording span:nth-child(2),.gm16-recording span:nth-child(4){animation-delay:-.3s}.gm16-recording span:nth-child(3){animation-delay:-.55s}@keyframes gm16-wave{to{transform:scaleY(.3);opacity:.5}}
+    .gm16-training-actions{display:flex;justify-content:center;gap:12px;flex-wrap:wrap}.gm16-training-repeat{border-color:#60727d;background:#fff;color:#17212b}.gm16-training-repeat span{color:#17212b}.gm16-intro[hidden],.gm16-training[hidden],.gm16-training-complete[hidden],.gm16-game[hidden],.gm16-recording[hidden]{display:none}@media(max-height:700px){.gm16-stage.is-instruction-stage{padding-top:8px}.gm16-intro ol{margin-bottom:7px;font-size:13px;line-height:1.25}.gm16-media-placeholder{height:clamp(100px,18vh,140px);margin-bottom:8px}.gm16-letter{width:min(180px,25vh);font-size:90px}}
+  `;container.append(style);return()=>{active=false;token+=1;if(recorder&&recorder.state==='recording')recorder.stop();stopStream();timers.forEach(id=>clearTimeout(id));timers.clear()}
 }

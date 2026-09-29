@@ -1,190 +1,32 @@
-export function mount({ container, definition, api, close }) {
-  container.innerHTML = `
-    <header class="game-header-new">
-      <div>
-        <p class="game-kicker-new mono">АБСТРАКЦИЯ</p>
-        <h2>${definition.title}</h2>
-        <p>Выберите два фрагмента, чтобы поменять их местами и собрать изображение.</p>
-      </div>
-    </header>
-    <main class="game-stage-new gm18">
-      <div class="gm18-info"><span data-round></span><span data-moves></span></div>
-      <div class="gm18-layout">
-        <div class="gm18-board" data-board></div>
-        <aside class="gm18-reference">
-          <span class="mono">ОБРАЗЕЦ</span>
-          <img data-reference alt="Образец собираемого изображения">
-        </aside>
-      </div>
-      <p data-status aria-live="polite"></p>
-    </main>
-    <footer class="game-actions-new">
-      <button type="button" class="icon-btn" data-close><span>К выбору игр</span></button>
-    </footer>`;
+export function mount({container,definition,api,close}){
+  const trainingImages={"пейзаж":"park_a.png","натюрморт или интерьер":"apartment_a.png","портрет":"shop_a.png"};
+  const trainingImage=trainingImages[definition.selected_stimulus_set]||"park_a.png";
+  container.innerHTML=`
+    <header class="game-header-new"><div><p class="game-kicker-new mono">АБСТРАКЦИЯ</p><h2>${definition.title}</h2><p data-instruction>Выберите два фрагмента, чтобы поменять их местами и собрать изображение.</p></div><div class="game-progress-new" data-header-progress>1. Инструкция</div></header>
+    <main class="game-stage-new gm18-stage is-instruction-stage" data-stage>
+      <section class="gm18-intro" data-intro><h3>Как выполнять задание</h3><ol><li>Сравните перемешанные фрагменты с изображением-образцом.</li><li>Нажмите один фрагмент, затем другой — они поменяются местами.</li><li>Продолжайте переставлять фрагменты, пока картинка не будет собрана.</li></ol><p class="gm18-example-title">Посмотрите пример</p><div class="gm18-media-placeholder"><span aria-hidden="true">▶</span><strong>Здесь будет GIF с примером</strong><small>Визуальная инструкция будет добавлена позже</small></div><button type="button" class="icon-btn primary-btn" data-start-training><span>Перейти к тренировке</span></button></section>
+      <section class="gm18-training" data-training hidden><h3>Тренировочный пример</h3><p>Поменяйте два фрагмента местами и соберите картинку.</p><div class="gm18-layout"><div class="gm18-board gm18-training-board" data-training-board></div><aside class="gm18-reference"><span class="mono">ОБРАЗЕЦ</span><img src="/game-assets/differences/${trainingImage}" alt="Образец"></aside></div><p data-training-status></p></section>
+      <section class="game-intro-new gm18-training-complete" data-training-complete hidden><h3>Обучение завершено</h3><p>Вы правильно собрали тренировочный пазл.</p><div class="gm18-training-actions"><button type="button" class="icon-btn gm18-training-repeat" data-repeat-training><span>Повторить тренировку</span></button><button type="button" class="icon-btn primary-btn" data-confirm-start><span>Начать игру</span></button></div></section>
+      <section class="gm18-game" data-game hidden><div class="gm18-info"><span data-round></span><span data-moves></span></div><div class="gm18-layout"><div class="gm18-board" data-board></div><aside class="gm18-reference"><span class="mono">ОБРАЗЕЦ</span><img data-reference alt="Образец собираемого изображения"></aside></div><p data-status></p></section>
+    </main><footer class="game-actions-new"><button type="button" class="icon-btn" data-close><span>К выбору игр</span></button></footer>`;
+  const stage=container.querySelector('[data-stage]'),instruction=container.querySelector('[data-instruction]'),headerProgress=container.querySelector('[data-header-progress]');
+  const intro=container.querySelector('[data-intro]'),training=container.querySelector('[data-training]'),trainingBoard=container.querySelector('[data-training-board]'),trainingStatus=container.querySelector('[data-training-status]'),trainingComplete=container.querySelector('[data-training-complete]');
+  const game=container.querySelector('[data-game]'),board=container.querySelector('[data-board]'),round=container.querySelector('[data-round]'),moves=container.querySelector('[data-moves]'),reference=container.querySelector('[data-reference]'),status=container.querySelector('[data-status]');
+  let state=null,selected=null,active=true,busy=false,token=0,trainingSelected=null,trainingOrder=[];const showOnly=target=>[intro,training,trainingComplete,game].forEach(section=>{section.hidden=section!==target});
+  function piecePosition(piece,columns,rows){const column=piece%columns,row=Math.floor(piece/columns);return{x:columns===1?0:column/(columns-1)*100,y:rows===1?0:row/(rows-1)*100}}
+  function createPiece(piece,index,columns,rows,image,handler){const position=piecePosition(piece,columns,rows),tile=document.createElement('button');tile.type='button';tile.className='gm18-piece';tile.dataset.index=index;tile.style.backgroundImage=`url('/game-assets/differences/${image}')`;tile.style.backgroundSize=`${columns*100}% ${rows*100}%`;tile.style.backgroundPosition=`${position.x}% ${position.y}%`;tile.onclick=()=>handler(index,tile);return tile}
+  function beginTraining(){token+=1;stage.classList.remove('is-instruction-stage');showOnly(training);headerProgress.textContent='2. Тренировка';instruction.textContent='Выберите два фрагмента, чтобы поменять их местами.';trainingStatus.textContent='';trainingSelected=null;trainingOrder=[1,0,2,3];renderTrainingBoard()}
+  function renderTrainingBoard(){trainingBoard.style.gridTemplateColumns='repeat(2,1fr)';trainingBoard.style.gridTemplateRows='repeat(2,1fr)';trainingBoard.replaceChildren(...trainingOrder.map((piece,index)=>createPiece(piece,index,2,2,trainingImage,chooseTraining)))}
+  function chooseTraining(index,tile){if(trainingSelected===null){trainingSelected=index;tile.classList.add('is-selected');trainingStatus.textContent='Теперь выберите второй фрагмент';return}if(trainingSelected===index){trainingSelected=null;tile.classList.remove('is-selected');trainingStatus.textContent='';return}const first=trainingSelected;[trainingOrder[first],trainingOrder[index]]=[trainingOrder[index],trainingOrder[first]];trainingSelected=null;renderTrainingBoard();if(trainingOrder.every((piece,position)=>piece===position)){trainingStatus.textContent='Верно, пазл собран.';const currentToken=token;setTimeout(()=>{if(!active||currentToken!==token)return;showOnly(trainingComplete);headerProgress.textContent='Обучение завершено';instruction.textContent='Тренировочный пример выполнен правильно.'},500)}else trainingStatus.textContent='Картинка ещё не собрана. Продолжайте переставлять фрагменты.'}
 
-  const board = container.querySelector("[data-board]");
-  const round = container.querySelector("[data-round]");
-  const moves = container.querySelector("[data-moves]");
-  const reference = container.querySelector("[data-reference]");
-  const status = container.querySelector("[data-status]");
-  let state = null;
-  let selected = null;
-  let active = true;
-  let busy = false;
+  function render(payload){if(!active)return;state=payload;selected=null;busy=false;round.textContent=payload.bonus?'Дополнительный пазл':`Пазл ${payload.round_number} из ${payload.required_rounds} · ${payload.name}`;moves.textContent=`Ходов: ${payload.move_count}`;status.textContent='';reference.hidden=false;reference.src=`/game-assets/differences/${payload.image}`;board.style.gridTemplateColumns=`repeat(${payload.columns},1fr)`;board.style.gridTemplateRows=`repeat(${payload.rows},1fr)`;board.replaceChildren(...payload.board.map((piece,index)=>createPiece(piece,index,payload.columns,payload.rows,payload.image,choose)))}
+  async function choose(index,tile){if(busy)return;if(selected===null){selected=index;tile.classList.add('is-selected');status.textContent='Теперь выберите второй фрагмент';return}if(selected===index){selected=null;tile.classList.remove('is-selected');status.textContent='';return}busy=true;[...board.children].forEach(item=>{item.disabled=true});status.textContent='Переставляю…';try{const next=await api.answer({session_id:state.session_id,first_index:selected,second_index:index});if(next.finished){board.replaceChildren();reference.hidden=true;round.textContent='Готово';moves.textContent='';status.textContent='Все пазлы собраны. Результат сохранён.';return}render(next)}catch(error){status.textContent=error.message;busy=false;selected=null;[...board.children].forEach(item=>{item.disabled=false;item.classList.remove('is-selected')})}}
+  async function beginGame(){token+=1;showOnly(game);headerProgress.textContent='Игра';instruction.textContent='Переставляйте фрагменты и собирайте изображение.';try{render(await api.start())}catch(error){status.textContent=`Не удалось начать игру: ${error.message}`}}
 
-  function piecePosition(piece, columns, rows) {
-    const column = piece % columns;
-    const row = Math.floor(piece / columns);
-    return {
-      x: columns === 1 ? 0 : (column / (columns - 1)) * 100,
-      y: rows === 1 ? 0 : (row / (rows - 1)) * 100,
-    };
-  }
-
-  function render(payload) {
-    if (!active) return;
-    state = payload;
-    selected = null;
-    busy = false;
-    round.textContent = payload.bonus
-      ? "Дополнительный пазл"
-      : `Пазл ${payload.round_number} из ${payload.required_rounds} · ${payload.name}`;
-    moves.textContent = `Ходов: ${payload.move_count}`;
-    status.textContent = "";
-    reference.src = `/game-assets/differences/${payload.image}`;
-    board.style.gridTemplateColumns = `repeat(${payload.columns}, 1fr)`;
-    board.style.gridTemplateRows = `repeat(${payload.rows}, 1fr)`;
-    board.replaceChildren();
-
-    payload.board.forEach((piece, index) => {
-      const position = piecePosition(piece, payload.columns, payload.rows);
-      const tile = document.createElement("button");
-      tile.type = "button";
-      tile.className = "gm18-piece";
-      tile.dataset.index = index;
-      tile.setAttribute("aria-label", `Фрагмент ${index + 1}`);
-      tile.style.backgroundImage = `url('/game-assets/differences/${payload.image}')`;
-      tile.style.backgroundSize = `${payload.columns * 100}% ${payload.rows * 100}%`;
-      tile.style.backgroundPosition = `${position.x}% ${position.y}%`;
-      tile.onclick = () => choose(index, tile);
-      board.append(tile);
-    });
-  }
-
-  async function choose(index, tile) {
-    if (busy) return;
-    if (selected === null) {
-      selected = index;
-      tile.classList.add("is-selected");
-      status.textContent = "Теперь выберите второй фрагмент";
-      return;
-    }
-    if (selected === index) {
-      selected = null;
-      tile.classList.remove("is-selected");
-      status.textContent = "";
-      return;
-    }
-    busy = true;
-    [...board.children].forEach((item) => { item.disabled = true; });
-    status.textContent = "Переставляю…";
-    try {
-      const next = await api.answer({
-        session_id: state.session_id,
-        first_index: selected,
-        second_index: index,
-      });
-      if (!active) return;
-      if (next.finished) {
-        board.replaceChildren();
-        reference.hidden = true;
-        round.textContent = "Готово";
-        moves.textContent = "";
-        status.textContent = "Все пазлы собраны. Результат сохранён.";
-        return;
-      }
-      render(next);
-    } catch (error) {
-      status.textContent = error.message;
-      busy = false;
-      selected = null;
-      [...board.children].forEach((item) => {
-        item.disabled = false;
-        item.classList.remove("is-selected");
-      });
-    }
-  }
-
-  container.querySelector("[data-close]").onclick = () => {
-    active = false;
-    close();
-  };
-
-  const style = document.createElement("style");
-  style.textContent = `
-    .gm18 { text-align: center; }
-    .gm18-info {
-      display: flex;
-      justify-content: space-between;
-      width: min(980px, 90vw);
-      margin: 0 auto 10px;
-      color: #455b68;
-    }
-    .gm18-layout {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) clamp(110px, 14vw, 180px);
-      align-items: start;
-      gap: clamp(12px, 2vw, 24px);
-      width: min(1040px, 92vw);
-      margin: auto;
-    }
-    .gm18-board {
-      display: grid;
-      width: min(780px, 70vw, calc(58vh * 1.429));
-      aspect-ratio: 1499 / 1049;
-      gap: 2px;
-      overflow: hidden;
-      border: 3px solid #b8cbd4;
-      border-radius: 16px;
-      background: #dce6eb;
-    }
-    .gm18-piece {
-      min-width: 0;
-      min-height: 0;
-      padding: 0;
-      border: 0;
-      border-radius: 0;
-      background-repeat: no-repeat;
-      transition: box-shadow .12s, filter .12s;
-    }
-    .gm18-piece:hover { filter: brightness(1.06); }
-    .gm18-piece.is-selected {
-      position: relative;
-      z-index: 1;
-      box-shadow: inset 0 0 0 6px #2fa6bd;
-      filter: brightness(1.08);
-    }
-    .gm18-reference {
-      color: #587180;
-      font-size: 12px;
-      letter-spacing: .12em;
-    }
-    .gm18-reference img {
-      display: block;
-      width: 100%;
-      margin-top: 8px;
-      border: 2px solid #c6d5dc;
-      border-radius: 12px;
-    }
-    .gm18 [data-status] { min-height: 1.5em; margin: 10px 0 0; }
-    @media (max-width: 720px) {
-      .gm18-layout { grid-template-columns: 1fr; width: min(94vw, 620px); }
-      .gm18-board { width: 100%; }
-      .gm18-reference { display: none; }
-    }
-  `;
-  container.append(style);
-  api.start().then(render);
-
-  return () => { active = false; };
+  container.querySelector('[data-start-training]').onclick=beginTraining;container.querySelector('[data-repeat-training]').onclick=beginTraining;container.querySelector('[data-confirm-start]').onclick=beginGame;container.querySelector('[data-close]').onclick=()=>{active=false;token+=1;close()};
+  const style=document.createElement('style');style.textContent=`
+    .gm18-stage{text-align:center;overflow:hidden}.gm18-stage.is-instruction-stage{align-items:start;padding-top:clamp(14px,2.4vh,30px)}.gm18-intro,.gm18-training,.gm18-game{width:min(1040px,100%)}.gm18-intro h3,.gm18-training h3{margin:0 0 10px;font-size:clamp(19px,2.3vw,25px)}.gm18-intro ol{width:min(700px,100%);margin:0 auto 16px;padding-left:28px;color:#52606d;text-align:left;font-size:clamp(14px,1.6vw,18px);line-height:1.4}.gm18-intro li+li{margin-top:5px}.gm18-example-title{margin:0 0 7px;font-weight:700}.gm18-media-placeholder{box-sizing:border-box;display:flex;width:min(620px,100%);height:clamp(130px,22vh,230px);margin:0 auto 18px;flex-direction:column;align-items:center;justify-content:center;gap:7px;border:2px dashed #b8cbd5;border-radius:16px;background:#eaf1f4;color:#52606d}.gm18-media-placeholder>span{display:grid;width:46px;height:46px;place-items:center;border-radius:50%;background:#d3e2e9;color:#168ba8}.gm18-media-placeholder strong{color:#263744}.gm18-training>p{color:#52606d}
+    .gm18-info{display:flex;justify-content:space-between;width:min(820px,82vw);margin:0 auto 8px;color:#455b68}.gm18-layout{display:flex;width:min(900px,88vw);margin:auto;flex-direction:column;align-items:center;gap:clamp(14px,2vh,22px)}.gm18-board{display:grid;width:min(760px,76vw,calc(48vh * 1.429));aspect-ratio:1499/1049;gap:2px;overflow:hidden;border:3px solid #b8cbd4;border-radius:16px;background:#dce6eb}.gm18-training-board{width:min(620px,68vw,calc(40vh * 1.429))}.gm18-piece{min-width:0;min-height:0;padding:0;border:0;border-radius:0;background-repeat:no-repeat}.gm18-piece:hover{filter:brightness(1.06)}.gm18-piece.is-selected{position:relative;z-index:1;box-shadow:inset 0 0 0 6px #2fa6bd}.gm18-reference{order:-1;width:min(320px,34vw,calc(17vh * 1.429));color:#587180;font-size:12px;letter-spacing:.12em}.gm18-reference img{display:block;width:100%;margin-top:6px;border:2px solid #c6d5dc;border-radius:12px}.gm18-game>[data-status],.gm18-training>[data-training-status]{min-height:1.5em;margin:10px 0 0}
+    .gm18-training-actions{display:flex;justify-content:center;gap:12px;flex-wrap:wrap}.gm18-training-repeat{border-color:#60727d;background:#fff;color:#17212b}.gm18-training-repeat span{color:#17212b}.gm18-intro[hidden],.gm18-training[hidden],.gm18-training-complete[hidden],.gm18-game[hidden]{display:none}@media(max-height:700px){.gm18-stage.is-instruction-stage{padding-top:8px}.gm18-intro ol{margin-bottom:7px;font-size:13px;line-height:1.25}.gm18-media-placeholder{height:clamp(100px,18vh,140px);margin-bottom:8px}.gm18-layout{gap:8px}.gm18-reference{width:min(240px,30vw,calc(13vh * 1.429))}.gm18-board{width:min(620px,68vw,calc(40vh * 1.429))}.gm18-training-board{width:min(540px,64vw,calc(36vh * 1.429))}}@media(max-width:720px){.gm18-layout{width:min(94vw,620px)}.gm18-reference{width:min(260px,56vw)}.gm18-board,.gm18-training-board{width:min(100%,calc(42vh * 1.429))}}
+  `;container.append(style);return()=>{active=false;token+=1}
 }

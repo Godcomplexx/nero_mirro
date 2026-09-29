@@ -17,6 +17,8 @@ from neuro_mirror.screening.gm22_scoring import score_gm22
 @dataclass(slots=True)
 class TowerSession:
     session_id: str
+    difficulty_level: int
+    disk_count: int
     started_at_ms: float = field(default_factory=lambda: time.time() * 1000)
     level_started_at_ms: float = 0.0
     level_index: int = 0
@@ -35,10 +37,15 @@ class Gm22TowerPlugin(BrowserGamePlugin):
         self._sessions: dict[str, TowerSession] = {}
 
     def _disk_count(self, session: TowerSession) -> int:
-        return DISK_LEVELS[session.level_index] if session.level_index < len(DISK_LEVELS) else BONUS_DISKS
+        return session.disk_count
 
-    def _start(self) -> dict[str, Any]:
-        session = TowerSession(uuid.uuid4().hex)
+    def start_game(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._start(difficulty_level=payload.get("difficulty_level"))
+
+    def _start(self, *, difficulty_level: object = None) -> dict[str, Any]:
+        try: level = min(3, max(1, int(difficulty_level or 1)))
+        except (TypeError, ValueError): level = 1
+        session = TowerSession(uuid.uuid4().hex, level, DISK_LEVELS[level - 1])
         self._sessions[session.session_id] = session
         return self._prepare_level(session)
 
@@ -102,29 +109,21 @@ class Gm22TowerPlugin(BrowserGamePlugin):
             result["move_valid"] = legal_move
             return result
 
-        session.level_index += 1
         elapsed_ms = time.time() * 1000 - session.started_at_ms
-        if session.level_index >= len(DISK_LEVELS) and elapsed_ms >= MINIMUM_SESSION_MS:
-            events = list(session.round_events)
-            self._sessions.pop(session.session_id, None)
-            return {
-                "ok": True,
-                "finished": True,
-                "events": events,
-                "metrics": score_gm22(events, elapsed_ms),
-            }
-        result = self._prepare_level(session)
-        result["level_complete"] = True
-        return result
+        events = list(session.round_events)
+        self._sessions.pop(session.session_id, None)
+        return {"ok": True, "finished": True, "events": events, "metrics": score_gm22(events, elapsed_ms)}
 
     def _payload(self, session: TowerSession) -> dict[str, Any]:
         return {
             "ok": True,
             "finished": False,
             "session_id": session.session_id,
-            "level_number": session.level_index + 1,
-            "required_levels": len(DISK_LEVELS),
-            "bonus": session.level_index >= len(DISK_LEVELS),
+            "difficulty_level": session.difficulty_level,
+            "difficulty_parameters": {"elements": session.disk_count},
+            "level_number": 1,
+            "required_levels": 1,
+            "bonus": False,
             "disk_count": self._disk_count(session),
             "rods": [list(rod) for rod in session.rods],
             "move_count": session.level_valid_moves,

@@ -327,7 +327,10 @@ def create_app() -> FastAPI:
         )
 
     @app.post("/api/games/{game_code}/start")
-    async def generic_game_start(game_code: str) -> JSONResponse:
+    async def generic_game_start(
+        game_code: str,
+        payload: dict[str, Any] | None = None,
+    ) -> JSONResponse:
         try:
             definition = get_available_game_definition(game_code)
         except KeyError as exc:
@@ -338,7 +341,10 @@ def create_app() -> FastAPI:
         return await _game_request(
             definition.start_request_topic,
             f"web.game.{definition.topic_prefix}",
-            {"user_id": str(active_user.get("id") or "")},
+            {
+                **(payload or {}),
+                "user_id": str(active_user.get("id") or ""),
+            },
         )
 
     @app.post("/api/games/{game_code}/answer")

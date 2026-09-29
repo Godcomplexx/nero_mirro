@@ -1,59 +1,29 @@
-export function mount({ container, definition, api, close }) {
-  container.innerHTML = `<header class="game-header-new"><div><p class="game-kicker-new mono">ВНИМАНИЕ</p><h2>${definition.title}</h2><p>Сравните картинки. Все ответы отмечайте только на нижней картинке.</p></div></header><main class="game-stage-new gm10"><p data-progress></p><div class="gm10-pair"><div class="gm10-reference"><span class="gm10-label">ОБРАЗЕЦ · НЕ НАЖИМАТЬ</span><img data-left alt="Исходное изображение"></div><div class="gm10-target"><span class="gm10-label gm10-label-active">ИЩИТЕ И НАЖИМАЙТЕ ЗДЕСЬ</span><img data-right alt="Изменённое изображение"><div data-marks></div></div></div><p data-status></p></main><footer class="game-actions-new"><button data-close class="icon-btn"><span>К выбору игр</span></button></footer>`;
-  const left = container.querySelector("[data-left]");
-  const right = container.querySelector("[data-right]");
-  const marks = container.querySelector("[data-marks]");
-  const progress = container.querySelector("[data-progress]");
-  const status = container.querySelector("[data-status]");
-  let state = null;
-  let locked = false;
+export function mount({container,definition,api,close}){
+  container.innerHTML=`
+    <header class="game-header-new"><div><p class="game-kicker-new mono">ВНИМАНИЕ</p><h2>${definition.title}</h2><p data-instruction>Сравните картинки. Все ответы отмечайте только на нижней картинке.</p></div><div class="game-progress-new" data-progress>1. Инструкция</div></header>
+    <main class="game-stage-new gm10-stage is-instruction-stage" data-stage>
+      <section class="gm10-intro" data-intro><h3>Как выполнять задание</h3><ol><li>Верхняя картинка — образец, нажимать на неё не нужно.</li><li>Сравните её с нижней картинкой.</li><li>Нажимайте на найденные отличия только на нижней картинке.</li></ol><p class="gm10-example-title">Посмотрите пример</p><div class="gm10-media-placeholder"><span aria-hidden="true">▶</span><strong>Здесь будет GIF с примером</strong><small>Визуальная инструкция будет добавлена позже</small></div><button type="button" class="icon-btn primary-btn" data-start-training><span>Перейти к тренировке</span></button></section>
+      <section class="gm10-training" data-training hidden><h3>Тренировочный пример</h3><p>Найдите одно отличие и нажмите на него в нижней картинке.</p><div class="gm10-training-pair"><div><span>ОБРАЗЕЦ · НЕ НАЖИМАТЬ</span><div class="gm10-training-picture"><i class="sun"></i><i class="tree"></i><i class="box blue"></i></div></div><div><span class="active">ИЩИТЕ И НАЖИМАЙТЕ ЗДЕСЬ</span><div class="gm10-training-picture is-clickable" data-training-picture><i class="sun"></i><i class="tree"></i><i class="box red"></i><b data-training-mark hidden></b></div></div></div><p data-training-feedback aria-live="polite"></p></section>
+      <section class="game-intro-new gm10-training-complete" data-training-complete hidden><h3>Обучение завершено</h3><p>Вы правильно нашли отличие на нижней картинке.</p><div class="gm10-training-actions"><button type="button" class="icon-btn gm10-training-repeat" data-repeat-training><span>Повторить тренировку</span></button><button type="button" class="icon-btn primary-btn" data-confirm-start><span>Начать игру</span></button></div></section>
+      <section class="gm10-game" data-game hidden><div class="gm10-pair"><div class="gm10-reference"><span class="gm10-label">ОБРАЗЕЦ · НЕ НАЖИМАТЬ</span><img data-left alt="Исходное изображение"></div><div class="gm10-target"><span class="gm10-label gm10-label-active">ИЩИТЕ И НАЖИМАЙТЕ ЗДЕСЬ</span><img data-right alt="Изменённое изображение"><div data-marks></div></div></div><p data-status></p></section>
+    </main><footer class="game-actions-new"><button data-close class="icon-btn"><span>К выбору игр</span></button></footer>`;
+  const stage=container.querySelector('[data-stage]'),instruction=container.querySelector('[data-instruction]'),progress=container.querySelector('[data-progress]');
+  const intro=container.querySelector('[data-intro]'),training=container.querySelector('[data-training]'),trainingPicture=container.querySelector('[data-training-picture]'),trainingMark=container.querySelector('[data-training-mark]'),trainingFeedback=container.querySelector('[data-training-feedback]'),trainingComplete=container.querySelector('[data-training-complete]');
+  const game=container.querySelector('[data-game]'),left=container.querySelector('[data-left]'),right=container.querySelector('[data-right]'),marks=container.querySelector('[data-marks]'),status=container.querySelector('[data-status]');
+  let state=null,locked=false,active=true,token=0;const timers=new Set();const showOnly=target=>[intro,training,trainingComplete,game].forEach(section=>{section.hidden=section!==target});
+  function beginTraining(){token+=1;stage.classList.remove('is-instruction-stage');showOnly(training);progress.textContent='2. Тренировка';instruction.textContent='Ищите отличие только на нижней картинке.';trainingMark.hidden=true;trainingFeedback.textContent='';trainingFeedback.className='';locked=false}
+  trainingPicture.onclick=event=>{if(locked)return;const rect=trainingPicture.getBoundingClientRect(),x=(event.clientX-rect.left)/rect.width,y=(event.clientY-rect.top)/rect.height;const correct=Math.hypot(x-.72,y-.55)<=.15;if(!correct){trainingFeedback.textContent='Здесь отличия нет. Сравните картинки ещё раз.';trainingFeedback.className='is-wrong';return}locked=true;trainingMark.hidden=false;trainingMark.style.left=`${x*100}%`;trainingMark.style.top=`${y*100}%`;trainingFeedback.textContent='Верно.';trainingFeedback.className='is-correct';const currentToken=token;const id=setTimeout(()=>{timers.delete(id);if(!active||currentToken!==token)return;showOnly(trainingComplete);progress.textContent='Обучение завершено';instruction.textContent='Тренировочный пример выполнен правильно.'},450);timers.add(id)};
 
-  function render(payload) {
-    state = payload;
-    locked = false;
-    left.src = `/game-assets/differences/${payload.left}`;
-    right.src = `/game-assets/differences/${payload.right}`;
-    marks.replaceChildren();
-    progress.textContent = `${payload.scene} · уровень ${payload.scene_number} из ${payload.scene_count}`;
-    status.textContent = `Найдено ${payload.found.length} из ${payload.difference_count}`;
-  }
+  function render(payload){if(!active)return;state=payload;locked=false;left.src=`/game-assets/differences/${payload.left}`;right.src=`/game-assets/differences/${payload.right}`;marks.replaceChildren();progress.textContent=`${payload.scene} · уровень ${payload.scene_number} из ${payload.scene_count}`;status.textContent=`Найдено ${payload.found.length} из ${payload.difference_count}`}
+  right.onclick=async event=>{if(locked)return;const rect=right.getBoundingClientRect(),x=(event.clientX-rect.left)/rect.width,y=(event.clientY-rect.top)/rect.height;try{const payload=await api.answer({session_id:state.session_id,x,y});if(payload.finished){locked=true;container.querySelector('.gm10-pair').hidden=true;progress.textContent='Завершено';status.textContent=`Найдено отличий: ${Math.round(payload.metrics.a07_found_difference_rate*100)}%`;return}if(payload.scene_complete){locked=true;status.textContent='Уровень завершён';setTimeout(()=>render(payload),650);return}if(payload.correct){const mark=document.createElement('span');mark.className='gm10-mark';mark.style.left=`${x*100}%`;mark.style.top=`${y*100}%`;marks.append(mark)}else status.textContent='Здесь отличия нет';setTimeout(()=>{if(!locked)status.textContent=`Найдено ${payload.found.length} из ${payload.difference_count}`},500)}catch(error){status.textContent=`Не удалось проверить ответ: ${error.message}`}};
+  async function beginGame(){token+=1;showOnly(game);container.querySelector('.gm10-pair').hidden=false;progress.textContent='Подготовка…';instruction.textContent='Сравните картинки и нажимайте на отличия в нижней.';try{render(await api.start())}catch(error){status.textContent=`Не удалось начать игру: ${error.message}`}}
 
-  right.onclick = async event => {
-    if (locked) return;
-    const rect = right.getBoundingClientRect();
-    const x = (event.clientX - rect.left) / rect.width;
-    const y = (event.clientY - rect.top) / rect.height;
-    const payload = await api.answer({ session_id: state.session_id, x, y });
-    if (payload.finished) {
-      locked = true;
-      container.querySelector(".gm10-pair").remove();
-      progress.textContent = "Завершено";
-      status.textContent = `Найдено отличий: ${Math.round(payload.metrics.a07_found_difference_rate * 100)}%`;
-      return;
-    }
-    if (payload.scene_complete) {
-      locked = true;
-      status.textContent = "Уровень завершён";
-      setTimeout(() => render(payload), 650);
-      return;
-    }
-    if (payload.correct) {
-      const mark = document.createElement("span");
-      mark.className = "gm10-mark";
-      mark.style.left = `${x * 100}%`;
-      mark.style.top = `${y * 100}%`;
-      marks.append(mark);
-    } else {
-      status.textContent = "Здесь отличия нет";
-    }
-    setTimeout(() => {
-      if (!locked) status.textContent = `Найдено ${payload.found.length} из ${payload.difference_count}`;
-    }, 500);
-  };
-
-  container.querySelector("[data-close]").onclick = close;
-  const style = document.createElement("style");
-  style.textContent = `.gm10{display:flex!important;flex-direction:column;align-items:center;justify-content:flex-start;gap:6px;text-align:center;padding:8px!important;overflow:hidden!important}.gm10>p{flex:0 0 auto;margin:2px 0}.gm10-pair{flex:1 1 auto;min-height:0;width:100%;display:grid;grid-template-rows:minmax(0,1fr) minmax(0,1fr);justify-items:center;align-items:stretch;gap:8px}.gm10-reference,.gm10-target{position:relative;height:100%;min-height:0;width:fit-content;max-width:100%;padding-top:20px}.gm10-reference img,.gm10-target img{display:block;height:calc(100% - 20px);min-height:0;width:auto;max-width:100%;object-fit:contain;border-radius:12px;border:1px solid #b8c8d1}.gm10-target img{border:3px solid #38a9c7;box-shadow:0 0 0 4px rgba(56,169,199,.14)}.gm10-label{position:absolute;top:0;left:50%;transform:translateX(-50%);white-space:nowrap;font:700 11px/16px var(--font-mono,monospace);letter-spacing:.12em;color:#687783}.gm10-label-active{color:#167d9b}.gm10-target>[data-marks]{position:absolute;left:0;right:0;top:20px;bottom:0;pointer-events:none}.gm10-mark{position:absolute;width:clamp(28px,3vw,44px);height:clamp(28px,3vw,44px);transform:translate(-50%,-50%);border:4px solid #e84252;border-radius:50%;box-shadow:0 0 0 3px #fff8}`;
-  container.append(style);
-  api.start().then(render);
+  container.querySelector('[data-start-training]').onclick=beginTraining;container.querySelector('[data-repeat-training]').onclick=beginTraining;container.querySelector('[data-confirm-start]').onclick=beginGame;container.querySelector('[data-close]').onclick=()=>{active=false;token+=1;timers.forEach(id=>clearTimeout(id));timers.clear();close()};
+  const style=document.createElement('style');style.textContent=`
+    .gm10-stage{text-align:center;overflow:hidden}.gm10-stage.is-instruction-stage{align-items:start;padding-top:clamp(14px,2.4vh,30px)}.gm10-intro,.gm10-training,.gm10-game{width:min(900px,100%)}.gm10-intro h3,.gm10-training h3{margin:0 0 10px;font-size:clamp(19px,2.3vw,25px)}.gm10-intro ol{width:min(700px,100%);margin:0 auto 16px;padding-left:28px;color:#52606d;text-align:left;font-size:clamp(14px,1.6vw,18px);line-height:1.4}.gm10-intro li+li{margin-top:5px}.gm10-example-title{margin:0 0 7px;font-weight:700}
+    .gm10-media-placeholder{box-sizing:border-box;display:flex;width:min(620px,100%);height:clamp(130px,22vh,230px);margin:0 auto 18px;flex-direction:column;align-items:center;justify-content:center;gap:7px;border:2px dashed #b8cbd5;border-radius:16px;background:#eaf1f4;color:#52606d}.gm10-media-placeholder>span{display:grid;width:46px;height:46px;place-items:center;border-radius:50%;background:#d3e2e9;color:#168ba8}.gm10-media-placeholder strong{color:#263744}.gm10-training>p{margin:0 0 8px;color:#52606d}
+    .gm10-training-pair{display:grid;grid-template-rows:1fr 1fr;gap:10px;width:min(520px,90%);margin:auto}.gm10-training-pair>div>span{display:block;margin-bottom:4px;font:700 10px/16px var(--font-mono,monospace);letter-spacing:.12em;color:#687783}.gm10-training-pair>div>span.active{color:#167d9b}.gm10-training-picture{position:relative;height:130px;overflow:hidden;border:2px solid #b8c8d1;border-radius:14px;background:linear-gradient(#9edcff 0 58%,#78bd6b 58%)}.gm10-training-picture.is-clickable{border:3px solid #38a9c7}.gm10-training-picture .sun{position:absolute;left:12%;top:15%;width:32px;height:32px;border-radius:50%;background:#ffd24c}.gm10-training-picture .tree{position:absolute;left:42%;bottom:12%;width:22px;height:70px;background:#7c4b2a}.gm10-training-picture .tree:before{content:'';position:absolute;left:-24px;top:-22px;width:70px;height:55px;border-radius:50%;background:#3d9c52}.gm10-training-picture .box{position:absolute;left:67%;top:42%;width:52px;height:42px;border-radius:6px}.gm10-training-picture .blue{background:#397ed1}.gm10-training-picture .red{background:#dc3b4e}.gm10-training-picture b,.gm10-mark{position:absolute;width:44px;height:44px;transform:translate(-50%,-50%);border:4px solid #e84252;border-radius:50%;box-shadow:0 0 0 3px #fff8}.gm10-training>[data-training-feedback].is-correct{color:#167950}.gm10-training>[data-training-feedback].is-wrong{color:#b33443}
+    .gm10-game{height:100%;min-height:0;display:flex;flex-direction:column}.gm10-game>p{margin:3px}.gm10-pair{flex:1;min-height:0;width:100%;display:grid;grid-template-rows:minmax(0,1fr) minmax(0,1fr);justify-items:center;gap:8px}.gm10-reference,.gm10-target{position:relative;height:100%;min-height:0;width:fit-content;max-width:100%;padding-top:20px}.gm10-reference img,.gm10-target img{display:block;height:calc(100% - 20px);width:auto;max-width:100%;object-fit:contain;border-radius:12px;border:1px solid #b8c8d1}.gm10-target img{border:3px solid #38a9c7}.gm10-label{position:absolute;top:0;left:50%;transform:translateX(-50%);white-space:nowrap;font:700 11px/16px var(--font-mono,monospace);letter-spacing:.12em;color:#687783}.gm10-label-active{color:#167d9b}.gm10-target>[data-marks]{position:absolute;left:0;right:0;top:20px;bottom:0;pointer-events:none}
+    .gm10-training-actions{display:flex;justify-content:center;gap:12px;flex-wrap:wrap}.gm10-training-repeat{border-color:#60727d;background:#fff;color:#17212b}.gm10-training-repeat span{color:#17212b}.gm10-intro[hidden],.gm10-training[hidden],.gm10-training-complete[hidden],.gm10-game[hidden],.gm10-pair[hidden],.gm10-training-picture b[hidden]{display:none}@media(max-height:700px){.gm10-stage.is-instruction-stage{padding-top:8px}.gm10-intro ol{margin-bottom:7px;font-size:13px;line-height:1.25}.gm10-media-placeholder{height:clamp(100px,18vh,140px);margin-bottom:8px}.gm10-training-picture{height:95px}}
+  `;container.append(style);return()=>{active=false;token+=1;timers.forEach(id=>clearTimeout(id));timers.clear()}
 }

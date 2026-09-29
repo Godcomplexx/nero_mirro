@@ -1,267 +1,34 @@
-const MAZE_SLOT_MS = 20000;
+export function mount({container,definition,api,close}){
+  container.innerHTML=`
+    <header class="game-header-new"><div><p class="game-kicker-new mono">АБСТРАКЦИЯ</p><h2>${definition.title}</h2><p data-instruction>Проведите линию от зелёного старта до красного финиша.</p></div><div class="game-progress-new" data-progress>1. Инструкция</div></header>
+    <main class="game-stage-new gm19-module is-instruction-stage" data-stage>
+      <section class="gm19-intro" data-intro><h3>Как выполнять задание</h3><ol><li>Нажмите на зелёную точку и удерживайте кнопку мыши или палец.</li><li>Ведите голубую линию только по свободным проходам, не пересекая чёрные стены.</li><li>Если линия коснётся стены, место касания станет красным. Вернитесь в проход и продолжайте.</li><li>Не отпускайте линию, пока не достигнете красной точки.</li></ol><p class="gm19-example-title">Посмотрите пример</p><div class="gm19-media-placeholder"><span aria-hidden="true">▶</span><strong>Здесь будет GIF с примером</strong><small>Визуальная инструкция будет добавлена позже</small></div><button type="button" class="icon-btn primary-btn" data-start-training><span>Перейти к тренировке</span></button></section>
+      <section class="gm19-training" data-training hidden><h3>Тренировочный пример</h3><p data-training-status>Проведите линию от зелёной точки до красной.</p><div data-training-holder></div></section>
+      <section class="game-intro-new gm19-training-complete" data-training-complete hidden><h3>Обучение завершено</h3><p>Вы правильно прошли тренировочный лабиринт.</p><div class="gm19-training-actions"><button type="button" class="icon-btn gm19-training-repeat" data-repeat-training><span>Повторить тренировку</span></button><button type="button" class="icon-btn primary-btn" data-confirm-start><span>Начать игру</span></button></div></section>
+      <section class="gm19-game" data-game hidden><div data-game-holder></div><div class="game-result-new" data-result hidden><h3>Игра завершена</h3><p data-result-text></p><button type="button" class="icon-btn primary-btn" data-restart><span>Ещё раз</span></button></div></section>
+    </main><footer class="game-actions-new"><button type="button" class="icon-btn" data-close><span>К выбору игр</span></button></footer>`;
+  const stage=container.querySelector('[data-stage]'),instruction=container.querySelector('[data-instruction]'),progress=container.querySelector('[data-progress]');
+  const intro=container.querySelector('[data-intro]'),training=container.querySelector('[data-training]'),trainingStatus=container.querySelector('[data-training-status]'),trainingHolder=container.querySelector('[data-training-holder]'),trainingComplete=container.querySelector('[data-training-complete]');
+  const game=container.querySelector('[data-game]'),gameHolder=container.querySelector('[data-game-holder]'),result=container.querySelector('[data-result]'),resultText=container.querySelector('[data-result-text]'),restart=container.querySelector('[data-restart]');
+  const canvas=document.createElement('canvas');canvas.className='gm19-module-canvas';canvas.width=720;canvas.height=720;const context=canvas.getContext('2d');
+  let state=null,path=[],trail=[],drawing=false,finishing=false,errors=0,shownAt=0,startedAt=0,lastRejected='',wallHit=false,collisionPoint=null,active=true,token=0,trainingMode=false;const timers=new Set();const delay=milliseconds=>new Promise(resolve=>{const id=setTimeout(()=>{timers.delete(id);resolve()},milliseconds);timers.add(id)});const showOnly=target=>[intro,training,trainingComplete,game].forEach(section=>{section.hidden=section!==target});
+  function trainingMaze(){const size=3,walls=Array.from({length:size},()=>Array.from({length:size},()=>({n:true,e:true,s:true,w:true}))),route=[[0,0],[1,0],[1,1],[2,1],[2,2]];for(let index=0;index<route.length-1;index+=1){const [x,y]=route[index],[nx,ny]=route[index+1];if(nx>x){walls[y][x].e=false;walls[ny][nx].w=false}else{walls[y][x].s=false;walls[ny][nx].n=false}}return{size,walls,start:[0,0],finish:[2,2]}}
+  function draw(){if(!state)return;const size=state.size,cell=canvas.width/size;context.clearRect(0,0,canvas.width,canvas.height);context.fillStyle='#f7fafb';context.fillRect(0,0,canvas.width,canvas.height);context.strokeStyle='#17212b';context.lineWidth=4;context.beginPath();for(let y=0;y<size;y+=1)for(let x=0;x<size;x+=1){const walls=state.walls[y][x],x0=x*cell,y0=y*cell;if(walls.n){context.moveTo(x0,y0);context.lineTo(x0+cell,y0)}if(walls.w){context.moveTo(x0,y0);context.lineTo(x0,y0+cell)}if(y===size-1&&walls.s){context.moveTo(x0,y0+cell);context.lineTo(x0+cell,y0+cell)}if(x===size-1&&walls.e){context.moveTo(x0+cell,y0);context.lineTo(x0+cell,y0+cell)}}context.stroke();if(trail.length){context.strokeStyle='#38a9c7';context.lineWidth=8;context.lineCap='round';context.lineJoin='round';context.beginPath();trail.forEach(([px,py],index)=>{index?context.lineTo(px,py):context.moveTo(px,py)});context.stroke()}if(wallHit&&collisionPoint){context.fillStyle='#d83a48';context.beginPath();context.arc(collisionPoint[0],collisionPoint[1],10,0,Math.PI*2);context.fill()}[[state.start,'#24a66f'],[state.finish,'#d83a48']].forEach(([position,color])=>{context.fillStyle=color;context.beginPath();context.arc((position[0]+.5)*cell,(position[1]+.5)*cell,cell*.22,0,Math.PI*2);context.fill()})}
+  function resetPath(message){drawing=false;finishing=false;path=[];trail=[];wallHit=false;collisionPoint=null;errors+=1;if(trainingMode)trainingStatus.textContent=message;else instruction.textContent=message;draw()}
+  function beginTraining(){token+=1;stage.classList.remove('is-instruction-stage');showOnly(training);progress.textContent='2. Тренировка';instruction.textContent='Проведите маршрут по проходам лабиринта.';trainingHolder.append(canvas);trainingMode=true;state=trainingMaze();path=[];trail=[];drawing=false;finishing=false;errors=0;wallHit=false;collisionPoint=null;trainingStatus.textContent='Начните с зелёной точки и ведите линию до красной.';draw()}
+  function renderMaze(payload){state=payload;trainingMode=false;path=[];trail=[];drawing=false;finishing=false;errors=0;lastRejected='';wallHit=false;collisionPoint=null;shownAt=performance.now();progress.textContent=`Лабиринт ${payload.maze} из ${payload.maze_count}`;instruction.textContent='Начните с зелёной точки и ведите линию по проходам до финиша.';result.hidden=true;gameHolder.append(canvas);draw()}
+  function cellFromEvent(event){const rect=canvas.getBoundingClientRect();return[Math.max(0,Math.min(state.size-1,Math.floor((event.clientX-rect.left)/rect.width*state.size))),Math.max(0,Math.min(state.size-1,Math.floor((event.clientY-rect.top)/rect.height*state.size)))]}
+  function pointFromEvent(event){const rect=canvas.getBoundingClientRect();return[(event.clientX-rect.left)/rect.width*canvas.width,(event.clientY-rect.top)/rect.height*canvas.height]}
+  function canMove(from,to){const[x,y]=from,[nextX,nextY]=to,dx=nextX-x,dy=nextY-y,direction=dx===1&&dy===0?'e':dx===-1&&dy===0?'w':dx===0&&dy===1?'s':dx===0&&dy===-1?'n':null;return Boolean(direction&&!state.walls[y][x][direction])}
+  async function finishMaze(){if(finishing)return;drawing=false;finishing=true;const currentToken=token;if(trainingMode){trainingStatus.textContent='Верно, выход найден.';setTimeout(()=>{if(!active||currentToken!==token)return;showOnly(trainingComplete);progress.textContent='Обучение завершено';instruction.textContent='Тренировочный пример выполнен правильно.'},450);return}const executionMs=performance.now()-startedAt;instruction.textContent='Маршрут завершён…';if(!active||currentToken!==token)return;try{const payload=await api.answer({session_id:state.session_id,path,boundary_errors:errors,planning_ms:startedAt-shownAt,execution_ms:executionMs,timestamp_ms:Date.now()});if(!payload.finished){renderMaze(payload);return}canvas.remove();result.hidden=false;restart.disabled=false;progress.textContent='Завершено';instruction.textContent='Все лабиринты пройдены.';resultText.textContent=`Касаний стен: ${payload.metrics.v03_boundary_exits}.`}catch(error){resetPath(`Не удалось сохранить маршрут: ${error.message}. Начните снова.`)}}
+  function onPointerDown(event){if(!state||finishing)return;const cell=cellFromEvent(event);if(cell[0]!==state.start[0]||cell[1]!==state.start[1])return;event.preventDefault();drawing=true;path=[[...state.start]];trail=[pointFromEvent(event)];errors=0;lastRejected='';wallHit=false;collisionPoint=null;startedAt=performance.now();canvas.setPointerCapture(event.pointerId);draw()}
+  function onPointerMove(event){if(!drawing||finishing)return;event.preventDefault();const point=pointFromEvent(event),outside=point[0]<0||point[1]<0||point[0]>canvas.width||point[1]>canvas.height;if(outside){wallHit=true;collisionPoint=trail.length?trail[trail.length-1]:[Math.max(0,Math.min(canvas.width,point[0])),Math.max(0,Math.min(canvas.height,point[1]))];if(lastRejected!=='outside'){errors+=1;lastRejected='outside'}if(trainingMode)trainingStatus.textContent='Граница лабиринта — вернитесь внутрь.';else instruction.textContent='Граница лабиринта — вернитесь внутрь.';draw();return}const cell=cellFromEvent(event),last=path[path.length-1];if(cell[0]===last[0]&&cell[1]===last[1]){lastRejected='';wallHit=false;collisionPoint=null;trail.push(point);draw();return}if(canMove(last,cell)){lastRejected='';wallHit=false;collisionPoint=null;path.push(cell);trail.push(point);draw();if(cell[0]===state.finish[0]&&cell[1]===state.finish[1])finishMaze();return}const key=cell.join(',');wallHit=true;collisionPoint=trail.length?trail[trail.length-1]:point;if(key!==lastRejected){errors+=1;lastRejected=key}if(trainingMode)trainingStatus.textContent='Стена — вернитесь в проход и продолжайте.';else instruction.textContent='Стена — вернитесь в проход и продолжайте.';draw()}
+  function onPointerEnd(){if(!drawing||finishing)return;resetPath('Линия отпущена до финиша. Начните снова с зелёной точки.')}
+  async function beginGame(){token+=1;drawing=false;finishing=true;showOnly(game);result.hidden=true;instruction.textContent='Создаю лабиринты…';try{renderMaze(await api.start())}catch(error){finishing=false;instruction.textContent=`Не удалось начать игру: ${error.message}`}}
 
-export function mount({ container, definition, api, close }) {
-  container.innerHTML = `
-    <header class="game-header-new">
-      <div>
-        <p class="game-kicker-new mono">АБСТРАКЦИЯ</p>
-        <h2>${definition.title}</h2>
-        <p data-instruction>Проведите линию от зелёного старта до красного финиша.</p>
-      </div>
-      <div class="game-progress-new" data-progress>Лабиринт 1 из 3</div>
-    </header>
-    <main class="game-stage-new gm19-module">
-      <div class="game-intro-new" data-intro>
-        <p>Нажмите на зелёную точку и ведите линию по проходам до красной точки, не отпуская кнопку мыши или палец.</p>
-        <button type="button" class="icon-btn primary-btn" data-start><span>Начать</span></button>
-      </div>
-      <canvas class="gm19-module-canvas" data-canvas width="720" height="720" hidden></canvas>
-      <div class="game-result-new" data-result hidden>
-        <h3>Игра завершена</h3>
-        <p data-result-text></p>
-        <button type="button" class="icon-btn primary-btn" data-restart><span>Ещё раз</span></button>
-      </div>
-    </main>
-    <footer class="game-actions-new">
-      <button type="button" class="icon-btn" data-close><span>К выбору игр</span></button>
-    </footer>`;
-
-  const instruction = container.querySelector("[data-instruction]");
-  const progress = container.querySelector("[data-progress]");
-  const intro = container.querySelector("[data-intro]");
-  const canvas = container.querySelector("[data-canvas]");
-  const result = container.querySelector("[data-result]");
-  const resultText = container.querySelector("[data-result-text]");
-  const start = container.querySelector("[data-start]");
-  const restart = container.querySelector("[data-restart]");
-  const context = canvas.getContext("2d");
-  let state = null;
-  let path = [];
-  let drawing = false;
-  let finishing = false;
-  let errors = 0;
-  let shownAt = 0;
-  let startedAt = 0;
-  let lastRejected = "";
-  let active = true;
-  let token = 0;
-
-  const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
-
-  function draw() {
-    if (!state) return;
-    const size = state.size;
-    const cell = canvas.width / size;
-    context.clearRect(0, 0, canvas.width, canvas.height);
-    context.fillStyle = "#f7fafb";
-    context.fillRect(0, 0, canvas.width, canvas.height);
-    context.strokeStyle = "#17212b";
-    context.lineWidth = 4;
-    context.beginPath();
-    for (let y = 0; y < size; y += 1) {
-      for (let x = 0; x < size; x += 1) {
-        const walls = state.walls[y][x];
-        const x0 = x * cell;
-        const y0 = y * cell;
-        if (walls.n) { context.moveTo(x0, y0); context.lineTo(x0 + cell, y0); }
-        if (walls.w) { context.moveTo(x0, y0); context.lineTo(x0, y0 + cell); }
-        if (y === size - 1 && walls.s) { context.moveTo(x0, y0 + cell); context.lineTo(x0 + cell, y0 + cell); }
-        if (x === size - 1 && walls.e) { context.moveTo(x0 + cell, y0); context.lineTo(x0 + cell, y0 + cell); }
-      }
-    }
-    context.stroke();
-    if (path.length) {
-      context.strokeStyle = "#38a9c7";
-      context.lineWidth = 8;
-      context.lineCap = "round";
-      context.beginPath();
-      path.forEach(([x, y], index) => {
-        const px = (x + 0.5) * cell;
-        const py = (y + 0.5) * cell;
-        if (index) context.lineTo(px, py); else context.moveTo(px, py);
-      });
-      context.stroke();
-    }
-    [[state.start, "#24a66f"], [state.finish, "#d83a48"]].forEach(([position, color]) => {
-      context.fillStyle = color;
-      context.beginPath();
-      context.arc((position[0] + 0.5) * cell, (position[1] + 0.5) * cell, cell * 0.22, 0, Math.PI * 2);
-      context.fill();
-    });
-  }
-
-  function renderMaze(payload) {
-    state = payload;
-    path = [];
-    drawing = false;
-    finishing = false;
-    errors = 0;
-    lastRejected = "";
-    shownAt = performance.now();
-    progress.textContent = `Лабиринт ${payload.maze} из ${payload.maze_count}`;
-    instruction.textContent = "Начните с зелёной точки и не отпускайте кнопку до финиша.";
-    intro.hidden = true;
-    result.hidden = true;
-    canvas.hidden = false;
-    draw();
-  }
-
-  function cellFromEvent(event) {
-    const rect = canvas.getBoundingClientRect();
-    return [
-      Math.max(0, Math.min(state.size - 1, Math.floor((event.clientX - rect.left) / rect.width * state.size))),
-      Math.max(0, Math.min(state.size - 1, Math.floor((event.clientY - rect.top) / rect.height * state.size))),
-    ];
-  }
-
-  function canMove(from, to) {
-    const [x, y] = from;
-    const [nextX, nextY] = to;
-    const dx = nextX - x;
-    const dy = nextY - y;
-    const direction = dx === 1 && dy === 0 ? "e"
-      : dx === -1 && dy === 0 ? "w"
-        : dx === 0 && dy === 1 ? "s"
-          : dx === 0 && dy === -1 ? "n" : null;
-    return Boolean(direction && !state.walls[y][x][direction]);
-  }
-
-  async function finishMaze() {
-    if (finishing) return;
-    drawing = false;
-    finishing = true;
-    const currentToken = token;
-    const executionMs = performance.now() - startedAt;
-    instruction.textContent = "Маршрут завершён…";
-    const elapsed = performance.now() - shownAt;
-    if (elapsed < MAZE_SLOT_MS) await delay(MAZE_SLOT_MS - elapsed);
-    if (!active || currentToken !== token) return;
-    try {
-      const payload = await api.answer({
-        session_id: state.session_id,
-        path,
-        boundary_errors: errors,
-        planning_ms: startedAt - shownAt,
-        execution_ms: executionMs,
-        timestamp_ms: Date.now(),
-      });
-      if (!active || currentToken !== token) return;
-      if (!payload.finished) {
-        renderMaze(payload);
-        return;
-      }
-      canvas.hidden = true;
-      result.hidden = false;
-      restart.disabled = false;
-      progress.textContent = "Завершено";
-      instruction.textContent = "Все лабиринты пройдены.";
-      resultText.textContent = `Выходов за границы: ${payload.metrics.v03_boundary_exits}.`;
-    } catch (error) {
-      finishing = false;
-      path = [];
-      instruction.textContent = `Не удалось сохранить маршрут: ${error.message}. Начните снова.`;
-      draw();
-    }
-  }
-
-  function onPointerDown(event) {
-    if (!state || finishing) return;
-    const cell = cellFromEvent(event);
-    if (cell[0] !== state.start[0] || cell[1] !== state.start[1]) return;
-    event.preventDefault();
-    drawing = true;
-    path = [[...state.start]];
-    errors = 0;
-    lastRejected = "";
-    startedAt = performance.now();
-    canvas.setPointerCapture(event.pointerId);
-    draw();
-  }
-
-  function onPointerMove(event) {
-    if (!drawing || finishing) return;
-    event.preventDefault();
-    const cell = cellFromEvent(event);
-    const last = path[path.length - 1];
-    if (cell[0] === last[0] && cell[1] === last[1]) {
-      lastRejected = "";
-      return;
-    }
-    if (canMove(last, cell)) {
-      lastRejected = "";
-      path.push(cell);
-      draw();
-      if (cell[0] === state.finish[0] && cell[1] === state.finish[1]) finishMaze();
-      return;
-    }
-    const key = cell.join(",");
-    if (key !== lastRejected) {
-      errors += 1;
-      lastRejected = key;
-    }
-  }
-
-  function onPointerEnd() {
-    if (!drawing || finishing) return;
-    drawing = false;
-    path = [];
-    errors += 1;
-    instruction.textContent = "Кнопка отпущена до финиша. Начните снова с зелёной точки.";
-    draw();
-  }
-
-  async function begin() {
-    token += 1;
-    drawing = false;
-    finishing = true;
-    start.disabled = true;
-    restart.disabled = true;
-    canvas.hidden = true;
-    result.hidden = true;
-    instruction.textContent = "Создаю лабиринты…";
-    try {
-      renderMaze(await api.start());
-    } catch (error) {
-      finishing = false;
-      instruction.textContent = `Не удалось начать игру: ${error.message}`;
-      start.disabled = false;
-      restart.disabled = false;
-    }
-  }
-
-  canvas.addEventListener("pointerdown", onPointerDown);
-  canvas.addEventListener("pointermove", onPointerMove);
-  canvas.addEventListener("pointerup", onPointerEnd);
-  canvas.addEventListener("pointercancel", onPointerEnd);
-  start.onclick = begin;
-  restart.onclick = begin;
-  container.querySelector("[data-close]").onclick = () => {
-    active = false;
-    drawing = false;
-    finishing = true;
-    token += 1;
-    close();
-  };
-
-  const style = document.createElement("style");
-  style.textContent = `
-    .gm19-module { display: grid; place-items: center; padding: clamp(7px, 1.2vh, 14px); overflow: hidden; }
-    .gm19-module-canvas { display: block; width: min(68vh, 720px, 88vw); height: min(68vh, 720px, 88vw); max-width: 100%; touch-action: none; background: #fff; border-radius: 12px; }
-    .gm19-module-canvas[hidden] { display: none; }
-    @media (max-height: 720px) {
-      .gm19-module-canvas { width: min(60vh, 560px, 86vw); height: min(60vh, 560px, 86vw); }
-    }
-  `;
-  container.append(style);
-
-  return () => {
-    active = false;
-    drawing = false;
-    finishing = true;
-    token += 1;
-    canvas.removeEventListener("pointerdown", onPointerDown);
-    canvas.removeEventListener("pointermove", onPointerMove);
-    canvas.removeEventListener("pointerup", onPointerEnd);
-    canvas.removeEventListener("pointercancel", onPointerEnd);
-  };
+  canvas.addEventListener('pointerdown',onPointerDown);canvas.addEventListener('pointermove',onPointerMove);canvas.addEventListener('pointerup',onPointerEnd);canvas.addEventListener('pointercancel',onPointerEnd);container.querySelector('[data-start-training]').onclick=beginTraining;container.querySelector('[data-repeat-training]').onclick=beginTraining;container.querySelector('[data-confirm-start]').onclick=beginGame;restart.onclick=beginGame;container.querySelector('[data-close]').onclick=()=>{active=false;drawing=false;finishing=true;token+=1;timers.forEach(id=>clearTimeout(id));timers.clear();close()};
+  const style=document.createElement('style');style.textContent=`
+    .gm19-module{display:grid;place-items:center;text-align:center;padding:clamp(7px,1.2vh,14px);overflow:hidden}.gm19-module.is-instruction-stage{align-items:start;padding-top:clamp(14px,2.4vh,30px)}.gm19-intro,.gm19-training,.gm19-game{width:min(800px,100%)}.gm19-intro h3,.gm19-training h3{margin:0 0 10px;font-size:clamp(19px,2.3vw,25px)}.gm19-intro ol{width:min(700px,100%);margin:0 auto 16px;padding-left:28px;color:#52606d;text-align:left;font-size:clamp(14px,1.6vw,18px);line-height:1.4}.gm19-intro li+li{margin-top:5px}.gm19-example-title{margin:0 0 7px;font-weight:700}.gm19-media-placeholder{box-sizing:border-box;display:flex;width:min(620px,100%);height:clamp(130px,22vh,230px);margin:0 auto 18px;flex-direction:column;align-items:center;justify-content:center;gap:7px;border:2px dashed #b8cbd5;border-radius:16px;background:#eaf1f4;color:#52606d}.gm19-media-placeholder>span{display:grid;width:46px;height:46px;place-items:center;border-radius:50%;background:#d3e2e9;color:#168ba8}.gm19-media-placeholder strong{color:#263744}.gm19-training>p{color:#52606d}.gm19-module-canvas{display:block;width:min(64vh,650px,82vw);height:min(64vh,650px,82vw);max-width:100%;margin:auto;touch-action:none;background:#fff;border-radius:12px}.gm19-training .gm19-module-canvas{width:min(52vh,500px,72vw);height:min(52vh,500px,72vw)}
+    .gm19-training-actions{display:flex;justify-content:center;gap:12px;flex-wrap:wrap}.gm19-training-repeat{border-color:#60727d;background:#fff;color:#17212b}.gm19-training-repeat span{color:#17212b}.gm19-intro[hidden],.gm19-training[hidden],.gm19-training-complete[hidden],.gm19-game[hidden]{display:none}@media(max-height:700px){.gm19-module.is-instruction-stage{padding-top:8px}.gm19-intro ol{margin-bottom:7px;font-size:13px;line-height:1.25}.gm19-media-placeholder{height:clamp(100px,18vh,140px);margin-bottom:8px}.gm19-module-canvas{width:min(56vh,520px);height:min(56vh,520px)}}
+  `;container.append(style);return()=>{active=false;drawing=false;finishing=true;token+=1;timers.forEach(id=>clearTimeout(id));timers.clear();canvas.removeEventListener('pointerdown',onPointerDown);canvas.removeEventListener('pointermove',onPointerMove);canvas.removeEventListener('pointerup',onPointerEnd);canvas.removeEventListener('pointercancel',onPointerEnd)}
 }

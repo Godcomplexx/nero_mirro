@@ -15,6 +15,9 @@ from neuro_mirror.screening.gm04_scoring import score_gm04
 class PatternSession:
     session_id: str
     patterns: list[list[int]]
+    difficulty_level: int
+    grid_size: int
+    target_range: tuple[int, int]
     round_index: int = 0
     phase: str = "study"
     shown_ms: float = field(default_factory=lambda: time.time() * 1000)
@@ -32,12 +35,20 @@ class Gm04LocationPlugin(BrowserGamePlugin):
         self._sessions: dict[str, PatternSession] = {}
         self._random = secrets.SystemRandom()
 
-    def _start(self) -> dict[str, Any]:
+    def start_game(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._start(difficulty_level=payload.get("difficulty_level"))
+
+    def _start(self, *, difficulty_level: object = None) -> dict[str, Any]:
+        try:
+            level = min(3, max(1, int(difficulty_level or 1)))
+        except (TypeError, ValueError):
+            level = 1
+        grid_size, minimum, maximum = ((4, 3, 5), (8, 4, 7), (10, 6, 10))[level - 1]
         patterns = [
-            sorted(self._random.sample(range(GRID_SIZE ** 2), self._random.randint(MIN_TARGETS, MAX_TARGETS)))
+            sorted(self._random.sample(range(grid_size ** 2), self._random.randint(minimum, maximum)))
             for _ in range(ROUNDS)
         ]
-        session = PatternSession(uuid.uuid4().hex, patterns)
+        session = PatternSession(uuid.uuid4().hex, patterns, level, grid_size, (minimum, maximum))
         self._sessions[session.session_id] = session
         return self._payload(session)
 
@@ -55,7 +66,7 @@ class Gm04LocationPlugin(BrowserGamePlugin):
         selected_raw = payload.get("selected")
         if not isinstance(selected_raw, list):
             return {"ok": False, "message": "Ответ должен содержать выбранные клетки."}
-        selected = sorted({int(value) for value in selected_raw if 0 <= int(value) < GRID_SIZE ** 2})
+        selected = sorted({int(value) for value in selected_raw if 0 <= int(value) < session.grid_size ** 2})
         targets = session.patterns[session.round_index]
         spatial_errors = len(set(targets) ^ set(selected))
         event = {
@@ -81,7 +92,9 @@ class Gm04LocationPlugin(BrowserGamePlugin):
     def _payload(self, session: PatternSession) -> dict[str, Any]:
         return {
             "ok": True, "finished": False, "session_id": session.session_id,
-            "phase": session.phase, "grid_size": GRID_SIZE,
+            "difficulty_level": session.difficulty_level,
+            "difficulty_parameters": {"grid_size": session.grid_size, "minimum_targets": session.target_range[0], "maximum_targets": session.target_range[1]},
+            "phase": session.phase, "grid_size": session.grid_size,
             "round": session.round_index + 1, "round_count": len(session.patterns),
             "targets": session.patterns[session.round_index] if session.phase == "study" else [],
             "study_seconds": STUDY_SECONDS,

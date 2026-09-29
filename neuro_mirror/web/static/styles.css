@@ -1884,25 +1884,94 @@ pre {
 }
 
 .training-domain-panel[hidden] { display: none; }
+.training-difficulty {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 11px 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  color: var(--fg-dim);
+}
+.training-difficulty-options { display: flex; gap: 7px; }
+.training-difficulty-options button {
+  padding: 8px 13px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--fg-dim);
+  font: inherit;
+  cursor: pointer;
+}
+.training-difficulty-options button:hover,
+.training-difficulty-options button.is-active {
+  border-color: var(--accent);
+  background: rgba(123, 220, 255, 0.12);
+  color: var(--fg);
+}
 .training-domain-panel h3 { margin: 0 0 12px; font-size: 17px; color: var(--fg-dim); }
+.training-recommendation {
+  width: 100%;
+  justify-content: center;
+  margin-bottom: 14px;
+}
+.training-recommendation:disabled { cursor: wait; opacity: 0.7; }
 .training-domain-grid { margin-bottom: 0; }
 .training-domain-grid .menu-item { min-height: 78px; justify-content: center; }
 
 @media (max-width: 720px) {
   .training-domain-tabs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .training-difficulty { align-items: stretch; flex-direction: column; }
+  .training-difficulty-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 
 /* ---- Additional cognitive games ---- */
 .game-panel-new { position:absolute; inset:0; z-index:37; display:grid; padding:clamp(12px,2vh,24px); background:rgba(3,6,10,.95); }
 .game-panel-new[hidden] { display:none; }
-.game-shell-new { width:min(1100px,100%); height:100%; min-height:0; margin:auto; display:grid; grid-template-rows:auto minmax(0,1fr) auto; gap:clamp(10px,1.8vh,20px); }
+.game-shell-new { width:min(1240px,82vw); height:100%; min-height:0; margin:auto; display:grid; grid-template-rows:auto minmax(0,1fr) auto; gap:clamp(10px,1.8vh,20px); }
 .game-header-new { display:flex; justify-content:space-between; align-items:flex-start; gap:20px; }
 .game-header-new h2 { margin:4px 0 6px; font-size:clamp(24px,3vw,38px); }
 .game-header-new p { margin:0; color:var(--fg-dim); }
 .game-kicker-new { color:var(--accent)!important; letter-spacing:.17em; font-size:12px; }
 .game-progress-new { flex:none; padding:10px 16px; border:1px solid var(--line); border-radius:999px; color:var(--fg-dim); }
 .game-stage-new { min-height:0; display:grid; place-items:center; overflow:hidden; padding:clamp(16px,3vh,36px); border:1px solid var(--line-strong); border-radius:var(--radius); background:#f4f7f8; color:#17212b; box-shadow:var(--shadow); }
+.game-stage-new .icon-btn:not(.primary-btn) {
+  border:2px solid #60727d;
+  background:#ffffff;
+  color:#17212b;
+  box-shadow:0 3px 10px rgba(23,33,43,.10);
+}
+.game-stage-new .icon-btn:not(.primary-btn) span { color:inherit; }
+.game-stage-new .icon-btn:not(.primary-btn):hover:not(:disabled) {
+  border-color:#168ba8;
+  background:#e8f8fc;
+  color:#17212b;
+  box-shadow:0 0 0 4px rgba(54,183,215,.18);
+}
+.game-stage-new .icon-btn:not(.primary-btn):focus-visible {
+  outline:3px solid #168ba8;
+  outline-offset:3px;
+}
+.game-shell-new > .game-stage-new {
+  width:100%;
+  max-width:none;
+  height:100%;
+  margin:0;
+  box-sizing:border-box;
+}
 .game-intro-new,.game-result-new { max-width:620px; text-align:center; }
+.game-stage-new .game-result-new {
+  width:min(620px,100%);
+  margin-inline:auto;
+  justify-self:center;
+}
+.game-stage-new [class*="-module-play"] {
+  margin-inline:auto;
+}
+.game-stage-new [class*="-module-matrix"] {
+  margin-inline:auto;
+}
 .game-intro-new p,.game-result-new p { margin:0 0 24px; color:#52606d; font-size:clamp(16px,2vw,20px); }
 .game-result-new h3 { margin:0 0 10px; font-size:clamp(24px,3vw,34px); }
 .game-intro-new[hidden],.game-result-new[hidden] { display:none; }
@@ -1910,6 +1979,65 @@ pre {
 .game-options-new { display:grid; grid-template-columns:repeat(2,minmax(180px,1fr)); gap:14px; width:min(620px,100%); }
 .game-option-new { padding:18px; border:2px solid #d5dfe5; border-radius:16px; background:#fff; color:#17212b; font-size:20px; cursor:pointer; }
 .game-option-new:hover { border-color:#36b7d7; box-shadow:0 0 0 4px rgba(54,183,215,.14); }
+
+/* ---- Shared game tutorial ---- */
+.game-tutorial-stage { align-items:start; padding-top:clamp(14px,2.4vh,30px); overflow:hidden; }
+.game-tutorial-card { width:min(800px,100%); text-align:center; }
+.game-tutorial-instruction,.game-tutorial-practice,.game-tutorial-complete { width:100%; }
+.game-tutorial-instruction h3,.game-tutorial-practice h3 { margin:0 0 10px; font-size:clamp(19px,2.3vw,25px); }
+.game-tutorial-instruction ol { width:min(700px,100%); margin:0 auto clamp(10px,1.8vh,18px); padding-left:28px; color:#52606d; text-align:left; font-size:clamp(14px,1.6vw,18px); line-height:1.4; }
+.game-tutorial-instruction ol li+li { margin-top:5px; }
+.game-tutorial-example-title { margin:0 0 7px; color:#17212b; font-weight:700; }
+.game-tutorial-media,.game-tutorial-media-placeholder { display:flex; width:min(620px,100%); height:clamp(130px,22vh,230px); margin:0 auto clamp(12px,2vh,20px); border-radius:16px; }
+.game-tutorial-media { object-fit:contain; background:#eaf1f4; }
+.game-tutorial-media-placeholder { box-sizing:border-box; flex-direction:column; align-items:center; justify-content:center; gap:7px; border:2px dashed #b8cbd5; background:#eaf1f4; color:#52606d; }
+.game-tutorial-media-placeholder>span { display:grid; width:46px; height:46px; place-items:center; padding-left:3px; border-radius:50%; background:#d3e2e9; color:#168ba8; font-size:20px; }
+.game-tutorial-media-placeholder strong { color:#263744; }
+.game-tutorial-media-placeholder small { padding:0 14px; }
+.game-tutorial-next { margin:0 auto; }
+.game-tutorial-practice>p { margin:0 0 12px; color:#52606d; }
+.game-tutorial-example { display:flex; align-items:center; justify-content:center; flex-wrap:wrap; gap:10px; min-height:70px; margin:0 auto clamp(10px,1.8vh,18px); padding:10px 14px; border:1px solid #c7d5dc; border-radius:16px; background:#fff; }
+.game-tutorial-example span { padding:8px 12px; border-radius:10px; background:#eaf1f4; color:#263744; font-size:clamp(16px,2vw,22px); }
+.game-tutorial-practice>strong { display:block; margin-bottom:9px; font-size:clamp(15px,1.7vw,18px); }
+.game-tutorial-options { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:9px; }
+.game-tutorial-options button { min-height:54px; padding:9px 12px; border:2px solid #c7d5dc; border-radius:13px; background:#fff; color:#17212b; font:inherit; cursor:pointer; }
+.game-tutorial-options button:hover { border-color:#38a9c7; }
+.game-tutorial-options button.is-correct { border-color:#1d9b69; background:#e4f7ef; }
+.game-tutorial-options button.is-wrong { border-color:#d64b59; background:#fdebed; }
+.game-tutorial-practice>[data-tutorial-feedback] { min-height:1.4em; margin:7px 0 0; font-size:14px; }
+.game-tutorial-practice>[data-tutorial-feedback].is-correct { color:#167950; }
+.game-tutorial-practice>[data-tutorial-feedback].is-wrong { color:#b33443; }
+.game-tutorial-instruction[hidden],.game-tutorial-practice[hidden],.game-tutorial-complete[hidden] { display:none; }
+.game-tutorial-complete { padding-top:8px; }
+.game-tutorial-complete h3 { margin:0 0 7px; }
+.game-tutorial-complete p { margin:0 0 12px; color:#52606d; }
+.game-tutorial-complete>div { display:flex; justify-content:center; flex-wrap:wrap; gap:10px; }
+.game-tutorial-complete .icon-btn.game-tutorial-repeat {
+  border-color:#60727d;
+  background:#fff;
+  color:#17212b;
+}
+.game-tutorial-complete .icon-btn.game-tutorial-repeat span { color:#17212b; }
+.game-tutorial-complete .icon-btn.game-tutorial-repeat:hover:not(:disabled) {
+  border-color:#168ba8;
+  background:#e8f8fc;
+  color:#17212b;
+}
+
+@media (max-width:720px) {
+  .game-shell-new { width:min(96vw,100%); }
+  .game-tutorial-options { grid-template-columns:1fr; }
+}
+
+@media (max-height:700px) {
+  .game-tutorial-stage { padding-top:8px; }
+  .game-tutorial-instruction ol { margin-bottom:7px; font-size:13px; line-height:1.25; }
+  .game-tutorial-media,.game-tutorial-media-placeholder { height:clamp(100px,18vh,140px); margin-bottom:8px; }
+  .game-tutorial-media-placeholder>span { width:34px; height:34px; font-size:15px; }
+  .game-tutorial-example { min-height:48px; margin-bottom:7px; padding:6px; }
+  .game-tutorial-example span { padding:5px 8px; font-size:15px; }
+  .game-tutorial-options button { min-height:42px; padding:6px 9px; font-size:13px; }
+}
 
 @media (max-height: 700px) {
   .game-stage-new { padding: 8px; }

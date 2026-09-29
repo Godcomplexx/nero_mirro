@@ -9,7 +9,6 @@ from typing import Any
 from neuro_mirror.plugins.games.base import BrowserGamePlugin
 from neuro_mirror.plugins.games.gm18_puzzle.stimuli import (
     BONUS_PUZZLE,
-    MINIMUM_SESSION_MS,
     PUZZLES,
 )
 from neuro_mirror.screening.gm18_scoring import score_gm18
@@ -32,6 +31,9 @@ def minimum_swaps(board: list[int]) -> int:
 @dataclass(slots=True)
 class PuzzleSession:
     session_id: str
+    puzzles: list[dict[str, Any]]
+    stimulus_set: str
+    difficulty_level: int
     started_at_ms: float = field(default_factory=lambda: time.time() * 1000)
     round_started_at_ms: float = 0.0
     round_index: int = 0
@@ -51,13 +53,28 @@ class Gm18PuzzlePlugin(BrowserGamePlugin):
         self._sessions: dict[str, PuzzleSession] = {}
         self._random = secrets.SystemRandom()
 
-    def _start(self) -> dict[str, Any]:
-        session = PuzzleSession(uuid.uuid4().hex)
+    def start_game(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._start(stimulus_set=str(payload.get("stimulus_set") or ""), difficulty_level=payload.get("difficulty_level"))
+
+    def _start(self, *, stimulus_set: str = "", difficulty_level: object = None) -> dict[str, Any]:
+        try: level = min(3, max(1, int(difficulty_level or 1)))
+        except (TypeError, ValueError): level = 1
+        puzzles_by_set = {
+            "пейзаж": PUZZLES[0],
+            "натюрморт или интерьер": PUZZLES[1],
+            "портрет": PUZZLES[2],
+        }
+        available = tuple(name for name in self.definition.stimulus_sets if name in puzzles_by_set) or tuple(puzzles_by_set)
+        selected = stimulus_set if stimulus_set in available else available[0]
+        source = puzzles_by_set[selected]
+        rows, columns = ((2, 3), (3, 4), (4, 5))[level - 1]
+        puzzle = {**source, "rows": rows, "columns": columns}
+        session = PuzzleSession(uuid.uuid4().hex, [puzzle], selected, level)
         self._sessions[session.session_id] = session
         return self._prepare_round(session)
 
     def _puzzle(self, session: PuzzleSession) -> dict[str, Any]:
-        return PUZZLES[session.round_index] if session.round_index < len(PUZZLES) else BONUS_PUZZLE
+        return session.puzzles[session.round_index] if session.round_index < len(session.puzzles) else BONUS_PUZZLE
 
     def _prepare_round(self, session: PuzzleSession) -> dict[str, Any]:
         puzzle = self._puzzle(session)
@@ -105,7 +122,7 @@ class Gm18PuzzlePlugin(BrowserGamePlugin):
         )
         session.round_index += 1
         elapsed_ms = now_ms - session.started_at_ms
-        if session.round_index >= len(PUZZLES) and elapsed_ms >= MINIMUM_SESSION_MS:
+        if session.round_index >= len(session.puzzles):
             events = list(session.round_events)
             self._sessions.pop(session.session_id, None)
             return {
@@ -122,9 +139,12 @@ class Gm18PuzzlePlugin(BrowserGamePlugin):
             "ok": True,
             "finished": False,
             "session_id": session.session_id,
+            "stimulus_set": session.stimulus_set,
+            "difficulty_level": session.difficulty_level,
+            "difficulty_parameters": {"pieces": puzzle["rows"] * puzzle["columns"]},
             "round_number": session.round_index + 1,
-            "required_rounds": len(PUZZLES),
-            "bonus": session.round_index >= len(PUZZLES),
+            "required_rounds": len(session.puzzles),
+            "bonus": session.round_index >= len(session.puzzles),
             "name": puzzle["name"],
             "image": puzzle["image"],
             "rows": puzzle["rows"],
