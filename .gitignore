@@ -27,6 +27,9 @@ moca_recall_split_experiment/
 # Локальные веса моделей (скачиваются при первом запуске)
 runtime/models/gigaam/*.ckpt
 runtime/models/gigaam/*.model
+# Технический журнал вместе с файлами ротации: правило *.log не покрывает
+# neuro_mirror.log.1 и последующие.
+runtime/logs/
 runtime/deidentified/
 runtime/dataset/
 runtime/models/tts/*.onnx

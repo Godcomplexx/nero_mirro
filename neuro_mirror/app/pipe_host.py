@@ -298,13 +298,12 @@ async def _read_lines(loop: asyncio.AbstractEventLoop):
 
 async def serve(app=None) -> None:
     """Запустить ядро и обслуживать канал до закрытия стандартного ввода."""
+    from neuro_mirror.core.logging_setup import configure_logging
     from neuro_mirror.web.app import create_app
 
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-        stream=sys.stderr,
-    )
+    # Стандартный вывод занят обменом с интерфейсом, поэтому диагностика
+    # направляется в поток ошибок.
+    configure_logging(console_stream=sys.stderr)
 
     app = app or create_app()
     writer = ProtocolWriter()

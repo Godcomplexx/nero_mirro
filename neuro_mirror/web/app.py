@@ -46,6 +46,11 @@ from neuro_mirror.plugins.games.registry import (
 )
 from neuro_mirror.plugins.games.contracts import Domain, normalise_game_code
 from neuro_mirror.plugins.games.selector import NoEligibleGameError, select_game
+from neuro_mirror.core.access_journal import (
+    EXPORT_RESULTS,
+    VIEW_RESULTS,
+    AccessJournal,
+)
 from neuro_mirror.screening.training_session import build_training_session
 from neuro_mirror.plugins.ui.web_plugin import WebUIPlugin, WebUIStateStore
 from neuro_mirror.plugins.user_progress.plugin import UserProgressPlugin
@@ -204,6 +209,7 @@ def create_app() -> FastAPI:
             await runtime.stop()
 
     app = FastAPI(title="Neuro Mirror Web", lifespan=lifespan)
+    access_journal = AccessJournal()
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
     app.mount("/game-assets", StaticFiles(directory=str(game_assets_dir)), name="game-assets")
 
@@ -576,6 +582,11 @@ def create_app() -> FastAPI:
 
         items = reply.get("items") or []
         items.sort(key=lambda item: str(item.get("stored_at") or ""), reverse=True)
+        access_journal.record(
+            action=VIEW_RESULTS,
+            user_id=str(active.get("id") or ""),
+            details={"count": len(items)},
+        )
         return JSONResponse({"user": _serialize_user(active), "items": items})
 
     @app.get("/api/results/games/export")
@@ -601,6 +612,11 @@ def create_app() -> FastAPI:
             if item.get("report_type") == "training_game"
         ]
         games.sort(key=lambda item: str(item.get("stored_at") or ""), reverse=True)
+        access_journal.record(
+            action=EXPORT_RESULTS,
+            user_id=str(active.get("id") or ""),
+            details={"kind": "training_game", "count": len(games)},
+        )
         return JSONResponse(
             {
                 "user_id": str(active.get("id") or ""),
