@@ -105,6 +105,14 @@ class GameSessionCoordinator(ProcessorPlugin):
             "session_started_at": session.get("started_at"),
             "versions": deepcopy(session.get("versions") or {}),
         }
+        # Исход дописывается к предъявлению: на нём строится подстройка уровня.
+        self.history_store.record_outcome(
+            session_id=persistent_session_id,
+            game_code=definition.code,
+            metrics=dict(payload.get("metrics") or {}),
+            completion_status=str(payload.get("completion_status") or "unknown"),
+            technical_validity=str(payload.get("technical_validity") or "unknown"),
+        )
         completed = self.session_store.complete(persistent_session_id, result) or {}
         result["session_status"] = completed.get("status", "completed")
         result["session_finished_at"] = completed.get("finished_at")

@@ -111,7 +111,10 @@ def _client_with(tmp_path, stored_items):
     users.select_user(user["id"])
 
     bus = SimpleNamespace(request=AsyncMock(return_value={"items": stored_items}))
-    history = SimpleNamespace(for_user=lambda _user_id: ())
+    history = SimpleNamespace(
+        for_user=lambda _user_id: (),
+        passes_for_game=lambda _user_id, _code: [],
+    )
     app = create_app()
     app.state.context = SimpleNamespace(
         user_store=users,

@@ -321,10 +321,12 @@ def create_app() -> FastAPI:
                 detail="Сначала пройдите когнитивный тест: занятие подбирается по его результату.",
             )
 
+        history_store = ctx.runtime.game_history_store
         session = build_training_session(
             profile,
-            history=ctx.runtime.game_history_store.for_user(user_id),
+            history=history_store.for_user(user_id),
             available_codes=implemented_game_codes(),
+            passes_for_game=lambda code: history_store.passes_for_game(user_id, code),
         )
         if not session["games"]:
             raise HTTPException(status_code=409, detail="Не удалось подобрать ни одного задания.")

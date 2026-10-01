@@ -4,7 +4,19 @@ from __future__ import annotations
 from typing import Any
 
 
-def score_gm22(events: list[dict[str, Any]], elapsed_ms: float) -> dict[str, float | int | bool]:
+def score_gm22(
+    events: list[dict[str, Any]],
+    elapsed_ms: float,
+    *,
+    required_levels: int,
+) -> dict[str, float | int | bool]:
+    """Оценить прохождение башни.
+
+    Число требуемых уровней передаётся вызывающим. Раньше оно было зашито
+    тройкой вместе с минимальной продолжительностью занятия: после перехода
+    на один уровень за занятие безошибочное решение засчитывалось как
+    незавершённое.
+    """
     completed = [event for event in events if event.get("level_complete")]
     valid_moves = sum(bool(event.get("legal_move")) for event in events)
     invalid_moves = sum(not bool(event.get("legal_move")) for event in events)
@@ -16,5 +28,5 @@ def score_gm22(events: list[dict[str, Any]], elapsed_ms: float) -> dict[str, flo
         "e03_invalid_move_count": invalid_moves,
         "e04_duration_ms": max(0.0, elapsed_ms),
         "u07_error_count": invalid_moves,
-        "u06_complete": len(completed) >= 3 and elapsed_ms >= 60_000,
+        "u06_complete": len(completed) >= max(1, required_levels),
     }

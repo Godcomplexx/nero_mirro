@@ -112,7 +112,7 @@ class Gm22TowerPlugin(BrowserGamePlugin):
         elapsed_ms = time.time() * 1000 - session.started_at_ms
         events = list(session.round_events)
         self._sessions.pop(session.session_id, None)
-        return {"ok": True, "finished": True, "events": events, "metrics": score_gm22(events, elapsed_ms)}
+        return {"ok": True, "finished": True, "events": events, "metrics": score_gm22(events, elapsed_ms, required_levels=1)}
 
     def _payload(self, session: TowerSession) -> dict[str, Any]:
         return {

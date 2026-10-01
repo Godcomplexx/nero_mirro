@@ -18,6 +18,7 @@ from neuro_mirror.plugins.games.selector import (
     Presentation,
     select_game,
 )
+from neuro_mirror.screening.difficulty_policy import MIN_LEVEL, next_level
 from neuro_mirror.screening.moca_scoring import MOCA_MODULES
 from neuro_mirror.screening.training_plan import DEFAULT_SESSION_SIZE, plan_session
 
@@ -59,6 +60,7 @@ def build_training_session(
     available_codes: frozenset[str] | None = None,
     definitions: tuple[GameDefinition, ...] = GAME_CATALOG,
     session_size: int = DEFAULT_SESSION_SIZE,
+    passes_for_game=None,
 ) -> dict[str, Any]:
     """Собрать занятие: план по доменам плюс конкретные игры по порядку."""
     profile = list(profile)
@@ -92,6 +94,11 @@ def build_training_session(
             continue
         used_codes.add(decision.game.code)
         used_sets.add((decision.game.code, decision.stimulus_set))
+        # Уровень берётся из прошлых прохождений этой игры: пока она даётся
+        # с трудом, занятие остаётся на прежнем уровне.
+        level = MIN_LEVEL
+        if passes_for_game is not None:
+            level = next_level(decision.game.code, passes_for_game(decision.game.code))
         games.append({
             "position": position,
             "domain": domain_label,
@@ -99,6 +106,7 @@ def build_training_session(
             "game_code": decision.game.code,
             "title": decision.game.title,
             "stimulus_set": decision.stimulus_set,
+            "difficulty_level": level,
             "reasons": list(decision.reasons),
         })
 
