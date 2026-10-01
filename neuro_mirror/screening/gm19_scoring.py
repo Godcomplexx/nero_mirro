@@ -1,7 +1,13 @@
 from __future__ import annotations
 from typing import Any
 
-def score_gm19_mazes(mazes: list[dict[str, Any]], *, expected_mazes: int = 3) -> dict[str, Any]:
+def score_gm19_mazes(mazes: list[dict[str, Any]], *, expected_mazes: int) -> dict[str, Any]:
+    """Оценить пройденные лабиринты.
+
+    Ожидаемое число лабиринтов передаётся вызывающим, а не задаётся
+    умолчанием: набор стимулов менялся, умолчание осталось прежним, и
+    полностью пройденное занятие считалось незавершённым.
+    """
     redundancies = []
     for maze in mazes:
         shortest = max(1, int(maze["shortest_steps"])); actual = max(0, len(maze["path"]) - 1)

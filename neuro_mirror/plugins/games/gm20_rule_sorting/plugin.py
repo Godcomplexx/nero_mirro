@@ -10,6 +10,7 @@ from neuro_mirror.plugins.games.base import BrowserGamePlugin
 from neuro_mirror.plugins.games.gm20_rule_sorting.stimuli import (
     COLORS,
     REFERENCES,
+    RULE_BLOCK_SIZE,
     RULES,
     SHAPES,
     TRIAL_COUNT,
@@ -21,6 +22,7 @@ from neuro_mirror.screening.gm20_scoring import score_gm20_trials
 class RuleSortingSession:
     session_id: str
     active_rule: str
+    rule_schedule: list[str]
     trial_index: int = 0
     consecutive_correct: int = 0
     previous_rule: str | None = None
@@ -43,9 +45,29 @@ class Gm20RuleSortingPlugin(BrowserGamePlugin):
         self._random = secrets.SystemRandom()
 
     def _start_session(self) -> dict[str, Any]:
+        block_count = TRIAL_COUNT // RULE_BLOCK_SIZE
+        remaining = {rule: block_count // len(RULES) for rule in RULES}
+        for rule in RULES[: block_count % len(RULES)]:
+            remaining[rule] += 1
+        rule_schedule: list[str] = []
+        while len(rule_schedule) < block_count:
+            previous = rule_schedule[-1] if rule_schedule else None
+            available = [
+                rule for rule in RULES
+                if remaining[rule] > 0 and rule != previous
+            ]
+            highest_remaining = max(remaining[rule] for rule in available)
+            candidates = [
+                rule for rule in available
+                if remaining[rule] == highest_remaining
+            ]
+            selected_rule = self._random.choice(candidates)
+            rule_schedule.append(selected_rule)
+            remaining[selected_rule] -= 1
         session = RuleSortingSession(
             session_id=uuid.uuid4().hex,
-            active_rule=self._random.choice(RULES),
+            active_rule=rule_schedule[0],
+            rule_schedule=rule_schedule,
         )
         self._sessions[session.session_id] = session
         return self._prepare_trial(session)
@@ -112,9 +134,13 @@ class Gm20RuleSortingPlugin(BrowserGamePlugin):
         session.trial_index += 1
         session.trials_since_switch += 1
 
-        if session.consecutive_correct >= 10 and session.trial_index < TRIAL_COUNT:
+        if (
+            session.trial_index % RULE_BLOCK_SIZE == 0
+            and session.trial_index < TRIAL_COUNT
+        ):
             old_rule = session.active_rule
-            session.active_rule = self._random.choice([rule for rule in RULES if rule != old_rule])
+            block_index = session.trial_index // RULE_BLOCK_SIZE
+            session.active_rule = session.rule_schedule[block_index]
             session.previous_rule = old_rule
             session.consecutive_correct = 0
             session.trials_since_switch = 1

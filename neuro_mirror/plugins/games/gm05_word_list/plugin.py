@@ -15,6 +15,7 @@ from neuro_mirror.screening.gm05_scoring import score_gm05_rounds
 class WordListSession:
     session_id: str
     sets: list[tuple[str, list[str]]]
+    stimulus_set: str
     round_index: int = 0
     shown_at_ms: float = 0.0
     rounds: list[dict[str, Any]] = field(default_factory=list)
@@ -29,13 +30,29 @@ class Gm05WordListPlugin(BrowserGamePlugin):
         self._sessions: dict[str, WordListSession] = {}
         self._random = secrets.SystemRandom()
 
-    def _start(self) -> dict[str, Any]:
-        sets = []
-        for category, source in WORD_SETS:
-            words = list(source)
-            self._random.shuffle(words)
-            sets.append((category, words))
-        session = WordListSession(uuid.uuid4().hex, sets)
+    def start_game(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._start(stimulus_set=str(payload.get("stimulus_set") or ""))
+
+    def _start(self, *, stimulus_set: str = "") -> dict[str, Any]:
+        sets_by_name = {category.casefold(): (category, source) for category, source in WORD_SETS}
+        available_sets = tuple(
+            set_name
+            for set_name in self.definition.stimulus_sets
+            if set_name.casefold() in sets_by_name
+        ) or tuple(sets_by_name)
+        requested_set = stimulus_set.casefold()
+        selected_set = next(
+            (set_name for set_name in available_sets if set_name.casefold() == requested_set),
+            available_sets[0],
+        )
+        category, source = sets_by_name[selected_set.casefold()]
+        words = list(source)
+        self._random.shuffle(words)
+        session = WordListSession(
+            uuid.uuid4().hex,
+            [(category, words)],
+            selected_set,
+        )
         self._sessions[session.session_id] = session
         return self._round_payload(session)
 
@@ -47,6 +64,7 @@ class Gm05WordListPlugin(BrowserGamePlugin):
         session.shown_at_ms = time.time() * 1000
         return {"ok": True, "finished": False, "session_id": session.session_id,
                 "round": session.round_index + 1, "round_count": len(session.sets),
+                "stimulus_set": session.stimulus_set,
                 "category": category, "study_ms": STUDY_MS, "study_words": targets,
                 "choices": choices}
 
@@ -68,5 +86,13 @@ class Gm05WordListPlugin(BrowserGamePlugin):
         session.round_index += 1
         if session.round_index == len(session.sets):
             self._sessions.pop(session.session_id, None)
-            return {"ok": True, "finished": True, "metrics": score_gm05_rounds(session.rounds), "events": session.rounds}
+            return {
+                "ok": True,
+                "finished": True,
+                "metrics": score_gm05_rounds(
+                    session.rounds,
+                    expected_rounds=len(session.sets),
+                ),
+                "events": session.rounds,
+            }
         return self._round_payload(session)

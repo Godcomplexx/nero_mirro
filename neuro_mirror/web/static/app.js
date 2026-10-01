@@ -2185,6 +2185,34 @@ const gameDomainLabels = {
 };
 let gameCatalog = [];
 let dynamicGameCleanup = null;
+let trainingSelectionSession = { gameCodes: [], stimulusSets: [], difficultyLevel: 1 };
+
+function resetTrainingSelectionSession() {
+  trainingSelectionSession = { gameCodes: [], stimulusSets: [], difficultyLevel: 1 };
+}
+
+function rememberTrainingSelection(definition, stimulusSet) {
+  if (!trainingSelectionSession.gameCodes.includes(definition.code)) {
+    trainingSelectionSession.gameCodes.push(definition.code);
+  }
+  if (!stimulusSet) return;
+  const alreadyUsed = trainingSelectionSession.stimulusSets.some(
+    ([code, setName]) => code === definition.code && setName === stimulusSet
+  );
+  if (!alreadyUsed) trainingSelectionSession.stimulusSets.push([definition.code, stimulusSet]);
+}
+
+async function selectTrainingGame(domainCode) {
+  return fetchJson("/api/games/select", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      domain: domainCode,
+      session_game_codes: trainingSelectionSession.gameCodes,
+      session_stimulus_sets: trainingSelectionSession.stimulusSets,
+    }),
+  });
+}
 
 async function loadGameCatalog() {
   if (!el.trainingGameList) return;
@@ -2198,6 +2226,29 @@ async function loadGameCatalog() {
   tabs.setAttribute("aria-label", "Категории тренировок");
   const panels = document.createElement("div");
   panels.className = "training-domain-panels";
+  const difficulty = document.createElement("div");
+  difficulty.className = "training-difficulty";
+  const difficultyLabel = document.createElement("span");
+  difficultyLabel.textContent = "Сложность:";
+  const difficultyOptions = document.createElement("div");
+  difficultyOptions.className = "training-difficulty-options";
+  [[1, "Простая"], [2, "Средняя"], [3, "Сложная"]].forEach(([level, label]) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = label;
+    button.dataset.difficultyLevel = String(level);
+    button.classList.toggle("is-active", level === trainingSelectionSession.difficultyLevel);
+    button.onclick = () => {
+      trainingSelectionSession.difficultyLevel = level;
+      difficultyOptions.querySelectorAll("button").forEach(item => {
+        item.classList.toggle("is-active", item === button);
+        item.setAttribute("aria-pressed", String(item === button));
+      });
+    };
+    button.setAttribute("aria-pressed", String(level === trainingSelectionSession.difficultyLevel));
+    difficultyOptions.append(button);
+  });
+  difficulty.append(difficultyLabel, difficultyOptions);
 
   const selectDomain = (selectedDomain) => {
     tabs.querySelectorAll("[data-training-domain]").forEach((tab) => {
@@ -2230,6 +2281,29 @@ async function loadGameCatalog() {
     panel.setAttribute("role", "tabpanel");
     const heading = document.createElement("h3");
     heading.textContent = `Игры: ${label.toLowerCase()}`;
+    const recommendation = document.createElement("button");
+    recommendation.type = "button";
+    recommendation.className = "icon-btn primary-btn training-recommendation";
+    recommendation.textContent = "Подобрать игру автоматически";
+    recommendation.onclick = async () => {
+      if (recommendation.disabled) return;
+      recommendation.disabled = true;
+      const initialText = recommendation.textContent;
+      recommendation.textContent = "Подбираем…";
+      try {
+        const decision = await selectTrainingGame(domainCode);
+        const selectedCode = decision.game.code.toLowerCase().replace("-", "");
+        await openTrainingGame(selectedCode, {
+          stimulusSet: decision.stimulus_set || "",
+          difficultyLevel: trainingSelectionSession.difficultyLevel,
+        });
+      } catch (error) {
+        setText(el.messageValue, `Не удалось подобрать игру: ${error.message || error}`);
+      } finally {
+        recommendation.textContent = initialText;
+        recommendation.disabled = false;
+      }
+    };
     const grid = document.createElement("div");
     grid.className = "menu-grid training-domain-grid";
     for (const definition of games) {
@@ -2242,12 +2316,122 @@ async function loadGameCatalog() {
       button.append(title);
       grid.append(button);
     }
-    panel.append(heading, grid);
+    panel.append(heading, recommendation, grid);
     panels.append(panel);
   }
-  el.trainingGameList.append(tabs, panels);
+  el.trainingGameList.append(tabs, difficulty, panels);
   const firstDomain = domainOrder.find(domain => definitions.some(item => item.primary_domain === domain));
   if (firstDomain) selectDomain(firstDomain);
+}
+
+const GAME_TUTORIALS = {
+  "GM-01": { steps: ["Открывайте по две закрытые карточки.", "Запоминайте расположение изображений.", "Найдите все одинаковые пары."], demo: ["? → 🐶", "? → 🍎", "? → 🐶"], question: "Что нужно сделать, когда вы запомнили карточку с собакой?", options: ["Открыть карточку с таким же изображением", "Нажимать любые карточки", "Закрыть игру"], correct: 0 },
+  "GM-03": { steps: ["Запомните предметы и их расположение.", "После изменения внимательно сравните сцену.", "Нажмите на предмет или место, которое изменилось."], demo: ["🍎  📘  🧸", "↓ изменение", "🍎  ❓  🧸"], question: "На что нужно нажать?", options: ["На изменившийся предмет или его место", "На любой предмет", "Только на край поля"], correct: 0 },
+  "GM-04": { steps: ["Запомните подсвеченные клетки.", "Дождитесь, когда подсветка исчезнет.", "Отметьте те же клетки и подтвердите ответ."], demo: ["□  ■  □", "запомнить", "□  ?  □"], question: "Какие клетки нужно выбрать?", options: ["Те, которые были подсвечены", "Все клетки", "Только угловые"], correct: 0 },
+  "GM-05": { steps: ["Прочитайте и запомните показанные слова.", "После показа изучите новый список.", "Выберите только слова из первоначального списка."], demo: ["кот · стол · мяч", "↓", "мяч · дом · кот"], question: "Какие слова нужно выбирать?", options: ["Только показанные ранее", "Только новые", "Все подряд"], correct: 0 },
+  "GM-06": { steps: ["Послушайте звуки и следите за кнопками.", "Запомните порядок и ритм.", "Повторите последовательность теми же кнопками."], demo: ["🔵 → 🟢 → 🔵", "пауза", "🔵 → 🟢 → 🔵"], question: "Что важно повторить?", options: ["Порядок и ритм", "Только последний звук", "Цвет фона"], correct: 0 },
+  "GM-07": { steps: ["Запомните образец цели.", "Найдите точно такой же объект среди похожих.", "Если цели нет, нажмите «Цели нет»."], demo: ["Цель: красная Т", "Т  ┴  Т", "найти точное совпадение"], question: "Что делать, если подходящего объекта нет?", options: ["Выбрать «Цели нет»", "Нажать любой объект", "Ждать окончания"], correct: 0 },
+  "GM-08": { steps: ["На обычный сигнал отвечайте нажатием.", "На стоп-сигнал не нажимайте.", "Старайтесь отвечать быстро, но не ошибаться."], demo: ["Обычный → нажать", "Стоп → не нажимать"], question: "Что делать при стоп-сигнале?", options: ["Не нажимать", "Нажать дважды", "Нажать как можно быстрее"], correct: 0 },
+  "GM-09": { steps: ["Запомните выделенные объекты.", "Следите за ними во время движения.", "После остановки выберите именно их."], demo: ["●  ◉  ●", "↝ движение ↜", "найти ◉"], question: "Какие объекты выбирать после движения?", options: ["Те, которые были выделены в начале", "Самые близкие", "Все объекты"], correct: 0 },
+  "GM-10": { steps: ["Верхняя картинка — образец, нажимать на неё не нужно.", "Ищите отличия на нижней картинке.", "Нажимайте на каждое найденное отличие."], demo: ["Образец: 🌳 🪑", "Нижняя: 🌳 ❌", "нажать на ❌"], question: "На какой картинке нужно нажимать отличия?", options: ["На нижней", "На верхней", "На обеих"], correct: 0 },
+  "GM-11": { steps: ["Послушайте или прочитайте правило счёта.", "Продолжайте считать вслух по этому правилу.", "При смене правила сразу используйте новое."], demo: ["100 − 7", "93 − 7", "86"], question: "Что делать после смены правила?", options: ["Продолжить по новому правилу", "Повторять старый ответ", "Остановиться"], correct: 0 },
+  "GM-12": { steps: ["Посмотрите на изображение.", "Прочитайте предложенные слова.", "Нажмите слово, которое соответствует картинке."], demo: ["🍎", "груша · яблоко · стол", "→ яблоко"], question: "Что нужно выбрать для изображения яблока?", options: ["Слово «яблоко»", "Любое слово", "Самое длинное слово"], correct: 0 },
+  "GM-13": { steps: ["Прочитайте название категории.", "После сигнала называйте подходящие слова вслух.", "Не повторяйте уже названные слова."], demo: ["Категория: животные", "кот · собака · лошадь"], question: "Что нужно называть?", options: ["Слова из указанной категории", "Любые числа", "Одно слово много раз"], correct: 0 },
+  "GM-14": { steps: ["Рассмотрите перемешанные буквы.", "Перетаскивайте их в пустые ячейки.", "Составьте правильное слово."], demo: ["Т  О  К", "переставить", "К  О  Т"], question: "Какой результат нужен?", options: ["Правильно составленное слово", "Буквы в случайном порядке", "Пустые ячейки"], correct: 0 },
+  "GM-15": { steps: ["Рассмотрите изображение.", "После сигнала чётко назовите предмет вслух.", "Старайтесь отвечать без долгой паузы."], demo: ["🫖", "сигнал", "«чайник»"], question: "Когда нужно произнести название?", options: ["После сигнала записи", "До появления картинки", "После выхода из игры"], correct: 0 },
+  "GM-16": { steps: ["Запомните показанную букву.", "После сигнала называйте слова на эту букву.", "Не повторяйте слова и имена собственные."], demo: ["Буква К", "кот · книга · камень"], question: "Какие слова подходят?", options: ["Начинающиеся с указанной буквы", "Заканчивающиеся любой буквой", "Только числа"], correct: 0 },
+  "GM-17": { steps: ["Рассмотрите фигуру-образец.", "Мысленно поверните её.", "Выберите тот же образ в другом положении, без зеркального отражения."], demo: ["└ → поворот", "┌  ┘  ┐", "найти тот же образ"], question: "Можно ли выбирать зеркальное отражение?", options: ["Нет, нужен только поворот", "Да, всегда", "Нужно выбрать любую фигуру"], correct: 0 },
+  "GM-18": { steps: ["Посмотрите на изображение-образец.", "Перемещайте фрагменты в подходящие места.", "Соберите целую картинку."], demo: ["▧  ▨  ▦", "переставить", "🖼️ целое"], question: "Что является целью?", options: ["Собрать целое изображение", "Спрятать все детали", "Выбрать один фрагмент"], correct: 0 },
+  "GM-19": { steps: ["Найдите начало и конец лабиринта.", "Проведите путь только по свободным проходам.", "Не пересекайте стены."], demo: ["● ─┐", "  ┌┘", "  └─★"], question: "Можно ли проводить путь через стену?", options: ["Нет", "Да", "Только в начале"], correct: 0 },
+  "GM-20": { steps: ["Сравните сортируемую карточку с эталонными.", "Самостоятельно определите действующее правило.", "Выберите карточку, к которой относится образец; правило может измениться."], demo: ["🔺🔺  |  🔵🔵", "образец: 🔺", "выбрать по правилу"], question: "Будет ли правило всегда одинаковым?", options: ["Нет, оно может измениться", "Да, всегда", "Правила нет"], correct: 0 },
+  "GM-21": { steps: ["Рассмотрите все предметы.", "Определите общий признак большинства.", "Нажмите на предмет, который не подходит к остальным."], demo: ["🍎  🍐  🍊  🔨", "лишний → 🔨"], question: "Какой предмет нужно выбрать?", options: ["Не подходящий к общей группе", "Самый большой", "Первый слева"], correct: 0 },
+  "GM-22": { steps: ["Перенесите всю башню на целевой стержень.", "За один ход перемещайте только один верхний диск.", "Большой диск нельзя класть на маленький."], demo: ["▂ ▄ ▆", "по одному диску", "маленький поверх большого"], question: "Можно ли положить большой диск на маленький?", options: ["Нет", "Да", "Только один раз"], correct: 0 },
+  "GM-23": { steps: ["Рассмотрите элементы матрицы.", "Определите, как меняются форма, цвет или положение.", "Выберите вариант, продолжающий закономерность."], demo: ["●  ○  ●", "○  ●  ?", "найти продолжение"], question: "Что нужно учитывать?", options: ["Правило изменения элементов", "Только размер кнопки", "Порядок вариантов"], correct: 0 },
+  "GM-24": { steps: ["Рассмотрите группу слов.", "Определите, к какой общей категории они относятся.", "После сигнала назовите категорию вслух."], demo: ["автобус · поезд · самолёт", "→ транспорт"], question: "Что нужно назвать?", options: ["Общую категорию слов", "Все слова по буквам", "Количество слов"], correct: 0 },
+};
+
+function mountGameTutorial({ container, definition, onComplete, close }) {
+  const tutorial = GAME_TUTORIALS[definition.code];
+  if (!tutorial) return null;
+  let active = true;
+  const mediaMarkup = tutorial.gif
+    ? `<img class="game-tutorial-media" src="${tutorial.gif}" alt="Пример выполнения задания">`
+    : `<div class="game-tutorial-media-placeholder" role="img" aria-label="Здесь будет видео-пример">
+        <span aria-hidden="true">▶</span>
+        <strong>Здесь будет GIF с примером</strong>
+        <small>Визуальная инструкция для этой игры будет добавлена позже</small>
+      </div>`;
+  const render = () => {
+    container.innerHTML = `
+      <header class="game-header-new">
+        <div><p class="game-kicker-new mono">ОБУЧЕНИЕ</p><h2>${definition.title}</h2><p>Сначала разберём правило, затем выполним тренировочный пример.</p></div>
+        <div class="game-progress-new" data-tutorial-progress>1. Инструкция</div>
+      </header>
+      <main class="game-stage-new game-tutorial-stage">
+        <section class="game-tutorial-card">
+          <div class="game-tutorial-instruction" data-tutorial-instruction>
+            <h3>Как выполнять задание</h3>
+            <ol>${tutorial.steps.map(step => `<li>${step}</li>`).join("")}</ol>
+            <p class="game-tutorial-example-title">Посмотрите пример</p>
+            ${mediaMarkup}
+            <button type="button" class="icon-btn primary-btn game-tutorial-next" data-tutorial-to-practice><span>Перейти к тренировке</span></button>
+          </div>
+          <div class="game-tutorial-practice" data-tutorial-practice hidden>
+            <h3>Тренировочный пример</h3>
+            <p>Выполните пробное действие. Оно не учитывается в результате игры.</p>
+            <div class="game-tutorial-example" aria-label="Тренировочный пример">${tutorial.demo.map(item => `<span>${item}</span>`).join("")}</div>
+            <strong>${tutorial.question}</strong>
+            <div class="game-tutorial-options">${tutorial.options.map((option, index) => `<button type="button" data-tutorial-option="${index}">${option}</button>`).join("")}</div>
+            <p data-tutorial-feedback aria-live="polite"></p>
+          </div>
+          <div class="game-tutorial-complete" data-tutorial-complete hidden>
+            <h3>Обучение завершено</h3>
+            <p>Пробное действие выполнено правильно. Закончить обучение и начать игру?</p>
+            <div><button type="button" class="icon-btn game-tutorial-repeat" data-tutorial-repeat><span>Повторить тренировку</span></button><button type="button" class="icon-btn primary-btn" data-tutorial-start><span>Начать игру</span></button></div>
+          </div>
+        </section>
+      </main>
+      <footer class="game-actions-new"><button type="button" class="icon-btn" data-tutorial-close><span>К выбору игр</span></button></footer>`;
+    const instruction = container.querySelector("[data-tutorial-instruction]");
+    const practice = container.querySelector(".game-tutorial-practice");
+    const complete = container.querySelector("[data-tutorial-complete]");
+    const feedback = container.querySelector("[data-tutorial-feedback]");
+    const progress = container.querySelector("[data-tutorial-progress]");
+    const startPractice = () => {
+      instruction.hidden = true;
+      complete.hidden = true;
+      practice.hidden = false;
+      feedback.textContent = "";
+      feedback.className = "";
+      progress.textContent = "2. Тренировка";
+      container.querySelectorAll("[data-tutorial-option]").forEach(item => {
+        item.disabled = false;
+        item.classList.remove("is-correct", "is-wrong");
+      });
+    };
+    container.querySelector("[data-tutorial-to-practice]").onclick = startPractice;
+    container.querySelectorAll("[data-tutorial-option]").forEach(button => {
+      button.onclick = () => {
+        const correct = Number(button.dataset.tutorialOption) === tutorial.correct;
+        button.classList.add(correct ? "is-correct" : "is-wrong");
+        feedback.textContent = correct ? "Верно." : "Пока неверно. Ещё раз прочитайте правило и выберите другой ответ.";
+        feedback.className = correct ? "is-correct" : "is-wrong";
+        if (!correct) return;
+        container.querySelectorAll("[data-tutorial-option]").forEach(item => { item.disabled = true; });
+        practice.hidden = true;
+        complete.hidden = false;
+        progress.textContent = "Обучение завершено";
+      };
+    });
+    container.querySelector("[data-tutorial-repeat]").onclick = startPractice;
+    container.querySelector("[data-tutorial-start]").onclick = async () => {
+      if (!active) return;
+      await onComplete();
+    };
+    container.querySelector("[data-tutorial-close]").onclick = close;
+  };
+  render();
+  return () => { active = false; };
 }
 
 function closeDynamicGame() {
@@ -2258,11 +2442,16 @@ function closeDynamicGame() {
   openTrainingMenu();
 }
 
-async function openDynamicGame(game) {
+async function openDynamicGame(game, selection = {}) {
   const definition = gameCatalog.find(
     item => item.code.toLowerCase().replace("-", "") === game
   );
   if (!definition || !el.dynamicGameHost || !el.dynamicGamePanel) return;
+  const runtimeDefinition = {
+    ...definition,
+    selected_stimulus_set: selection.stimulusSet || definition.stimulus_sets?.[0] || "",
+    selected_difficulty_level: selection.difficultyLevel ?? 1,
+  };
   const rendererUrl = `/api/games/${encodeURIComponent(definition.code)}/renderer.js?v=${Date.now()}`;
   const renderer = await import(rendererUrl);
   if (typeof renderer.mount !== "function") {
@@ -2271,17 +2460,42 @@ async function openDynamicGame(game) {
   el.dynamicGameHost.replaceChildren();
   setHidden(el.dynamicGamePanel, false);
   const api = {
-    start: () => fetchJson(`/api/games/${encodeURIComponent(definition.code)}/start`, { method: "POST" }),
+    start: async () => {
+      const stimulusSet = selection.stimulusSet || definition.stimulus_sets?.[0] || "";
+      const result = await fetchJson(`/api/games/${encodeURIComponent(definition.code)}/start`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          stimulus_set: stimulusSet,
+          difficulty_level: selection.difficultyLevel ?? null,
+        }),
+      });
+      rememberTrainingSelection(definition, stimulusSet);
+      return result;
+    },
     answer: payload => fetchJson(`/api/games/${encodeURIComponent(definition.code)}/answer`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     }),
   };
-  dynamicGameCleanup = await renderer.mount({
+  const mountGame = async () => {
+    el.dynamicGameHost.replaceChildren();
+    dynamicGameCleanup = await renderer.mount({
+      container: el.dynamicGameHost,
+      definition: runtimeDefinition,
+      api,
+      close: closeDynamicGame,
+    });
+  };
+  if (["GM-01", "GM-02", "GM-03", "GM-04", "GM-05", "GM-06", "GM-07", "GM-08", "GM-09", "GM-10", "GM-11", "GM-12", "GM-13", "GM-14", "GM-15", "GM-16", "GM-17", "GM-18", "GM-19", "GM-20", "GM-21", "GM-22", "GM-23", "GM-24"].includes(definition.code)) {
+    await mountGame();
+    return;
+  }
+  dynamicGameCleanup = mountGameTutorial({
     container: el.dynamicGameHost,
     definition,
-    api,
+    onComplete: mountGame,
     close: closeDynamicGame,
   });
 }
@@ -2294,9 +2508,9 @@ function closeTrainingMenu() {
   setHidden(el.trainingMenu, true);
 }
 
-async function openTrainingGame(game) {
+async function openTrainingGame(game, selection = {}) {
   closeTrainingMenu();
-  await openDynamicGame(game);
+  await openDynamicGame(game, selection);
 }
 
 async function openMainMenu() {
@@ -2331,6 +2545,7 @@ async function handleMenuAction(item) {
         await openSessionCheck(item);
         break;
       case "training":
+        resetTrainingSelectionSession();
         openTrainingMenu();
         break;
       case "gm02":
@@ -2391,7 +2606,9 @@ function bindMainMenuEvents() {
       return;
     }
     const item = event.target.closest("[data-training-game]");
-    if (item) openTrainingGame(item.dataset.trainingGame).catch(error => {
+    if (item) openTrainingGame(item.dataset.trainingGame, {
+      difficultyLevel: trainingSelectionSession.difficultyLevel,
+    }).catch(error => {
       setText(el.messageValue, `Не удалось открыть игру: ${error.message || error}`);
     });
   });

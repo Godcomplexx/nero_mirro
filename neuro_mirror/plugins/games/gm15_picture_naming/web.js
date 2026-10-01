@@ -1,203 +1,35 @@
-export function mount({ container, definition, api, close }) {
-  container.innerHTML = `
-    <header class="game-header-new">
-      <div>
-        <p class="game-kicker-new mono">РЕЧЬ</p>
-        <h2>${definition.title}</h2>
-        <p>После сигнала быстро назовите изображённый предмет.</p>
-      </div>
-    </header>
-    <main class="game-stage-new gm15">
-      <div class="gm15-meta">
-        <span data-category></span><span data-progress></span>
-      </div>
-      <div class="gm15-card"><img data-image alt=""></div>
-      <button type="button" class="icon-btn primary-btn" data-record>
-        <span>Ответить голосом</span>
-      </button>
-      <div class="gm15-recording" data-recording hidden aria-label="Идёт запись">
-        <span></span><span></span><span></span><span></span><span></span>
-      </div>
-      <p data-status class="gm15-status" aria-live="polite"></p>
-    </main>
-    <footer class="game-actions-new">
-      <button type="button" class="icon-btn" data-close><span>К выбору игр</span></button>
-    </footer>`;
-
-  const category = container.querySelector("[data-category]");
-  const progress = container.querySelector("[data-progress]");
-  const image = container.querySelector("[data-image]");
-  const record = container.querySelector("[data-record]");
-  const recording = container.querySelector("[data-recording]");
-  const status = container.querySelector("[data-status]");
-  let state = null;
-  let stream = null;
-  let recorder = null;
-  let active = true;
-  let busy = false;
-
-  function render(payload) {
-    state = payload;
-    category.textContent = payload.category;
-    progress.textContent = `${payload.item_number} из ${payload.item_count}`;
-    image.src = `/game-assets/objects/${payload.image}`;
-    record.disabled = false;
-    record.hidden = false;
-    recording.hidden = true;
-    status.textContent = "";
-    busy = false;
-  }
-
-  async function beep() {
-    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-    const context = new AudioContextClass();
-    const oscillator = context.createOscillator();
-    const gain = context.createGain();
-    oscillator.frequency.value = 700;
-    gain.gain.value = 0.15;
-    oscillator.connect(gain).connect(context.destination);
-    oscillator.start();
-    oscillator.stop(context.currentTime + 0.16);
-    await new Promise((resolve) => setTimeout(resolve, 220));
-    await context.close();
-  }
-
-  function stopStream() {
-    if (stream) stream.getTracks().forEach((track) => track.stop());
-    stream = null;
-  }
-
-  async function submit(chunks, mime) {
-    stopStream();
-    if (!active) return;
-    recording.hidden = true;
-    status.textContent = "Распознаю…";
-    let transcript = "";
-    let recognized = false;
-    try {
-      const form = new FormData();
-      form.append("audio", new Blob(chunks, { type: mime }), "picture-name.webm");
-      const response = await fetch("/api/speech/transcribe?assistant=false", {
-        method: "POST",
-        body: form,
-      });
-      const speech = await response.json();
-      transcript = String(speech.transcript || "");
-      recognized = Boolean(speech.accepted && transcript);
-    } catch (error) {
-      status.textContent = `Не удалось распознать запись: ${error.message}`;
-    }
-
-    try {
-      const next = await api.answer({
-        session_id: state.session_id,
-        transcript,
-        recognized,
-        duration_ms: state.recording_ms,
-      });
-      if (!active) return;
-      if (next.finished) {
-        category.textContent = "Готово";
-        progress.textContent = "";
-        image.hidden = true;
-        record.hidden = true;
-        status.textContent = "Задание завершено. Ответы сохранены.";
-        busy = false;
-        return;
-      }
-      render(next);
-      if (!recognized) status.textContent = "Ответ не распознан. Можно продолжать.";
-    } catch (error) {
-      status.textContent = error.message;
-      record.disabled = false;
-      record.hidden = false;
-      busy = false;
-    }
-  }
-
-  record.onclick = async () => {
-    if (busy || !active) return;
-    busy = true;
-    record.disabled = true;
-    status.textContent = "Приготовьтесь…";
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
-        ? "audio/webm;codecs=opus"
-        : "audio/webm";
-      const chunks = [];
-      recorder = new MediaRecorder(stream, { mimeType: mime });
-      recorder.ondataavailable = (event) => {
-        if (event.data.size) chunks.push(event.data);
-      };
-      recorder.onstop = () => submit(chunks, mime);
-      recorder.start();
-      record.hidden = true;
-      await beep();
-      if (!active || recorder.state !== "recording") return;
-      recording.hidden = false;
-      status.textContent = "Говорите";
-      setTimeout(() => {
-        if (recorder && recorder.state === "recording") recorder.stop();
-      }, state.recording_ms);
-    } catch (error) {
-      stopStream();
-      status.textContent = `Не удалось включить микрофон: ${error.message}`;
-      record.disabled = false;
-      record.hidden = false;
-      busy = false;
-    }
+export function mount({container,definition,api,close}){
+  const trainingExamples={
+    "животные":{word:"кошка",image:"cat.png",answers:["кошка","кот"]},
+    "предметы быта":{word:"чашка",image:"cup.png",answers:["чашка","кружка"]},
+    "продукты питания":{word:"яблоко",image:"apple.png",answers:["яблоко"]},
   };
+  const trainingExample=trainingExamples[definition.selected_stimulus_set]||trainingExamples["животные"];
+  container.innerHTML=`
+    <header class="game-header-new"><div><p class="game-kicker-new mono">РЕЧЬ</p><h2>${definition.title}</h2><p data-instruction>После сигнала быстро назовите изображённый предмет.</p></div><div class="game-progress-new" data-header-progress>1. Инструкция</div></header>
+    <main class="game-stage-new gm15-stage is-instruction-stage" data-stage>
+      <section class="gm15-intro" data-intro><h3>Как выполнять задание</h3><ol><li>Рассмотрите изображённый предмет.</li><li>Нажмите «Ответить голосом» и дождитесь сигнала.</li><li>После сигнала чётко произнесите название предмета.</li></ol><p class="gm15-example-title">Посмотрите пример</p><div class="gm15-media-placeholder"><span aria-hidden="true">▶</span><strong>Здесь будет GIF с примером</strong><small>Визуальная инструкция будет добавлена позже</small></div><button type="button" class="icon-btn primary-btn" data-start-training><span>Перейти к тренировке</span></button></section>
+      <section class="gm15-training" data-training hidden><h3>Тренировочный пример</h3><p>Назовите изображённый предмет.</p><div class="gm15-card"><img src="/game-assets/objects/${trainingExample.image}" alt="${trainingExample.word}"></div><button type="button" class="icon-btn primary-btn" data-training-record><span>Ответить голосом</span></button><div class="gm15-recording" data-training-recording hidden><span></span><span></span><span></span><span></span><span></span></div><p class="gm15-status" data-training-status aria-live="polite"></p></section>
+      <section class="game-intro-new gm15-training-complete" data-training-complete hidden><h3>Обучение завершено</h3><p>Вы правильно назвали изображённый предмет.</p><div class="gm15-training-actions"><button type="button" class="icon-btn gm15-training-repeat" data-repeat-training><span>Повторить тренировку</span></button><button type="button" class="icon-btn primary-btn" data-confirm-start><span>Начать игру</span></button></div></section>
+      <section class="gm15-game" data-game hidden><div class="gm15-meta"><span data-category></span><span data-progress></span></div><div class="gm15-card"><img data-image alt=""></div><button type="button" class="icon-btn primary-btn" data-record><span>Ответить голосом</span></button><div class="gm15-recording" data-recording hidden><span></span><span></span><span></span><span></span><span></span></div><p data-status class="gm15-status" aria-live="polite"></p></section>
+    </main><footer class="game-actions-new"><button type="button" class="icon-btn" data-close><span>К выбору игр</span></button></footer>`;
+  const stage=container.querySelector('[data-stage]'),instruction=container.querySelector('[data-instruction]'),headerProgress=container.querySelector('[data-header-progress]');
+  const intro=container.querySelector('[data-intro]'),training=container.querySelector('[data-training]'),trainingRecord=container.querySelector('[data-training-record]'),trainingRecording=container.querySelector('[data-training-recording]'),trainingStatus=container.querySelector('[data-training-status]'),trainingComplete=container.querySelector('[data-training-complete]');
+  const game=container.querySelector('[data-game]'),category=container.querySelector('[data-category]'),progress=container.querySelector('[data-progress]'),image=container.querySelector('[data-image]'),record=container.querySelector('[data-record]'),recording=container.querySelector('[data-recording]'),status=container.querySelector('[data-status]');
+  let state=null,stream=null,recorder=null,active=true,busy=false,token=0;const timers=new Set();const showOnly=target=>[intro,training,trainingComplete,game].forEach(section=>{section.hidden=section!==target});
+  function stopStream(){if(stream)stream.getTracks().forEach(track=>track.stop());stream=null}async function beep(){const AudioContextClass=window.AudioContext||window.webkitAudioContext,context=new AudioContextClass(),oscillator=context.createOscillator(),gain=context.createGain();oscillator.frequency.value=700;gain.gain.value=.15;oscillator.connect(gain).connect(context.destination);oscillator.start();oscillator.stop(context.currentTime+.16);await new Promise(resolve=>setTimeout(resolve,220));await context.close()}
+  async function capture(durationMs,statusNode,indicator){statusNode.textContent='Приготовьтесь…';stream=await navigator.mediaDevices.getUserMedia({audio:true});const mime=MediaRecorder.isTypeSupported('audio/webm;codecs=opus')?'audio/webm;codecs=opus':'audio/webm',chunks=[];recorder=new MediaRecorder(stream,{mimeType:mime});return new Promise(async(resolve,reject)=>{recorder.ondataavailable=event=>{if(event.data.size)chunks.push(event.data)};recorder.onerror=event=>reject(event.error||new Error('Ошибка записи'));recorder.onstop=async()=>{stopStream();indicator.hidden=true;if(!active){resolve({transcript:'',recognized:false});return}statusNode.textContent='Распознаю…';try{const form=new FormData();form.append('audio',new Blob(chunks,{type:mime}),'picture-name.webm');const response=await fetch('/api/speech/transcribe?assistant=false',{method:'POST',body:form}),speech=await response.json(),transcript=String(speech.transcript||'');resolve({transcript,recognized:Boolean(speech.accepted&&transcript)})}catch(error){reject(error)}};recorder.start();await beep();if(!active||recorder.state!=='recording')return;indicator.hidden=false;statusNode.textContent='Говорите';const id=setTimeout(()=>{timers.delete(id);if(recorder&&recorder.state==='recording')recorder.stop()},durationMs);timers.add(id)})}
+  function render(payload){state=payload;category.textContent=payload.category;progress.textContent=`${payload.item_number} из ${payload.item_count}`;image.hidden=false;image.src=`/game-assets/objects/${payload.image}`;record.disabled=false;record.hidden=false;recording.hidden=true;status.textContent='';busy=false}
 
-  container.querySelector("[data-close]").onclick = () => {
-    active = false;
-    if (recorder && recorder.state === "recording") recorder.stop();
-    stopStream();
-    close();
-  };
+  function beginTraining(){token+=1;stage.classList.remove('is-instruction-stage');showOnly(training);headerProgress.textContent='2. Тренировка';instruction.textContent='Назовите изображённый предмет после сигнала.';trainingRecord.disabled=false;trainingRecord.hidden=false;trainingRecording.hidden=true;trainingStatus.textContent='';busy=false}
+  trainingRecord.onclick=async()=>{if(busy||!active)return;busy=true;trainingRecord.disabled=true;const currentToken=token;try{const speech=await capture(3500,trainingStatus,trainingRecording);if(!active||currentToken!==token)return;const normalized=speech.transcript.toLowerCase().replace(/ё/g,'е'),correct=speech.recognized&&trainingExample.answers.some(answer=>new RegExp(`(^|[^а-я])${answer}([^а-я]|$)`,'i').test(normalized));if(!correct){trainingStatus.textContent=speech.recognized?`Распознано «${speech.transcript}». Назовите предмет ещё раз.`:'Ответ не распознан. Повторите.';trainingRecord.disabled=false;busy=false;return}trainingStatus.textContent=`Верно: ${speech.transcript}`;setTimeout(()=>{if(!active||currentToken!==token)return;showOnly(trainingComplete);headerProgress.textContent='Обучение завершено';instruction.textContent='Тренировочный пример выполнен правильно.'},500)}catch(error){stopStream();trainingStatus.textContent=`Не удалось записать ответ: ${error.message}`;trainingRecord.disabled=false;busy=false}};
+  async function beginGame(){token+=1;showOnly(game);headerProgress.textContent='Игра';instruction.textContent='После сигнала быстро назовите изображённый предмет.';try{render(await api.start())}catch(error){status.textContent=`Не удалось начать игру: ${error.message}`}}
+  record.onclick=async()=>{if(busy||!active)return;busy=true;record.disabled=true;record.hidden=true;try{const speech=await capture(state.recording_ms,status,recording);if(!active)return;const next=await api.answer({session_id:state.session_id,transcript:speech.transcript,recognized:speech.recognized,duration_ms:state.recording_ms});if(!active)return;if(next.finished){category.textContent='Готово';progress.textContent='';image.hidden=true;record.hidden=true;status.textContent='Задание завершено. Ответы сохранены.';busy=false;return}render(next);if(!speech.recognized)status.textContent='Ответ не распознан. Можно продолжать.'}catch(error){stopStream();status.textContent=error.message;record.disabled=false;record.hidden=false;busy=false}};
 
-  const style = document.createElement("style");
-  style.textContent = `
-    .gm15 { text-align: center; }
-    .gm15-meta {
-      display: flex;
-      justify-content: space-between;
-      width: min(420px, 78vw);
-      margin: 0 auto 12px;
-      color: #587180;
-    }
-    .gm15-card {
-      display: grid;
-      place-items: center;
-      width: min(420px, 55vh, 76vw);
-      aspect-ratio: 1;
-      margin: 0 auto 18px;
-      border: 1px solid #c7d5dc;
-      border-radius: 28px;
-      background: #fff;
-    }
-    .gm15-card img { width: 76%; height: 76%; object-fit: contain; }
-    .gm15-status { min-height: 1.5em; }
-    .gm15-recording { height: 40px; color: #2fa6bd; }
-    .gm15-recording span {
-      display: inline-block;
-      width: 7px;
-      height: 28px;
-      margin: 0 3px;
-      border-radius: 7px;
-      background: currentColor;
-      animation: gm15-wave .75s ease-in-out infinite alternate;
-    }
-    .gm15-recording span:nth-child(2), .gm15-recording span:nth-child(4) { animation-delay: -.3s; }
-    .gm15-recording span:nth-child(3) { animation-delay: -.5s; }
-    @keyframes gm15-wave { to { transform: scaleY(.3); opacity: .5; } }
-  `;
-  container.append(style);
-  api.start().then(render);
-
-  return () => {
-    active = false;
-    if (recorder && recorder.state === "recording") recorder.stop();
-    stopStream();
-  };
+  container.querySelector('[data-start-training]').onclick=beginTraining;container.querySelector('[data-repeat-training]').onclick=beginTraining;container.querySelector('[data-confirm-start]').onclick=beginGame;container.querySelector('[data-close]').onclick=()=>{active=false;token+=1;if(recorder&&recorder.state==='recording')recorder.stop();stopStream();timers.forEach(id=>clearTimeout(id));timers.clear();close()};
+  const style=document.createElement('style');style.textContent=`
+    .gm15-stage{text-align:center}.gm15-stage.is-instruction-stage{align-items:start;padding-top:clamp(14px,2.4vh,30px)}.gm15-intro,.gm15-training,.gm15-game{width:min(800px,100%)}.gm15-intro h3,.gm15-training h3{margin:0 0 10px;font-size:clamp(19px,2.3vw,25px)}.gm15-intro ol{width:min(700px,100%);margin:0 auto 16px;padding-left:28px;color:#52606d;text-align:left;font-size:clamp(14px,1.6vw,18px);line-height:1.4}.gm15-intro li+li{margin-top:5px}.gm15-example-title{margin:0 0 7px;font-weight:700}.gm15-media-placeholder{box-sizing:border-box;display:flex;width:min(620px,100%);height:clamp(130px,22vh,230px);margin:0 auto 18px;flex-direction:column;align-items:center;justify-content:center;gap:7px;border:2px dashed #b8cbd5;border-radius:16px;background:#eaf1f4;color:#52606d}.gm15-media-placeholder>span{display:grid;width:46px;height:46px;place-items:center;border-radius:50%;background:#d3e2e9;color:#168ba8}.gm15-media-placeholder strong{color:#263744}.gm15-training>p{color:#52606d}
+    .gm15-meta{display:flex;justify-content:space-between;width:min(420px,78vw);margin:0 auto 12px;color:#587180}.gm15-card{display:grid;place-items:center;width:min(360px,45vh,70vw);aspect-ratio:1;margin:0 auto 18px;border:1px solid #c7d5dc;border-radius:28px;background:#fff}.gm15-card img{width:76%;height:76%;object-fit:contain}.gm15-status{min-height:1.5em}.gm15-recording{height:40px;color:#2fa6bd}.gm15-recording span{display:inline-block;width:7px;height:28px;margin:0 3px;border-radius:7px;background:currentColor;animation:gm15-wave .75s ease-in-out infinite alternate}.gm15-recording span:nth-child(2),.gm15-recording span:nth-child(4){animation-delay:-.3s}.gm15-recording span:nth-child(3){animation-delay:-.5s}@keyframes gm15-wave{to{transform:scaleY(.3);opacity:.5}}
+    .gm15-training-actions{display:flex;justify-content:center;gap:12px;flex-wrap:wrap}.gm15-training-repeat{border-color:#60727d;background:#fff;color:#17212b}.gm15-training-repeat span{color:#17212b}.gm15-intro[hidden],.gm15-training[hidden],.gm15-training-complete[hidden],.gm15-game[hidden],.gm15-recording[hidden]{display:none}@media(max-height:700px){.gm15-stage.is-instruction-stage{padding-top:8px}.gm15-intro ol{margin-bottom:7px;font-size:13px;line-height:1.25}.gm15-media-placeholder{height:clamp(100px,18vh,140px);margin-bottom:8px}.gm15-card{width:min(250px,35vh)}}
+  `;container.append(style);return()=>{active=false;token+=1;if(recorder&&recorder.state==='recording')recorder.stop();stopStream();timers.forEach(id=>clearTimeout(id));timers.clear()}
 }

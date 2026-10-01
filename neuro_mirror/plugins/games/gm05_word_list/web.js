@@ -1,186 +1,41 @@
 export function mount({ container, definition, api, close }) {
   container.innerHTML = `
-    <header class="game-header-new">
-      <div>
-        <p class="game-kicker-new mono">ПАМЯТЬ</p>
-        <h2>${definition.title}</h2>
-        <p data-instruction>Запомните слова, затем найдите их среди предложенных.</p>
-      </div>
-      <div class="game-progress-new" data-progress>Раунд 1 из 3</div>
-    </header>
-    <main class="game-stage-new gm05-module">
-      <div class="game-intro-new" data-intro>
-        <p>В каждом раунде пять слов показываются на несколько секунд.</p>
-        <button type="button" class="icon-btn primary-btn" data-start><span>Начать</span></button>
-      </div>
-      <div class="gm05-module-study" data-study hidden></div>
-      <div class="gm05-module-choice" data-choice hidden>
-        <div class="gm05-module-words" data-words></div>
-        <button type="button" class="icon-btn primary-btn" data-submit><span>Готово</span></button>
-      </div>
-      <div class="game-result-new" data-result hidden>
-        <h3>Игра завершена</h3>
-        <p data-result-text></p>
-        <button type="button" class="icon-btn primary-btn" data-restart><span>Ещё раз</span></button>
-      </div>
-    </main>
-    <footer class="game-actions-new">
-      <button type="button" class="icon-btn" data-close><span>К выбору игр</span></button>
-    </footer>`;
+    <header class="game-header-new"><div><p class="game-kicker-new mono">ПАМЯТЬ</p><h2>${definition.title}</h2><p data-instruction>Запомните слова, затем найдите их среди предложенных.</p></div><div class="game-progress-new" data-progress>1. Инструкция</div></header>
+    <main class="game-stage-new gm05-module is-instruction-stage" data-stage>
+      <section class="gm05-intro" data-intro><h3>Как выполнять задание</h3><ol><li>На несколько секунд появится список слов.</li><li>Прочитайте и постарайтесь запомнить все слова.</li><li>Затем выберите эти слова среди показанных вариантов и нажмите «Готово».</li></ol><p class="gm05-example-title">Посмотрите пример</p><div class="gm05-media-placeholder"><span aria-hidden="true">▶</span><strong>Здесь будет GIF с примером</strong><small>Визуальная инструкция будет добавлена позже</small></div><button type="button" class="icon-btn primary-btn" data-start-training><span>Перейти к тренировке</span></button></section>
+      <section class="gm05-training" data-training hidden><h3>Тренировочный пример</h3><p data-training-status></p><div class="gm05-module-study" data-training-study></div><div class="gm05-module-choice" data-training-choice hidden><div class="gm05-module-words" data-training-words></div><button type="button" class="icon-btn primary-btn" data-training-submit><span>Готово</span></button></div></section>
+      <section class="game-intro-new gm05-training-complete" data-training-complete hidden><h3>Обучение завершено</h3><p>Вы правильно нашли все показанные ранее слова.</p><div class="gm05-training-actions"><button type="button" class="icon-btn gm05-training-repeat" data-repeat-training><span>Повторить тренировку</span></button><button type="button" class="icon-btn primary-btn" data-confirm-start><span>Начать игру</span></button></div></section>
+      <section class="gm05-game" data-game hidden><div class="gm05-module-study" data-study hidden></div><div class="gm05-module-choice" data-choice hidden><div class="gm05-module-words" data-words></div><button type="button" class="icon-btn primary-btn" data-submit><span>Готово</span></button></div><div class="game-result-new" data-result hidden><h3>Игра завершена</h3><p data-result-text></p><button type="button" class="icon-btn primary-btn" data-restart><span>Ещё раз</span></button></div></section>
+    </main><footer class="game-actions-new"><button type="button" class="icon-btn" data-close><span>К выбору игр</span></button></footer>`;
 
-  const instruction = container.querySelector("[data-instruction]");
-  const progress = container.querySelector("[data-progress]");
-  const intro = container.querySelector("[data-intro]");
-  const study = container.querySelector("[data-study]");
-  const choice = container.querySelector("[data-choice]");
-  const words = container.querySelector("[data-words]");
-  const result = container.querySelector("[data-result]");
-  const resultText = container.querySelector("[data-result-text]");
-  const start = container.querySelector("[data-start]");
-  const restart = container.querySelector("[data-restart]");
-  const submit = container.querySelector("[data-submit]");
-  let state = null;
-  let selected = new Set();
-  let renderToken = 0;
-  let active = true;
-  let busy = false;
+  const instruction=container.querySelector('[data-instruction]'),progress=container.querySelector('[data-progress]'),stage=container.querySelector('[data-stage]');
+  const intro=container.querySelector('[data-intro]'),training=container.querySelector('[data-training]'),trainingStatus=container.querySelector('[data-training-status]'),trainingStudy=container.querySelector('[data-training-study]'),trainingChoice=container.querySelector('[data-training-choice]'),trainingWords=container.querySelector('[data-training-words]'),trainingSubmit=container.querySelector('[data-training-submit]'),trainingComplete=container.querySelector('[data-training-complete]');
+  const game=container.querySelector('[data-game]'),study=container.querySelector('[data-study]'),choice=container.querySelector('[data-choice]'),words=container.querySelector('[data-words]'),result=container.querySelector('[data-result]'),resultText=container.querySelector('[data-result-text]'),restart=container.querySelector('[data-restart]'),submit=container.querySelector('[data-submit]');
+  let state=null,selected=new Set(),trainingSelected=new Set(),renderToken=0,active=true,busy=false;const timers=new Set();
+  const delay=milliseconds=>new Promise(resolve=>{const id=setTimeout(()=>{timers.delete(id);resolve()},milliseconds);timers.add(id)});
+  const showOnly=target=>[intro,training,trainingComplete,game].forEach(section=>{section.hidden=section!==target});
+  const wordCards=(target,list,className='gm05-module-study-word')=>target.replaceChildren(...list.map(word=>{const item=document.createElement('div');item.className=className;item.textContent=word;return item}));
+  function selectableWords(target,list,selection){target.replaceChildren(...list.map(word=>{const button=document.createElement('button');button.type='button';button.className='gm05-module-word';button.textContent=word;button.onclick=()=>{button.classList.toggle('is-selected');button.classList.contains('is-selected')?selection.add(word):selection.delete(word)};return button}))}
 
-  const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
-
-  async function renderRound(payload) {
-    const token = ++renderToken;
-    state = payload;
-    selected = new Set();
-    busy = false;
-    progress.textContent = `Раунд ${payload.round} из ${payload.round_count}`;
-    instruction.textContent = `${payload.category}: запомните слова.`;
-    intro.hidden = true;
-    choice.hidden = true;
-    result.hidden = true;
-    study.hidden = false;
-    study.replaceChildren(...payload.study_words.map((word) => {
-      const card = document.createElement("div");
-      card.className = "gm05-module-study-word";
-      card.textContent = word;
-      return card;
-    }));
-    await delay(payload.study_ms);
-    if (!active || token !== renderToken) return;
-
-    words.replaceChildren(...payload.choices.map((word) => {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "gm05-module-word";
-      button.textContent = word;
-      button.onclick = () => {
-        button.classList.toggle("is-selected");
-        if (button.classList.contains("is-selected")) selected.add(word);
-        else selected.delete(word);
-      };
-      return button;
-    }));
-    instruction.textContent = "Выберите все слова, которые были показаны.";
-    study.hidden = true;
-    choice.hidden = false;
+  async function beginTraining(){
+    const token=++renderToken;stage.classList.remove('is-instruction-stage');showOnly(training);progress.textContent='2. Тренировка';instruction.textContent='Запомните три слова.';trainingStatus.textContent='Запоминайте слова';trainingChoice.hidden=true;trainingStudy.hidden=false;trainingSelected=new Set();
+    const targets=['кот','мяч','стол'];wordCards(trainingStudy,targets);await delay(3000);if(!active||token!==renderToken)return;
+    trainingStudy.hidden=true;trainingChoice.hidden=false;trainingStatus.textContent='Выберите все слова, которые были показаны.';selectableWords(trainingWords,['дом','мяч','кот','река','стол','сад'],trainingSelected);
+    trainingSubmit.disabled=false;trainingSubmit.onclick=()=>{const answer=[...trainingSelected].sort();const expected=[...targets].sort();const correct=answer.length===expected.length&&answer.every((word,index)=>word===expected[index]);if(correct){trainingSubmit.disabled=true;[...trainingWords.children].forEach(button=>{button.disabled=true;if(targets.includes(button.textContent))button.classList.add('is-correct')});trainingStatus.textContent='Верно.';setTimeout(()=>{if(!active||token!==renderToken)return;showOnly(trainingComplete);progress.textContent='Обучение завершено';instruction.textContent='Тренировочный пример выполнен правильно.'},450);return}[...trainingWords.children].forEach(button=>{if(button.classList.contains('is-selected'))button.classList.add('is-wrong')});trainingStatus.textContent='Выбраны не все нужные слова. Посмотрите список ещё раз.';trainingSubmit.disabled=true;setTimeout(()=>{if(active&&token===renderToken)beginTraining()},800)};
   }
 
-  async function begin() {
-    renderToken += 1;
-    start.disabled = true;
-    restart.disabled = true;
-    instruction.textContent = "Подготавливаю слова…";
-    try {
-      await renderRound(await api.start());
-    } catch (error) {
-      instruction.textContent = `Не удалось начать игру: ${error.message}`;
-      start.disabled = false;
-      restart.disabled = false;
-    }
+  async function renderRound(payload){
+    const token=++renderToken;state=payload;selected=new Set();busy=false;progress.textContent=`Раунд ${payload.round} из ${payload.round_count}`;instruction.textContent=`${payload.category}: запомните слова.`;choice.hidden=true;result.hidden=true;study.hidden=false;wordCards(study,payload.study_words);await delay(payload.study_ms);if(!active||token!==renderToken)return;
+    selectableWords(words,payload.choices,selected);instruction.textContent='Выберите все слова, которые были показаны.';study.hidden=true;choice.hidden=false;
   }
+  async function begin(){renderToken+=1;restart.disabled=true;instruction.textContent='Подготавливаю слова…';showOnly(game);try{await renderRound(await api.start())}catch(error){instruction.textContent=`Не удалось начать игру: ${error.message}`;restart.disabled=false}}
+  submit.onclick=async()=>{if(busy||!state)return;busy=true;submit.disabled=true;instruction.textContent='Проверяю ответ…';try{const payload=await api.answer({session_id:state.session_id,selected:[...selected],timestamp_ms:Date.now()});submit.disabled=false;if(!active)return;if(!payload.finished){await renderRound(payload);return}choice.hidden=true;result.hidden=false;restart.disabled=false;progress.textContent='Завершено';instruction.textContent='Задание выполнено.';resultText.textContent=`Узнано целей: ${Math.round((payload.metrics.m07_target_recognition_rate||0)*100)}%.`}catch(error){instruction.textContent=`Не удалось проверить ответ: ${error.message}`;submit.disabled=false;busy=false}};
 
-  submit.onclick = async () => {
-    if (busy || !state) return;
-    busy = true;
-    submit.disabled = true;
-    instruction.textContent = "Проверяю ответ…";
-    try {
-      const payload = await api.answer({
-        session_id: state.session_id,
-        selected: [...selected],
-        timestamp_ms: Date.now(),
-      });
-      submit.disabled = false;
-      if (!active) return;
-      if (!payload.finished) {
-        await renderRound(payload);
-        return;
-      }
-      choice.hidden = true;
-      result.hidden = false;
-      restart.disabled = false;
-      progress.textContent = "Завершено";
-      instruction.textContent = "Задание выполнено.";
-      resultText.textContent = `Узнано целей: ${Math.round((payload.metrics.m07_target_recognition_rate || 0) * 100)}%.`;
-    } catch (error) {
-      instruction.textContent = `Не удалось проверить ответ: ${error.message}`;
-      submit.disabled = false;
-      busy = false;
-    }
-  };
-
-  start.onclick = begin;
-  restart.onclick = begin;
-  container.querySelector("[data-close]").onclick = () => {
-    active = false;
-    renderToken += 1;
-    close();
-  };
-
-  const style = document.createElement("style");
-  style.textContent = `
-    .gm05-module { text-align: center; }
-    .gm05-module-study {
-      display: flex;
-      flex-wrap: wrap;
-      justify-content: center;
-      gap: clamp(10px, 2vw, 18px);
-      width: min(820px, 90%);
-    }
-    .gm05-module-study[hidden], .gm05-module-choice[hidden] { display: none; }
-    .gm05-module-study-word {
-      padding: clamp(18px, 3vh, 30px) clamp(24px, 4vw, 44px);
-      border: 2px solid #c6d5dc;
-      border-radius: 18px;
-      background: #fff;
-      font-size: clamp(22px, 3vw, 32px);
-      font-weight: 650;
-    }
-    .gm05-module-choice { width: min(780px, 92%); }
-    .gm05-module-words {
-      display: grid;
-      grid-template-columns: repeat(2, 1fr);
-      gap: clamp(8px, 1.5vh, 14px);
-      margin-bottom: clamp(12px, 2vh, 24px);
-    }
-    .gm05-module-word {
-      padding: clamp(11px, 1.8vh, 18px);
-      border: 2px solid #cbd8de;
-      border-radius: 15px;
-      background: #fff;
-      color: #17212b;
-      font-size: clamp(17px, 2.2vw, 22px);
-    }
-    .gm05-module-word:hover { border-color: #72b9c8; }
-    .gm05-module-word.is-selected { border-color: #168ba8; background: #dff5fa; }
-    @media (max-height: 700px) {
-      .gm05-module-word { padding: 8px; }
-      .gm05-module-study-word { padding: 14px 22px; }
-    }
-  `;
-  container.append(style);
-
-  return () => {
-    active = false;
-    renderToken += 1;
-  };
+  container.querySelector('[data-start-training]').onclick=beginTraining;container.querySelector('[data-repeat-training]').onclick=beginTraining;container.querySelector('[data-confirm-start]').onclick=begin;restart.onclick=begin;container.querySelector('[data-close]').onclick=()=>{active=false;renderToken+=1;timers.forEach(id=>clearTimeout(id));timers.clear();close()};
+  const style=document.createElement('style');style.textContent=`
+    .gm05-module{text-align:center}.gm05-module.is-instruction-stage{align-items:start;padding-top:clamp(14px,2.4vh,30px)}.gm05-intro,.gm05-training,.gm05-game{width:min(800px,100%)}.gm05-intro h3,.gm05-training h3{margin:0 0 10px;font-size:clamp(19px,2.3vw,25px)}.gm05-intro ol{width:min(700px,100%);margin:0 auto 16px;padding-left:28px;color:#52606d;text-align:left;font-size:clamp(14px,1.6vw,18px);line-height:1.4}.gm05-intro li+li{margin-top:5px}.gm05-example-title{margin:0 0 7px;font-weight:700}
+    .gm05-media-placeholder{box-sizing:border-box;display:flex;width:min(620px,100%);height:clamp(130px,22vh,230px);margin:0 auto 18px;flex-direction:column;align-items:center;justify-content:center;gap:7px;border:2px dashed #b8cbd5;border-radius:16px;background:#eaf1f4;color:#52606d}.gm05-media-placeholder>span{display:grid;width:46px;height:46px;place-items:center;border-radius:50%;background:#d3e2e9;color:#168ba8}.gm05-media-placeholder strong{color:#263744}
+    .gm05-training>p{margin:0 0 12px;color:#52606d}.gm05-module-study{display:flex;flex-wrap:wrap;justify-content:center;gap:clamp(10px,2vw,18px);width:min(820px,90%);margin:auto}.gm05-module-study[hidden],.gm05-module-choice[hidden]{display:none}.gm05-module-study-word{padding:clamp(18px,3vh,30px) clamp(24px,4vw,44px);border:2px solid #c6d5dc;border-radius:18px;background:#fff;font-size:clamp(22px,3vw,32px);font-weight:650}.gm05-module-choice{width:min(780px,92%);margin:auto}.gm05-module-words{display:grid;grid-template-columns:repeat(2,1fr);gap:clamp(8px,1.5vh,14px);margin-bottom:clamp(12px,2vh,24px)}.gm05-module-word{padding:clamp(11px,1.8vh,18px);border:2px solid #cbd8de;border-radius:15px;background:#fff;color:#17212b;font-size:clamp(17px,2.2vw,22px)}.gm05-module-word:hover{border-color:#72b9c8}.gm05-module-word.is-selected{border-color:#168ba8;background:#dff5fa}.gm05-module-word.is-correct{border-color:#1d9b69;background:#e4f7ef}.gm05-module-word.is-wrong{border-color:#d64b59;background:#fdebed}
+    .gm05-training-actions{display:flex;justify-content:center;gap:12px;flex-wrap:wrap}.gm05-training-repeat{border-color:#60727d;background:#fff;color:#17212b}.gm05-training-repeat span{color:#17212b}.gm05-intro[hidden],.gm05-training[hidden],.gm05-training-complete[hidden],.gm05-game[hidden]{display:none}@media(max-height:700px){.gm05-module.is-instruction-stage{padding-top:8px}.gm05-intro ol{margin-bottom:7px;font-size:13px;line-height:1.25}.gm05-media-placeholder{height:clamp(100px,18vh,140px);margin-bottom:8px}.gm05-module-word{padding:8px}.gm05-module-study-word{padding:14px 22px}}
+  `;container.append(style);return()=>{active=false;renderToken+=1;timers.forEach(id=>clearTimeout(id));timers.clear()}
 }

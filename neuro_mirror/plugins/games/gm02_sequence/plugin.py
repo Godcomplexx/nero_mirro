@@ -16,6 +16,8 @@ class SequenceSession:
     session_id: str
     sequence: list[int]
     started_at_ms: float
+    difficulty_level: int
+    max_rounds: int
     successful_rounds: int = 0
     round_events: list[dict[str, Any]] = field(default_factory=list)
 
@@ -34,12 +36,22 @@ class Gm02SequencePlugin(BrowserGamePlugin):
     def _new_cell(self) -> int:
         return self._random.randrange(GRID_SIZE * GRID_SIZE)
 
-    def _start_session(self) -> dict[str, Any]:
+    def start_game(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._start_session(difficulty_level=payload.get("difficulty_level"))
+
+    def _start_session(self, *, difficulty_level: object = None) -> dict[str, Any]:
+        try:
+            level = min(3, max(1, int(difficulty_level or 1)))
+        except (TypeError, ValueError):
+            level = 1
+        max_rounds = (10, 15, 20)[level - 1]
         session_id = uuid.uuid4().hex
         session = SequenceSession(
             session_id=session_id,
             sequence=[self._new_cell()],
             started_at_ms=time.time() * 1000,
+            difficulty_level=level,
+            max_rounds=max_rounds,
         )
         self._sessions[session_id] = session
         return self._round_payload(session)
@@ -95,7 +107,7 @@ class Gm02SequencePlugin(BrowserGamePlugin):
             }
 
         session.successful_rounds += 1
-        if session.successful_rounds >= MAX_ROUNDS:
+        if session.successful_rounds >= session.max_rounds:
             metrics["m01_max_sequence_length"] = session.successful_rounds
             self._sessions.pop(session_id, None)
             return {
@@ -115,8 +127,10 @@ class Gm02SequencePlugin(BrowserGamePlugin):
             "ok": True,
             "finished": False,
             "session_id": session.session_id,
+            "difficulty_level": session.difficulty_level,
+            "difficulty_parameters": {"cycles": session.max_rounds},
             "grid_size": GRID_SIZE,
             "round": session.successful_rounds + 1,
-            "max_rounds": MAX_ROUNDS,
+            "max_rounds": session.max_rounds,
             "sequence": list(session.sequence),
         }

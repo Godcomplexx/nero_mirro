@@ -1,201 +1,36 @@
-export function mount({ container, definition, api, close }) {
-  container.innerHTML = `
-    <header class="game-header-new">
-      <div>
-        <p class="game-kicker-new mono">РЕЧЬ</p>
-        <h2>${definition.title}</h2>
-        <p>После сигнала называйте как можно больше слов указанной категории.</p>
-      </div>
-    </header>
-    <main class="game-stage-new gm13">
-      <p class="gm13-step mono" data-step></p>
-      <h3 data-category></h3>
-      <p class="gm13-prompt" data-prompt></p>
-      <div class="gm13-recording" data-recording hidden>
-        <span></span><span></span><span></span><span></span><span></span>
-      </div>
-      <button type="button" class="icon-btn primary-btn" data-start>
-        <span>Начать блок</span>
-      </button>
-      <p class="gm13-status" data-status aria-live="polite"></p>
-    </main>
-    <footer class="game-actions-new">
-      <button type="button" class="icon-btn" data-close><span>К выбору игр</span></button>
-    </footer>`;
-
-  const step = container.querySelector("[data-step]");
-  const category = container.querySelector("[data-category]");
-  const prompt = container.querySelector("[data-prompt]");
-  const start = container.querySelector("[data-start]");
-  const status = container.querySelector("[data-status]");
-  const recording = container.querySelector("[data-recording]");
-  let state = null;
-  let stream = null;
-  let recorder = null;
-  let active = true;
-  let busy = false;
-
-  function render(payload) {
-    state = payload;
-    step.textContent = `БЛОК ${payload.block_number} ИЗ ${payload.block_count}`;
-    category.textContent = payload.category;
-    prompt.textContent = payload.prompt;
-    start.querySelector("span").textContent = payload.block_number === 1
-      ? "Начать задание"
-      : "Начать следующий блок";
-    start.disabled = false;
-    start.hidden = false;
-    recording.hidden = true;
-    status.textContent = "";
-    busy = false;
-  }
-
-  async function beep() {
-    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-    const context = new AudioContextClass();
-    const oscillator = context.createOscillator();
-    const gain = context.createGain();
-    oscillator.frequency.value = 700;
-    gain.gain.value = 0.15;
-    oscillator.connect(gain).connect(context.destination);
-    oscillator.start();
-    oscillator.stop(context.currentTime + 0.16);
-    await new Promise((resolve) => setTimeout(resolve, 220));
-    await context.close();
-  }
-
-  function stopStream() {
-    if (stream) stream.getTracks().forEach((track) => track.stop());
-    stream = null;
-  }
-
-  async function submitRecording(chunks, mime, durationMs) {
-    stopStream();
-    if (!active) return;
-    recording.hidden = true;
-    status.textContent = "Распознаю ответы…";
-    let transcript = "";
-    let recognized = false;
-    try {
-      const form = new FormData();
-      form.append("audio", new Blob(chunks, { type: mime }), "category.webm");
-      const response = await fetch("/api/speech/transcribe?assistant=false", {
-        method: "POST",
-        body: form,
-      });
-      const speech = await response.json();
-      transcript = String(speech.transcript || "");
-      recognized = Boolean(speech.accepted && transcript);
-    } catch (error) {
-      status.textContent = `Не удалось распознать запись: ${error.message}`;
-    }
-
-    try {
-      const next = await api.answer({
-        session_id: state.session_id,
-        transcript,
-        recognized,
-        duration_ms: durationMs,
-      });
-      if (!active) return;
-      if (next.finished) {
-        category.textContent = "Готово";
-        prompt.textContent = "Задание завершено";
-        step.textContent = "ВСЕ БЛОКИ ПРОЙДЕНЫ";
-        status.textContent = recognized
-          ? "Ответы сохранены"
-          : "Последняя запись не распознана, остальные ответы сохранены";
-        start.hidden = true;
-        busy = false;
-        return;
-      }
-      render(next);
-      if (!recognized) status.textContent = "Запись не распознана. Переходим к следующей категории.";
-    } catch (error) {
-      status.textContent = error.message;
-      start.disabled = false;
-      start.hidden = false;
-      busy = false;
-    }
-  }
-
-  start.onclick = async () => {
-    if (busy || !active) return;
-    busy = true;
-    start.disabled = true;
-    status.textContent = "Подготавливаю микрофон…";
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
-        ? "audio/webm;codecs=opus"
-        : "audio/webm";
-      const chunks = [];
-      recorder = new MediaRecorder(stream, { mimeType: mime });
-      recorder.ondataavailable = (event) => {
-        if (event.data.size) chunks.push(event.data);
-      };
-      recorder.onstop = () => submitRecording(chunks, mime, state.duration_ms);
-      recorder.start();
-      start.hidden = true;
-      await beep();
-      if (!active || recorder.state !== "recording") return;
-      status.textContent = "Говорите до окончания записи";
-      recording.hidden = false;
-      setTimeout(() => {
-        if (recorder && recorder.state === "recording") recorder.stop();
-      }, state.duration_ms);
-    } catch (error) {
-      stopStream();
-      status.textContent = `Не удалось включить микрофон: ${error.message}`;
-      start.disabled = false;
-      start.hidden = false;
-      busy = false;
-    }
+export function mount({container,definition,api,close}){
+  const trainingCategories={
+    "овощи":{title:"Овощи",prompt:"Назовите хотя бы один овощ.",words:["морковь","огурец","помидор","капуста","лук"]},
+    "животные":{title:"Животные",prompt:"Назовите хотя бы одно животное.",words:["кот","кошка","собака","лиса","лев","медведь","мышь","слон","тигр","заяц","кролик","волк"]},
+    "мебель":{title:"Мебель",prompt:"Назовите хотя бы один предмет мебели.",words:["стол","стул","шкаф","диван","кровать","кресло"]},
   };
+  const trainingCategory=trainingCategories[definition.selected_stimulus_set]||trainingCategories["овощи"];
+  container.innerHTML=`
+    <header class="game-header-new"><div><p class="game-kicker-new mono">РЕЧЬ</p><h2>${definition.title}</h2><p data-instruction>После сигнала называйте как можно больше слов указанной категории.</p></div><div class="game-progress-new" data-header-progress>1. Инструкция</div></header>
+    <main class="game-stage-new gm13-stage is-instruction-stage" data-stage>
+      <section class="gm13-intro" data-intro><h3>Как выполнять задание</h3><ol><li>Прочитайте название заданной категории.</li><li>Нажмите кнопку начала и дождитесь звукового сигнала.</li><li>Называйте вслух разные слова из этой категории до окончания записи.</li></ol><p class="gm13-example-title">Посмотрите пример</p><div class="gm13-media-placeholder"><span aria-hidden="true">▶</span><strong>Здесь будет GIF с примером</strong><small>Визуальная инструкция будет добавлена позже</small></div><button type="button" class="icon-btn primary-btn" data-start-training><span>Перейти к тренировке</span></button></section>
+      <section class="gm13-training" data-training hidden><p class="gm13-step mono">ТРЕНИРОВОЧНЫЙ ПРИМЕР</p><h3>${trainingCategory.title}</h3><p>${trainingCategory.prompt}</p><div class="gm13-recording" data-training-recording hidden><span></span><span></span><span></span><span></span><span></span></div><button type="button" class="icon-btn primary-btn" data-training-record><span>Начать запись</span></button><p class="gm13-status" data-training-status aria-live="polite"></p></section>
+      <section class="game-intro-new gm13-training-complete" data-training-complete hidden><h3>Обучение завершено</h3><p>Вы назвали слово из заданной категории.</p><div class="gm13-training-actions"><button type="button" class="icon-btn gm13-training-repeat" data-repeat-training><span>Повторить тренировку</span></button><button type="button" class="icon-btn primary-btn" data-confirm-start><span>Начать игру</span></button></div></section>
+      <section class="gm13-game" data-game hidden><p class="gm13-step mono" data-step></p><h3 data-category></h3><p class="gm13-prompt" data-prompt></p><div class="gm13-recording" data-recording hidden><span></span><span></span><span></span><span></span><span></span></div><button type="button" class="icon-btn primary-btn" data-start><span>Начать блок</span></button><p class="gm13-status" data-status aria-live="polite"></p></section>
+    </main><footer class="game-actions-new"><button type="button" class="icon-btn" data-close><span>К выбору игр</span></button></footer>`;
+  const stage=container.querySelector('[data-stage]'),instruction=container.querySelector('[data-instruction]'),headerProgress=container.querySelector('[data-header-progress]');
+  const intro=container.querySelector('[data-intro]'),training=container.querySelector('[data-training]'),trainingRecord=container.querySelector('[data-training-record]'),trainingStatus=container.querySelector('[data-training-status]'),trainingRecording=container.querySelector('[data-training-recording]'),trainingComplete=container.querySelector('[data-training-complete]');
+  const game=container.querySelector('[data-game]'),step=container.querySelector('[data-step]'),category=container.querySelector('[data-category]'),prompt=container.querySelector('[data-prompt]'),start=container.querySelector('[data-start]'),status=container.querySelector('[data-status]'),recording=container.querySelector('[data-recording]');
+  let state=null,stream=null,recorder=null,active=true,busy=false,token=0;const timers=new Set();const showOnly=target=>[intro,training,trainingComplete,game].forEach(section=>{section.hidden=section!==target});
+  async function beep(){const AudioContextClass=window.AudioContext||window.webkitAudioContext,context=new AudioContextClass(),oscillator=context.createOscillator(),gain=context.createGain();oscillator.frequency.value=700;gain.gain.value=.15;oscillator.connect(gain).connect(context.destination);oscillator.start();oscillator.stop(context.currentTime+.16);await new Promise(resolve=>setTimeout(resolve,220));await context.close()}
+  function stopStream(){if(stream)stream.getTracks().forEach(track=>track.stop());stream=null}
+  async function recordAndTranscribe(durationMs,statusNode,indicator){statusNode.textContent='Подготавливаю микрофон…';stream=await navigator.mediaDevices.getUserMedia({audio:true});const mime=MediaRecorder.isTypeSupported('audio/webm;codecs=opus')?'audio/webm;codecs=opus':'audio/webm',chunks=[];recorder=new MediaRecorder(stream,{mimeType:mime});return new Promise(async(resolve,reject)=>{recorder.ondataavailable=event=>{if(event.data.size)chunks.push(event.data)};recorder.onerror=event=>reject(event.error||new Error('Ошибка записи'));recorder.onstop=async()=>{stopStream();indicator.hidden=true;if(!active){resolve({transcript:'',recognized:false});return}statusNode.textContent='Распознаю ответы…';try{const form=new FormData();form.append('audio',new Blob(chunks,{type:mime}),'category.webm');const response=await fetch('/api/speech/transcribe?assistant=false',{method:'POST',body:form}),speech=await response.json(),transcript=String(speech.transcript||'');resolve({transcript,recognized:Boolean(speech.accepted&&transcript)})}catch(error){reject(error)}};recorder.start();await beep();if(!active||recorder.state!=='recording')return;statusNode.textContent='Говорите до окончания записи';indicator.hidden=false;const id=setTimeout(()=>{timers.delete(id);if(recorder&&recorder.state==='recording')recorder.stop()},durationMs);timers.add(id)})}
+  function render(payload){state=payload;step.textContent=`БЛОК ${payload.block_number} ИЗ ${payload.block_count}`;category.textContent=payload.category;prompt.textContent=payload.prompt;start.querySelector('span').textContent=payload.block_number===1?'Начать задание':'Начать следующий блок';start.disabled=false;start.hidden=false;recording.hidden=true;status.textContent='';busy=false}
 
-  container.querySelector("[data-close]").onclick = () => {
-    active = false;
-    if (recorder && recorder.state === "recording") recorder.stop();
-    stopStream();
-    close();
-  };
+  function beginTraining(){token+=1;stage.classList.remove('is-instruction-stage');showOnly(training);headerProgress.textContent='2. Тренировка';instruction.textContent=`${trainingCategory.prompt} Ответьте после сигнала.`;trainingStatus.textContent='';trainingRecord.disabled=false;trainingRecord.hidden=false;trainingRecording.hidden=true;busy=false}
+  trainingRecord.onclick=async()=>{if(busy||!active)return;busy=true;trainingRecord.disabled=true;const currentToken=token;try{const speech=await recordAndTranscribe(5000,trainingStatus,trainingRecording);if(!active||currentToken!==token)return;const normalized=speech.transcript.toLowerCase().replace(/ё/g,'е'),correct=speech.recognized&&trainingCategory.words.some(word=>new RegExp(`(^|[^а-я])${word}([^а-я]|$)`,'i').test(normalized));if(!correct){trainingStatus.textContent=speech.recognized?`Распознано «${speech.transcript}». Ответ не относится к категории «${trainingCategory.title}».`:'Речь не распознана. Повторите ответ.';trainingRecord.disabled=false;busy=false;return}trainingStatus.textContent=`Принято: ${speech.transcript}`;setTimeout(()=>{if(!active||currentToken!==token)return;showOnly(trainingComplete);headerProgress.textContent='Обучение завершено';instruction.textContent='Тренировочный пример выполнен правильно.'},500)}catch(error){stopStream();trainingStatus.textContent=`Не удалось записать ответ: ${error.message}`;trainingRecord.disabled=false;busy=false}};
+  async function beginGame(){token+=1;showOnly(game);headerProgress.textContent='Игра';instruction.textContent='Называйте слова указанной категории.';try{render(await api.start())}catch(error){status.textContent=`Не удалось начать игру: ${error.message}`}}
+  start.onclick=async()=>{if(busy||!active)return;busy=true;start.disabled=true;start.hidden=true;try{const speech=await recordAndTranscribe(state.duration_ms,status,recording);if(!active)return;const next=await api.answer({session_id:state.session_id,transcript:speech.transcript,recognized:speech.recognized,duration_ms:state.duration_ms});if(!active)return;if(next.finished){category.textContent='Готово';prompt.textContent='Задание завершено';step.textContent='ВСЕ БЛОКИ ПРОЙДЕНЫ';status.textContent=speech.recognized?'Ответы сохранены':'Последняя запись не распознана, остальные ответы сохранены';start.hidden=true;busy=false;return}render(next);if(!speech.recognized)status.textContent='Запись не распознана. Переходим к следующей категории.'}catch(error){stopStream();status.textContent=error.message;start.disabled=false;start.hidden=false;busy=false}};
 
-  const style = document.createElement("style");
-  style.textContent = `
-    .gm13 { text-align: center; }
-    .gm13-step { color: #587180; letter-spacing: .16em; }
-    .gm13 h3 {
-      margin: clamp(12px, 2vh, 24px) 0;
-      color: #17212b;
-      font-size: clamp(54px, 11vh, 112px);
-      line-height: 1;
-    }
-    .gm13-prompt { font-size: clamp(18px, 2.4vw, 28px); }
-    .gm13-status { min-height: 1.5em; }
-    .gm13-recording {
-      height: 54px;
-      margin: 24px auto;
-      color: #2fa6bd;
-    }
-    .gm13-recording span {
-      display: inline-block;
-      width: 8px;
-      height: 32px;
-      margin: 0 4px;
-      border-radius: 8px;
-      background: currentColor;
-      animation: gm13-wave .8s ease-in-out infinite alternate;
-    }
-    .gm13-recording span:nth-child(2), .gm13-recording span:nth-child(4) { animation-delay: -.3s; }
-    .gm13-recording span:nth-child(3) { animation-delay: -.55s; }
-    @keyframes gm13-wave { to { transform: scaleY(.35); opacity: .55; } }
-  `;
-  container.append(style);
-  api.start().then(render);
-
-  return () => {
-    active = false;
-    if (recorder && recorder.state === "recording") recorder.stop();
-    stopStream();
-  };
+  container.querySelector('[data-start-training]').onclick=beginTraining;container.querySelector('[data-repeat-training]').onclick=beginTraining;container.querySelector('[data-confirm-start]').onclick=beginGame;container.querySelector('[data-close]').onclick=()=>{active=false;token+=1;if(recorder&&recorder.state==='recording')recorder.stop();stopStream();timers.forEach(id=>clearTimeout(id));timers.clear();close()};
+  const style=document.createElement('style');style.textContent=`
+    .gm13-stage{text-align:center}.gm13-stage.is-instruction-stage{align-items:start;padding-top:clamp(14px,2.4vh,30px)}.gm13-intro,.gm13-training,.gm13-game{width:min(800px,100%)}.gm13-intro h3{margin:0 0 10px;font-size:clamp(19px,2.3vw,25px)}.gm13-intro ol{width:min(700px,100%);margin:0 auto 16px;padding-left:28px;color:#52606d;text-align:left;font-size:clamp(14px,1.6vw,18px);line-height:1.4}.gm13-intro li+li{margin-top:5px}.gm13-example-title{margin:0 0 7px;font-weight:700}.gm13-media-placeholder{box-sizing:border-box;display:flex;width:min(620px,100%);height:clamp(130px,22vh,230px);margin:0 auto 18px;flex-direction:column;align-items:center;justify-content:center;gap:7px;border:2px dashed #b8cbd5;border-radius:16px;background:#eaf1f4;color:#52606d}.gm13-media-placeholder>span{display:grid;width:46px;height:46px;place-items:center;border-radius:50%;background:#d3e2e9;color:#168ba8}.gm13-media-placeholder strong{color:#263744}
+    .gm13-step{color:#587180;letter-spacing:.16em}.gm13-training h3,.gm13-game h3{margin:clamp(12px,2vh,24px) 0;color:#17212b;font-size:clamp(54px,11vh,112px);line-height:1}.gm13-prompt{font-size:clamp(18px,2.4vw,28px)}.gm13-status{min-height:1.5em}.gm13-recording{height:54px;margin:24px auto;color:#2fa6bd}.gm13-recording span{display:inline-block;width:8px;height:32px;margin:0 4px;border-radius:8px;background:currentColor;animation:gm13-wave .8s ease-in-out infinite alternate}.gm13-recording span:nth-child(2),.gm13-recording span:nth-child(4){animation-delay:-.3s}.gm13-recording span:nth-child(3){animation-delay:-.55s}@keyframes gm13-wave{to{transform:scaleY(.35);opacity:.55}}
+    .gm13-training-actions{display:flex;justify-content:center;gap:12px;flex-wrap:wrap}.gm13-training-repeat{border-color:#60727d;background:#fff;color:#17212b}.gm13-training-repeat span{color:#17212b}.gm13-intro[hidden],.gm13-training[hidden],.gm13-training-complete[hidden],.gm13-game[hidden],.gm13-recording[hidden]{display:none}@media(max-height:700px){.gm13-stage.is-instruction-stage{padding-top:8px}.gm13-intro ol{margin-bottom:7px;font-size:13px;line-height:1.25}.gm13-media-placeholder{height:clamp(100px,18vh,140px);margin-bottom:8px}.gm13-training h3,.gm13-game h3{font-size:64px}}
+  `;container.append(style);return()=>{active=false;token+=1;if(recorder&&recorder.state==='recording')recorder.stop();stopStream();timers.forEach(id=>clearTimeout(id));timers.clear()}
 }

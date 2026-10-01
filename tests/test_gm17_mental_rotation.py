@@ -15,6 +15,12 @@ class _PredictableRandom:
     def shuffle(self, values: list[object]) -> None:
         values.reverse()
 
+    def randint(self, low: int, _high: int) -> int:
+        return low
+
+    def sample(self, population, count: int):
+        return list(population)[:count]
+
 
 def test_gm17_scoring_uses_first_responses() -> None:
     result = score_gm17_trials(

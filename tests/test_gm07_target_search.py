@@ -18,6 +18,13 @@ class _PredictableRandom:
     def choice(self, values):
         return values[0]
 
+    def randint(self, low: int, _high: int) -> int:
+        # Нижняя граница: число целей в пробе должно быть предсказуемым.
+        return low
+
+    def sample(self, population, count: int):
+        return list(population)[:count]
+
 
 def test_gm07_scoring_separates_omissions_and_false_alarms() -> None:
     trials = [
@@ -34,6 +41,26 @@ def test_gm07_scoring_separates_omissions_and_false_alarms() -> None:
     assert result["u01_correct_action_rate"] == 0.5
     assert result["g03_median_reaction_ms"] == 650
     assert result["u06_complete"] is True
+
+
+def test_gm07_uses_the_selected_target_set() -> None:
+    plugin = Gm07TargetSearchPlugin(EventBus())
+    plugin._random = _PredictableRandom()  # type: ignore[assignment]
+
+    reply = plugin.start_game({"stimulus_set": "треугольник"})
+
+    assert reply["stimulus_set"] == "треугольник"
+    assert reply["target"]["symbol"] == "▲"
+    assert {item["symbol"] for item in reply["stimuli"]} == {"▲"}
+
+
+def test_gm07_falls_back_to_the_first_target_set() -> None:
+    plugin = Gm07TargetSearchPlugin(EventBus())
+
+    reply = plugin.start_game({"stimulus_set": "неизвестная цель"})
+
+    assert reply["stimulus_set"] == plugin.definition.stimulus_sets[0]
+    assert reply["target"]["symbol"] == "Т"
 
 
 def test_gm07_plugin_returns_first_target_trial_and_accepts_answer() -> None:

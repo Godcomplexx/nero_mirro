@@ -18,6 +18,8 @@ from neuro_mirror.screening.gm21_scoring import score_gm21
 @dataclass(slots=True)
 class OddOneSession:
     session_id: str
+    main_category: str
+    stimulus_set: str
     started_at_ms: float = field(default_factory=lambda: time.time() * 1000)
     shown_at_ms: float = 0.0
     trial_index: int = 0
@@ -34,14 +36,20 @@ class Gm21OddOneOutPlugin(BrowserGamePlugin):
         self._sessions: dict[str, OddOneSession] = {}
         self._random = secrets.SystemRandom()
 
-    def _start(self) -> dict[str, Any]:
-        session = OddOneSession(uuid.uuid4().hex)
+    def start_game(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._start(stimulus_set=str(payload.get("stimulus_set") or ""))
+
+    def _start(self, *, stimulus_set: str = "") -> dict[str, Any]:
+        categories_by_name = {name.casefold(): name for name in CATEGORIES}
+        available = tuple(name for name in self.definition.stimulus_sets if name.casefold() in categories_by_name)
+        selected = next((name for name in available if name.casefold() == stimulus_set.casefold()), available[0])
+        session = OddOneSession(uuid.uuid4().hex, categories_by_name[selected.casefold()], selected)
         self._sessions[session.session_id] = session
         return self._prepare_trial(session)
 
     def _prepare_trial(self, session: OddOneSession) -> dict[str, Any]:
         category_names = list(CATEGORIES)
-        main_category = category_names[session.trial_index % len(category_names)]
+        main_category = session.main_category
         odd_category = self._random.choice([name for name in category_names if name != main_category])
         main_items = self._random.sample(list(CATEGORIES[main_category]), 3)
         odd_item = self._random.choice(CATEGORIES[odd_category])
@@ -110,6 +118,7 @@ class Gm21OddOneOutPlugin(BrowserGamePlugin):
             "ok": True,
             "finished": False,
             "session_id": session.session_id,
+            "stimulus_set": session.stimulus_set,
             "trial_number": session.trial_index + 1,
             "required_trials": REQUIRED_TRIALS,
             "bonus": session.trial_index >= REQUIRED_TRIALS,

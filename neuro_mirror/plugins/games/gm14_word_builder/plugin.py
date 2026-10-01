@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from neuro_mirror.plugins.games.base import BrowserGamePlugin
-from neuro_mirror.plugins.games.gm14_word_builder.stimuli import WORDS
+from neuro_mirror.plugins.games.gm14_word_builder.stimuli import WORD_SETS
 from neuro_mirror.screening.gm14_scoring import score_gm14_words
 
 
@@ -15,6 +15,9 @@ from neuro_mirror.screening.gm14_scoring import score_gm14_words
 class WordBuilderSession:
     session_id: str
     words: list[str]
+    stimulus_set: str
+    difficulty_level: int
+    letter_range: tuple[int, int]
     word_index: int = 0
     shown_at_ms: float = 0.0
     current_attempts: list[dict[str, Any]] = field(default_factory=list)
@@ -32,10 +35,18 @@ class Gm14WordBuilderPlugin(BrowserGamePlugin):
         self._sessions: dict[str, WordBuilderSession] = {}
         self._random = secrets.SystemRandom()
 
-    def _start_session(self) -> dict[str, Any]:
-        words = list(WORDS)
+    def start_game(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._start_session(stimulus_set=str(payload.get("stimulus_set") or ""), difficulty_level=payload.get("difficulty_level"))
+
+    def _start_session(self, *, stimulus_set: str = "", difficulty_level: object = None) -> dict[str, Any]:
+        try: level = min(3, max(1, int(difficulty_level or 1)))
+        except (TypeError, ValueError): level = 1
+        letter_range = ((3, 4), (4, 8), (6, 12))[level - 1]
+        available = tuple(name for name in self.definition.stimulus_sets if name in WORD_SETS) or tuple(WORD_SETS)
+        selected = stimulus_set if stimulus_set in available else available[0]
+        words = [word for word in WORD_SETS[selected] if letter_range[0] <= len(word) <= letter_range[1]]
         self._random.shuffle(words)
-        session = WordBuilderSession(uuid.uuid4().hex, words)
+        session = WordBuilderSession(uuid.uuid4().hex, words, selected, level, letter_range)
         self._sessions[session.session_id] = session
         return self._word_payload(session)
 
@@ -54,6 +65,9 @@ class Gm14WordBuilderPlugin(BrowserGamePlugin):
             "finished": False,
             "correct": None,
             "session_id": session.session_id,
+            "stimulus_set": session.stimulus_set,
+            "difficulty_level": session.difficulty_level,
+            "difficulty_parameters": {"minimum_letters": session.letter_range[0], "maximum_letters": session.letter_range[1]},
             "word_number": session.word_index + 1,
             "word_count": len(session.words),
             "letters": [

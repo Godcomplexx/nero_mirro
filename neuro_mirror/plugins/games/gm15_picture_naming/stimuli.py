@@ -35,7 +35,7 @@ PICTURE_SETS = (
         ),
     ),
     (
-        "Продукты",
+        "Продукты питания",
         (
             {"name": "Яблоко", "file": "apple.png", "answers": ("яблоко",)},
             {"name": "Хлеб", "file": "bread.png", "answers": ("хлеб", "батон")},

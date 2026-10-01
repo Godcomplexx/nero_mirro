@@ -15,6 +15,9 @@ from neuro_mirror.screening.gm09_scoring import score_gm09
 class TrackingSession:
     session_id: str
     rounds: list[dict[str, Any]]
+    stimulus_set: str
+    difficulty_level: int
+    target_count: int
     round_index: int = 0
     shown_ms: float = field(default_factory=lambda: time.time() * 1000)
     round_events: list[dict[str, Any]] = field(default_factory=list)
@@ -31,21 +34,30 @@ class Gm09ObjectTrackingPlugin(BrowserGamePlugin):
         self._sessions: dict[str, TrackingSession] = {}
         self._random = secrets.SystemRandom()
 
-    def _start(self) -> dict[str, Any]:
-        rounds = [self._make_round(index) for index in range(ROUNDS)]
-        session = TrackingSession(uuid.uuid4().hex, rounds)
+    def start_game(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._start(stimulus_set=str(payload.get("stimulus_set") or ""), difficulty_level=payload.get("difficulty_level"))
+
+    def _start(self, *, stimulus_set: str = "", difficulty_level: object = None) -> dict[str, Any]:
+        try: level = min(3, max(1, int(difficulty_level or 1)))
+        except (TypeError, ValueError): level = 1
+        target_count = (2, 3, 5)[level - 1]
+        available = tuple(name for name in self.definition.stimulus_sets if name in STIMULUS_SHAPES) or tuple(STIMULUS_SHAPES)
+        selected = stimulus_set if stimulus_set in available else available[0]
+        shape = STIMULUS_SHAPES[selected]
+        rounds = [self._make_round(index, shape, target_count) for index in range(ROUNDS)]
+        session = TrackingSession(uuid.uuid4().hex, rounds, selected, level, target_count)
         self._sessions[session.session_id] = session
         return self._payload(session)
 
-    def _make_round(self, index: int) -> dict[str, Any]:
+    def _make_round(self, index: int, shape: str, target_count: int) -> dict[str, Any]:
         starts = self._positions(OBJECT_COUNT)
         ends = self._positions(OBJECT_COUNT)
         objects = [
             {"id": f"object-{number}", "start": starts[number], "end": ends[number]}
             for number in range(OBJECT_COUNT)
         ]
-        targets = self._random.sample([item["id"] for item in objects], TARGET_COUNT)
-        return {"objects": objects, "targets": targets, "shape": STIMULUS_SHAPES[index % len(STIMULUS_SHAPES)]}
+        targets = self._random.sample([item["id"] for item in objects], target_count)
+        return {"objects": objects, "targets": targets, "shape": shape}
 
     def _positions(self, count: int) -> list[list[float]]:
         cells = self._random.sample(range(24), count)
@@ -84,7 +96,10 @@ class Gm09ObjectTrackingPlugin(BrowserGamePlugin):
         return {
             "ok": True, "finished": False, "session_id": session.session_id,
             "round": session.round_index + 1, "round_count": len(session.rounds),
+            "stimulus_set": session.stimulus_set,
+            "difficulty_level": session.difficulty_level,
+            "difficulty_parameters": {"tracked_objects": session.target_count},
             "objects": current["objects"], "targets": current["targets"],
-            "target_count": TARGET_COUNT, "shape": current["shape"],
+            "target_count": session.target_count, "shape": current["shape"],
             "preview_ms": PREVIEW_MS, "movement_ms": MOVEMENT_MS,
         }

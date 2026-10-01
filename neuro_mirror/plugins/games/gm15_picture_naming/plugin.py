@@ -20,6 +20,7 @@ from neuro_mirror.screening.gm15_scoring import score_gm15
 class NamingSession:
     session_id: str
     items: list[dict[str, Any]]
+    stimulus_set: str
     item_index: int = 0
     shown_at_ms: float = field(default_factory=lambda: time.time() * 1000)
     round_events: list[dict[str, Any]] = field(default_factory=list)
@@ -34,18 +35,18 @@ class Gm15PictureNamingPlugin(BrowserGamePlugin):
         self._sessions: dict[str, NamingSession] = {}
         self._random = secrets.SystemRandom()
 
-    def _start(self) -> dict[str, Any]:
-        category_items: list[list[dict[str, Any]]] = []
-        for category, source in PICTURE_SETS:
-            selected = [dict(item, category=category) for item in source]
-            self._random.shuffle(selected)
-            category_items.append(selected[:ITEMS_PER_CATEGORY])
-        items = [
-            category_items[category_index][cycle]
-            for cycle in range(ITEMS_PER_CATEGORY)
-            for category_index in range(len(category_items))
-        ]
-        session = NamingSession(uuid.uuid4().hex, items)
+    def start_game(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._start(stimulus_set=str(payload.get("stimulus_set") or ""))
+
+    def _start(self, *, stimulus_set: str = "") -> dict[str, Any]:
+        sets_by_name = {category.casefold(): (category, source) for category, source in PICTURE_SETS}
+        available = tuple(name for name in self.definition.stimulus_sets if name.casefold() in sets_by_name) or tuple(sets_by_name)
+        selected_set = next((name for name in available if name.casefold() == stimulus_set.casefold()), available[0])
+        category, source = sets_by_name[selected_set.casefold()]
+        items = [dict(item, category=category) for item in source]
+        self._random.shuffle(items)
+        items = items[:ITEMS_PER_CATEGORY]
+        session = NamingSession(uuid.uuid4().hex, items, selected_set)
         self._sessions[session.session_id] = session
         return self._payload(session)
 
@@ -92,6 +93,7 @@ class Gm15PictureNamingPlugin(BrowserGamePlugin):
             "ok": True,
             "finished": False,
             "session_id": session.session_id,
+            "stimulus_set": session.stimulus_set,
             "item_number": session.item_index + 1,
             "item_count": len(session.items),
             "category": item["category"],

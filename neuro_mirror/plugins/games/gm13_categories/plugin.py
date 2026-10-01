@@ -13,6 +13,8 @@ from neuro_mirror.screening.gm13_scoring import analyse_category_response, score
 @dataclass(slots=True)
 class CategorySession:
     session_id: str
+    categories: list[dict[str, Any]]
+    stimulus_set: str
     category_index: int = 0
     shown_at_ms: float = field(default_factory=lambda: time.time() * 1000)
     round_events: list[dict[str, Any]] = field(default_factory=list)
@@ -26,8 +28,14 @@ class Gm13CategoriesPlugin(BrowserGamePlugin):
         super().__init__(bus)
         self._sessions: dict[str, CategorySession] = {}
 
-    def _start(self) -> dict[str, Any]:
-        session = CategorySession(uuid.uuid4().hex)
+    def start_game(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._start(stimulus_set=str(payload.get("stimulus_set") or ""))
+
+    def _start(self, *, stimulus_set: str = "") -> dict[str, Any]:
+        categories_by_name = {str(item["name"]).casefold(): item for item in CATEGORIES}
+        available = tuple(name for name in self.definition.stimulus_sets if name.casefold() in categories_by_name) or tuple(categories_by_name)
+        selected = next((name for name in available if name.casefold() == stimulus_set.casefold()), available[0])
+        session = CategorySession(uuid.uuid4().hex, [categories_by_name[selected.casefold()]], selected)
         self._sessions[session.session_id] = session
         return self._payload(session)
 
@@ -36,7 +44,7 @@ class Gm13CategoriesPlugin(BrowserGamePlugin):
         if session is None:
             return {"ok": False, "message": "Игровая сессия не найдена."}
 
-        category = CATEGORIES[session.category_index]
+        category = session.categories[session.category_index]
         transcript = str(payload.get("transcript") or "").strip()
         analysis = analyse_category_response(transcript, set(category["words"]))
         duration_ms = max(
@@ -58,7 +66,7 @@ class Gm13CategoriesPlugin(BrowserGamePlugin):
             }
         )
         session.category_index += 1
-        if session.category_index >= len(CATEGORIES):
+        if session.category_index >= len(session.categories):
             events = list(session.round_events)
             self._sessions.pop(session.session_id, None)
             return {
@@ -72,14 +80,15 @@ class Gm13CategoriesPlugin(BrowserGamePlugin):
 
     @staticmethod
     def _payload(session: CategorySession) -> dict[str, Any]:
-        category = CATEGORIES[session.category_index]
+        category = session.categories[session.category_index]
         return {
             "ok": True,
             "finished": False,
             "session_id": session.session_id,
+            "stimulus_set": session.stimulus_set,
             "category": category["name"],
             "prompt": category["prompt"],
             "block_number": session.category_index + 1,
-            "block_count": len(CATEGORIES),
+            "block_count": len(session.categories),
             "duration_ms": BLOCK_DURATION_MS,
         }

@@ -85,9 +85,18 @@ class BrowserGamePlugin(Plugin):
         return getattr(self, self.start_handler)()
 
     def answer_game(self, payload: dict[str, Any]) -> dict[str, Any]:
+        requested_session_id = str(payload.get("session_id") or "")
+        active_session = getattr(self, "_sessions", {}).get(requested_session_id)
+        difficulty_parameters = self._difficulty_parameters(active_session)
         result = getattr(self, self.answer_handler)(payload)
         if not result.get("ok"):
             return result
+        if active_session is not None:
+            difficulty_level = getattr(active_session, "difficulty_level", None)
+            if difficulty_level is not None:
+                result.setdefault("difficulty_level", difficulty_level)
+            if difficulty_parameters:
+                result.setdefault("difficulty_parameters", deepcopy(difficulty_parameters))
         session_id = str(payload.get("session_id") or result.get("session_id") or "")
         events = result.get("events")
         if not isinstance(events, list):
@@ -108,6 +117,8 @@ class BrowserGamePlugin(Plugin):
                 "type": "training_game",
                 "game_code": self.definition.code,
                 "session_id": session_id,
+                "difficulty_level": result.get("difficulty_level"),
+                "difficulty_parameters": deepcopy(result.get("difficulty_parameters") or {}),
                 "completion_status": (
                     "completed" if complete is True
                     else "incomplete" if complete is False
@@ -122,6 +133,47 @@ class BrowserGamePlugin(Plugin):
                 "trials": deepcopy(journal),
             }
         return result
+
+    @staticmethod
+    def _difficulty_parameters(session: Any) -> dict[str, Any]:
+        """Keep the effective task settings available after a session is removed."""
+        if session is None:
+            return {}
+        explicit = getattr(session, "difficulty_parameters", None)
+        if isinstance(explicit, dict):
+            return explicit
+
+        parameters: dict[str, Any] = {}
+        scalar_fields = {
+            "max_rounds": "cycles",
+            "missing_items": "missing_items",
+            "grid_size": "grid_size",
+            "target_count": "tracked_objects",
+            "choice_count": "choices",
+            "disk_count": "elements",
+        }
+        for attribute, key in scalar_fields.items():
+            value = getattr(session, attribute, None)
+            if value is not None:
+                parameters[key] = value
+
+        letter_range = getattr(session, "letter_range", None)
+        if isinstance(letter_range, tuple) and len(letter_range) == 2:
+            parameters.update(
+                minimum_letters=letter_range[0], maximum_letters=letter_range[1]
+            )
+        target_range = getattr(session, "target_range", None)
+        if isinstance(target_range, tuple) and len(target_range) == 2:
+            parameters.update(
+                minimum_targets=target_range[0], maximum_targets=target_range[1]
+            )
+        puzzles = getattr(session, "puzzles", None)
+        if isinstance(puzzles, list) and puzzles:
+            parameters["pieces"] = puzzles[0]["rows"] * puzzles[0]["columns"]
+        scenes = getattr(session, "scenes", None)
+        if isinstance(scenes, list) and scenes:
+            parameters["differences"] = len(scenes[0].get("differences", ()))
+        return parameters
 
     def _session_events(self, session: object | None) -> list[dict[str, Any]]:
         if session is None:

@@ -61,5 +61,5 @@ class Gm19MazePlugin(BrowserGamePlugin):
                           "execution_ms":max(0,float(payload.get("execution_ms") or 0)),"server_duration_ms":max(0,time.time()*1000-s.shown_at_ms)})
         s.index+=1
         if s.index==MAZE_COUNT:
-            self._sessions.pop(s.session_id,None);return {"ok":True,"finished":True,"metrics":score_gm19_mazes(s.results),"events":s.results}
+            self._sessions.pop(s.session_id,None);return {"ok":True,"finished":True,"metrics":score_gm19_mazes(s.results, expected_mazes=MAZE_COUNT),"events":s.results}
         return self._payload(s)
