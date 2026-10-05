@@ -1,0 +1,40 @@
+/* neuro_mirror/web/static/css/components/tabs.css
+   Segmented tabs (deck «Последняя сессия | Динамика»). The selected tab is
+   marked by fill + bold text, not by color alone. */
+
+.nm-tabs {
+  display: inline-flex;
+  gap: 0.25rem;
+  margin: 0.5rem 0 1.25rem;
+  padding: 0.25rem;
+  border: 0.0625rem solid var(--nm-border);
+  border-radius: var(--nm-radius);
+  background: var(--nm-surface);
+}
+
+.nm-tab {
+  min-height: 3rem;
+  padding: 0.5rem 1.5rem;
+  border: none;
+  border-radius: 0.625rem;
+  background: transparent;
+  color: var(--nm-text);
+  font-family: var(--nm-font);
+  font-size: var(--nm-font-body);
+  cursor: pointer;
+}
+
+.nm-tab:hover {
+  background: #eff6ff;
+}
+
+.nm-tab:focus-visible {
+  outline: var(--nm-focus);
+  outline-offset: 0.125rem;
+}
+
+.nm-tab[aria-selected="true"] {
+  background: var(--nm-primary);
+  color: #ffffff;
+  font-weight: 700;
+}

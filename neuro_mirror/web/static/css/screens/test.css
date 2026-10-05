@@ -1,0 +1,16 @@
+/* neuro_mirror/web/static/css/screens/test.css
+   «Проверка самочувствия» (HADS) and «Когнитивный тест» (MoCA) screens,
+   js/screens/test-screen.js: the «Перед началом» check card. */
+
+.nm-test-intro {
+  max-width: 55rem;
+}
+
+.nm-test-intro .nm-check-list {
+  margin-bottom: 1.25rem;
+}
+
+/* "No audio consent" note above the actions */
+.nm-test-intro .nm-help-bar {
+  margin: 0 0 1.25rem;
+}

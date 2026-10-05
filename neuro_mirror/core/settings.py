@@ -6,8 +6,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-DEFAULT_LOCAL_LIVE2D_MODEL_URL = "/static/assets/live2d/HiyoriAiri/unzipped/hiyori_free_zh/runtime/hiyori_free_t08.model3.json"
-
 
 @dataclass(slots=True)
 class Settings:
@@ -15,8 +13,6 @@ class Settings:
     auto_start: bool | None = None
     web_host: str = "127.0.0.1"
     web_port: int = 8000
-    web_live2d_model_url: str = ""
-    web_live2d_cubism_core_url: str = "/static/vendor/live2dcubismcore.min.js"
 
     ai_backend: str = "ollama"
     ollama_base_url: str = "http://127.0.0.1:11434"
@@ -65,37 +61,11 @@ class Settings:
         base_dir = Path(__file__).resolve().parents[2]
         default_vision_script = base_dir / "runtime" / "vision_worker" / "worker.py"
         default_speech_script = base_dir / "runtime" / "speech_worker" / "worker.py"
-        default_live2d_model_file = (
-            base_dir
-            / "neuro_mirror"
-            / "web"
-            / "static"
-            / "assets"
-            / "live2d"
-            / "HiyoriAiri"
-            / "unzipped"
-            / "hiyori_free_zh"
-            / "runtime"
-            / "hiyori_free_t08.model3.json"
-        )
-        default_live2d_model_url = (
-            DEFAULT_LOCAL_LIVE2D_MODEL_URL
-            if default_live2d_model_file.exists()
-            else ""
-        )
 
         raw_ai = os.getenv("NEURO_MIRROR_ENABLE_AI_ASSISTANT", "1").strip().lower()
         raw_auto_start = os.getenv("NEURO_MIRROR_AUTO_START", "").strip().lower()
         raw_web_host = os.getenv("NEURO_MIRROR_WEB_HOST", "127.0.0.1").strip()
         raw_web_port = os.getenv("NEURO_MIRROR_WEB_PORT", "8000").strip()
-        raw_web_live2d_model_url = os.getenv(
-            "NEURO_MIRROR_WEB_LIVE2D_MODEL_URL",
-            default_live2d_model_url,
-        ).strip()
-        raw_web_live2d_cubism_core_url = os.getenv(
-            "NEURO_MIRROR_WEB_LIVE2D_CUBISM_CORE_URL",
-            "/static/vendor/live2dcubismcore.min.js",
-        ).strip()
 
         raw_ai_backend = os.getenv("NEURO_MIRROR_AI_BACKEND", "ollama").strip().lower()
         raw_ollama_base_url = os.getenv(
@@ -181,8 +151,6 @@ class Settings:
             auto_start=auto_start,
             web_host=raw_web_host,
             web_port=int(raw_web_port),
-            web_live2d_model_url=raw_web_live2d_model_url,
-            web_live2d_cubism_core_url=raw_web_live2d_cubism_core_url,
             ai_backend=raw_ai_backend,
             ollama_base_url=raw_ollama_base_url,
             ollama_model=raw_ollama_model,

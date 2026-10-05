@@ -1,0 +1,113 @@
+/* neuro_mirror/web/static/css/screens/tasks.css
+   «Задачи» (js/screens/tasks.js): search, domain filter chips, card grid. */
+
+.nm-tasks-toolbar {
+  margin-bottom: 0.875rem;
+}
+
+.nm-input {
+  width: min(26.25rem, 100%);
+  min-height: 3.25rem;
+  padding: 0.625rem 1rem;
+  border: 0.0625rem solid #94a3b8;
+  border-radius: var(--nm-radius);
+  background: var(--nm-surface);
+  color: var(--nm-text);
+  font-family: var(--nm-font);
+  font-size: var(--nm-font-body);
+}
+
+.nm-input:focus-visible {
+  outline: var(--nm-focus);
+  outline-offset: 0.0625rem;
+}
+
+.nm-tasks-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.625rem;
+  margin-bottom: 1.25rem;
+}
+
+/* Filter chip: pressed state = border + check-like weight, not color alone */
+.nm-chip {
+  min-height: 3rem;
+  padding: 0.25rem;
+  border: 0.125rem solid transparent;
+  border-radius: 62.4375rem;
+  background: transparent;
+  cursor: pointer;
+}
+
+.nm-chip[aria-pressed="true"] {
+  border-color: var(--nm-text);
+}
+
+.nm-chip[aria-pressed="true"] .nm-domain {
+  font-weight: 800;
+}
+
+.nm-chip:focus-visible {
+  outline: var(--nm-focus);
+  outline-offset: 0.125rem;
+}
+
+.nm-tasks-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(17.5rem, 1fr));
+  gap: 1rem;
+}
+
+.nm-task-card {
+  display: flex;
+  flex-direction: column;
+  border: 0.0625rem solid var(--nm-border);
+  border-radius: var(--nm-radius);
+  background: var(--nm-surface);
+  overflow: hidden;
+}
+
+.nm-task-image {
+  width: 100%;
+  height: 9.375rem;
+  object-fit: cover;
+}
+
+.nm-task-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  flex: 1 1 auto;
+  padding: 1rem 1.125rem;
+}
+
+.nm-task-title {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+
+.nm-task-desc {
+  margin: 0;
+  flex: 1 1 auto;
+  font-size: var(--nm-font-caption);
+  color: var(--nm-text-dim);
+}
+
+.nm-task-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.nm-task-level {
+  font-size: var(--nm-font-caption);
+  font-weight: 600;
+  color: var(--nm-text-dim);
+}
+
+.nm-task-foot .nm-btn {
+  margin-left: auto;
+}

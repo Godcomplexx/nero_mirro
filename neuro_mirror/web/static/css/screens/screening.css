@@ -1,0 +1,140 @@
+/* neuro_mirror/web/static/css/screens/screening.css
+   Базовый скрининг: equipment statuses | live camera | instructions + start
+   (deck slide 4). Panels (.nm-panel) are reused by later screens. */
+
+.nm-screening-grid {
+  display: grid;
+  grid-template-columns: minmax(14rem, 1fr) minmax(16rem, 1.2fr) minmax(15rem, 1fr);
+  gap: 1.25rem;
+  align-items: stretch;
+}
+
+/* Relative to the work area, so it follows the interface scale. Narrow:
+   camera on top as a low strip, statuses and actions side by side below. */
+@container workarea (max-width: 48rem) {
+  .nm-screening-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+  .nm-video-frame {
+    grid-column: 1 / -1;
+    grid-row: 1;
+    min-height: 12rem;
+    aspect-ratio: 16 / 6;
+  }
+}
+
+/* ---- Live camera ---- */
+
+.nm-video-frame {
+  position: relative;
+  min-height: 22.5rem;
+  border-radius: var(--nm-radius);
+  background: #0f1f38;
+  overflow: hidden;
+}
+
+.nm-video-frame video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: scaleX(-1); /* mirror, like a real mirror */
+}
+
+.nm-video-overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 1.5rem;
+  text-align: center;
+  color: #ffffff;
+  font-size: var(--nm-font-body);
+}
+
+.nm-video-overlay[hidden] {
+  display: none;
+}
+
+.nm-video-caption {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 0.625rem 1rem;
+  background: rgba(15, 31, 56, 0.75);
+  color: #ffffff;
+  font-size: var(--nm-font-caption);
+  text-align: center;
+}
+
+/* ---- Instructions + actions ---- */
+
+.nm-screening-side {
+  display: flex;
+  flex-direction: column;
+}
+
+.nm-instructions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+  margin: 0 0 1.25rem;
+  padding: 0;
+  list-style: none;
+}
+
+.nm-instructions li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  color: var(--nm-text);
+}
+
+.nm-instructions svg {
+  flex-shrink: 0;
+  width: 1.625rem;
+  height: 1.625rem;
+  color: var(--nm-primary);
+}
+
+.nm-side-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.nm-screening-side .nm-instructions {
+  margin: 1.25rem 0 0;
+}
+
+/* Short windows (up to ~1600×900): tighter vertical spacing so the screen
+   fits without a scrollbar; text sizes stay ≥ 18 px. */
+@media (max-height: 940px) {
+  .nm-video-frame {
+    min-height: 11rem;
+  }
+
+  .nm-screening-grid .nm-panel-text {
+    margin-bottom: 0.5rem;
+  }
+
+  /* Secondary hint, dropped on short windows so the main action fits */
+  .nm-screening-grid .nm-optional-text {
+    display: none;
+  }
+
+  .nm-screening-grid .nm-panel {
+    padding: 1rem 1.25rem;
+  }
+
+  .nm-instructions {
+    gap: 0.5rem;
+  }
+
+  .nm-help-bar {
+    margin-top: 0.75rem;
+    padding: 0.5rem 1rem;
+  }
+}

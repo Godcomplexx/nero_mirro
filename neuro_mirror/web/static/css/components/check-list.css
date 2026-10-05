@@ -1,0 +1,103 @@
+/* neuro_mirror/web/static/css/components/check-list.css
+   Equipment status rows (js/components/check-list.js). */
+
+.nm-check-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.nm-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.75rem 0.875rem;
+  border: 0.0625rem solid var(--nm-border);
+  border-radius: var(--nm-radius);
+  background: #f8fafc;
+}
+
+.nm-check-icon {
+  flex-shrink: 0;
+  width: 2rem;
+  height: 2rem;
+  display: grid;
+  place-items: center;
+  border: 0.125rem solid #94a3b8;
+  border-radius: 50%;
+  background: var(--nm-surface);
+  color: var(--nm-text-dim);
+  font-size: 1.0625rem;
+  font-weight: 700;
+}
+
+.nm-check-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  min-width: 0;
+}
+
+.nm-check-title {
+  font-size: var(--nm-font-body);
+  color: var(--nm-text);
+}
+
+.nm-check-note {
+  font-size: var(--nm-font-caption);
+  color: var(--nm-text-dim);
+  overflow-wrap: anywhere;
+}
+
+.nm-check[data-state="ok"] {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+}
+
+.nm-check[data-state="ok"] .nm-check-icon {
+  border-color: #15803d;
+  background: #15803d;
+  color: #ffffff;
+}
+
+.nm-check[data-state="warn"] {
+  border-color: #fde68a;
+  background: #fffbeb;
+}
+
+.nm-check[data-state="warn"] .nm-check-icon {
+  border-color: #b45309;
+  background: #b45309;
+  color: #ffffff;
+}
+
+.nm-check[data-state="fail"] {
+  border-color: #fecaca;
+  background: #fef2f2;
+}
+
+.nm-check[data-state="fail"] .nm-check-icon {
+  border-color: #b91c1c;
+  background: #b91c1c;
+  color: #ffffff;
+}
+
+.nm-check[data-state="wait"] .nm-check-icon {
+  border-color: var(--nm-primary);
+  color: var(--nm-primary);
+}
+
+/* Short windows (up to ~1600×900): tighter vertical spacing so the screen
+   fits without a scrollbar; text sizes stay ≥ 18 px. */
+@media (max-height: 940px) {
+  .nm-check-list {
+    gap: 0.375rem;
+  }
+
+  .nm-check {
+    padding: 0.375rem 0.75rem;
+  }
+}

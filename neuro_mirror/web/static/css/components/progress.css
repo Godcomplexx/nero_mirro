@@ -1,0 +1,24 @@
+/* neuro_mirror/web/static/css/components/progress.css */
+
+/* Calm progress: no pulsing or blinking (deck slide 2) */
+.nm-progress {
+  height: 0.875rem;
+  margin-top: 0.5rem;
+  border-radius: 0.4375rem;
+  background: var(--nm-border);
+  overflow: hidden;
+}
+
+.nm-progress-fill {
+  height: 100%;
+  width: 0;
+  border-radius: 0.4375rem;
+  background: var(--nm-primary);
+  transition: width 300ms linear;
+}
+
+.nm-progress-label {
+  margin: 0.625rem 0 0;
+  font-size: var(--nm-font-caption);
+  color: var(--nm-text-dim);
+}

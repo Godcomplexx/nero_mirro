@@ -34,7 +34,14 @@ CONSENT_TEXT = " ".join(
 )
 
 # Preset avatars shipped with the web UI (web/static/assets/avatars/<id>.svg)
-PRESET_AVATARS = ("a01", "a02", "a03", "a04", "a05", "a06")
+# Avatars offered on the new-user form: 32 portraits of mixed age (about half
+# elderly), skin tone and gender — DiceBear "Avataaars" by Pablo Stanley,
+# stored in static/assets/avatars/p01.svg … p32.svg
+PRESET_AVATARS = tuple(f"p{number:02d}" for number in range(1, 33))
+# Avatars of earlier sets are no longer shipped: a profile that still names
+# one gets the first current preset instead (web/app.py)
+LEGACY_AVATARS: tuple[str, ...] = ()
+KNOWN_AVATARS = PRESET_AVATARS + LEGACY_AVATARS
 
 # Пройденные этапы пользователя — по ним ассистент предлагает следующий шаг
 DEFAULT_PROGRESS: dict[str, Any] = {

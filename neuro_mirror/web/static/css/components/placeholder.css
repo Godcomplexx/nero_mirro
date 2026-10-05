@@ -1,0 +1,11 @@
+/* neuro_mirror/web/static/css/components/placeholder.css */
+
+.nm-placeholder {
+  margin-top: 1rem;
+  padding: 1.25rem 1.5rem;
+  background: var(--nm-surface);
+  border: 0.0625rem solid var(--nm-border);
+  border-radius: var(--nm-radius);
+  color: var(--nm-text-dim);
+  font-size: 1.125rem;
+}

@@ -1,0 +1,39 @@
+/* neuro_mirror/web/static/css/components/dialog.css
+   In-page confirmation (used before leaving an unfinished test). */
+
+.nm-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10000; /* above the legacy overlays and the MoCA panel */
+  display: grid;
+  place-items: center;
+  padding: 1.5rem;
+  background: rgba(15, 31, 56, 0.55);
+  font-family: var(--nm-font);
+}
+
+.nm-dialog {
+  width: min(35rem, 100%);
+  padding: 1.75rem 2rem;
+  border-radius: var(--nm-radius);
+  background: var(--nm-surface);
+  color: var(--nm-text);
+  box-shadow: 0 1.25rem 3.125rem rgba(15, 31, 56, 0.3);
+}
+
+.nm-dialog-title {
+  margin: 0 0 0.75rem;
+  font-size: 1.5rem;
+  font-weight: 700;
+}
+
+.nm-dialog-text {
+  margin: 0 0 1.5rem;
+  font-size: var(--nm-font-body);
+  line-height: 1.5;
+  color: var(--nm-text-dim);
+}
+
+.nm-dialog .nm-btn-row {
+  justify-content: flex-end;
+}

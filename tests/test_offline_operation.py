@@ -90,21 +90,19 @@ def test_speech_synthesis_is_local():
 def test_interface_loads_fonts_and_scripts_from_the_project():
     static = SOURCE_ROOT / "web" / "static"
     markup = (static / "index.html").read_text(encoding="utf-8")
-    script = (static / "app.js").read_text(encoding="utf-8")
+    scripts = [static / "app.js", *sorted((static / "js").rglob("*.js"))]
 
     assert "fonts.googleapis.com" not in markup
     assert "fonts.gstatic.com" not in markup
     assert "/static/fonts/fonts.css" in markup
-    assert "cdn.jsdelivr.net" not in script
-    assert "/static/vendor/" in script
+    for path in scripts:
+        assert "cdn.jsdelivr.net" not in path.read_text(encoding="utf-8"), path.name
 
 
 def test_bundled_assets_exist():
     static = SOURCE_ROOT / "web" / "static"
     assert (static / "fonts" / "fonts.css").is_file()
     assert list((static / "fonts").glob("*.woff2")), "нет файлов шрифтов"
-    for name in ("pixi.min.js", "cubism4.min.js", "live2dcubismcore.min.js"):
-        assert (static / "vendor" / name).is_file(), f"нет {name}"
 
 
 def test_vision_translation_does_not_use_public_services():

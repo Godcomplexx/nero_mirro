@@ -1,0 +1,783 @@
+/* neuro_mirror/web/static/css/screens/practice.css
+   Start of a game made by the interface (js/components/game-intro.js):
+   «Как выполнять задание» with a live example, the practice round and
+   «Обучение завершено»; plus the small pieces the practice rounds are built
+   of (js/practice/*). Sits inside the game frame (.nm-game-host), whose
+   field scales and centres the content. */
+
+/* ---- 1. Instruction: steps and buttons on the left, example on the right ---- */
+
+.nm-game-host .nm-intro {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "title   example"
+    "steps   example"
+    "note    example"
+    "actions example";
+  grid-template-rows: auto auto auto 1fr;
+  column-gap: 2.5rem;
+  align-items: start;
+  width: min(64rem, 100%);
+  max-width: none;
+  text-align: left;
+}
+
+.nm-game-host .nm-intro > h3 {
+  grid-area: title;
+  margin: 0 0 0.75rem;
+  font-size: 1.375rem;
+}
+
+.nm-game-host .nm-intro-steps {
+  grid-area: steps;
+  margin: 0 0 1rem;
+  padding-left: 1.5rem;
+  color: var(--nm-text);
+  font-size: var(--nm-font-body);
+  line-height: 1.5;
+}
+
+.nm-game-host .nm-intro-steps li + li {
+  margin-top: 0.375rem;
+}
+
+.nm-game-host .nm-intro-note {
+  grid-area: note;
+  margin: 0 0 1.25rem;
+  color: var(--nm-text-dim);
+  font-size: var(--nm-font-body);
+}
+
+.nm-game-host .nm-intro-actions {
+  grid-area: actions;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.nm-game-host .nm-intro-example {
+  grid-area: example;
+  margin: 0;
+}
+
+.nm-game-host .nm-intro-example figcaption {
+  margin: 0 0 0.75rem;
+  color: var(--nm-text-dim);
+  font-size: var(--nm-font-body);
+}
+
+/* The example: the practice round playing by itself, smaller, not clickable */
+.nm-game-host .nm-pr-demo {
+  position: relative;
+  overflow: hidden;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 0.25rem;
+  padding: 0.75rem;
+  border: 0.0625rem solid var(--nm-border);
+  border-radius: var(--nm-radius);
+  background: var(--nm-bg);
+  pointer-events: none;
+  /* drawn at full size and shown at 62 % */
+  width: calc(22rem / 0.62);
+  height: calc(20rem / 0.62);
+  zoom: 0.62;
+}
+
+.nm-game-host .nm-pr-pointer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 5;
+  margin: -0.25rem 0 0 -0.375rem;
+  transition: transform 550ms ease-in-out, opacity 250ms ease;
+}
+
+/* Not on screen while the example is only showing something */
+.nm-game-host .nm-pr-pointer.is-idle {
+  opacity: 0;
+}
+
+.nm-game-host .nm-pr-pointer.is-placing {
+  transition: none;
+}
+
+/* Pressed and moving without letting go: steadier, slower glide */
+.nm-game-host .nm-pr-pointer.is-dragging {
+  transition: transform 360ms linear, opacity 250ms ease;
+}
+
+.nm-game-host .nm-pr-pointer svg {
+  display: block;
+  transition: transform 120ms ease-out;
+}
+
+.nm-game-host .nm-pr-pointer.is-pressing svg {
+  transform: scale(0.82);
+}
+
+/* ---- 2. Practice round and 3. «Обучение завершено» ---- */
+
+.nm-game-host .nm-practice-run {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.nm-game-host .nm-practice-label {
+  margin: 0;
+  color: var(--nm-primary);
+  font-size: var(--nm-font-caption);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.nm-game-host .nm-pr-status {
+  min-height: 1.5em;
+  margin: 0 0 0.5rem;
+  color: var(--nm-text);
+  font-size: var(--nm-font-body);
+  text-align: center;
+}
+
+.nm-game-host .nm-practice-done {
+  text-align: center;
+}
+
+.nm-game-host .nm-practice-done h3 {
+  margin: 0 0 0.625rem;
+  font-size: 1.5rem;
+}
+
+.nm-game-host .nm-practice-done p {
+  margin: 0 0 1.25rem;
+  font-size: var(--nm-font-body);
+}
+
+.nm-game-host .nm-practice-done .nm-intro-actions {
+  justify-content: center;
+}
+
+/* ---- Pieces of the practice rounds ---- */
+
+.nm-game-host .nm-pr-area {
+  display: flex;
+  justify-content: center;
+}
+
+.nm-game-host .nm-pr-column {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+}
+
+.nm-game-host .nm-pr-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+}
+
+.nm-game-host .nm-pr-grid {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.nm-game-host .nm-pr-grid-2 {
+  grid-template-columns: repeat(2, minmax(9rem, 1fr));
+}
+
+.nm-game-host .nm-pr-grid-3 {
+  grid-template-columns: repeat(3, minmax(6rem, 1fr));
+}
+
+.nm-game-host .nm-pr-tile {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+  min-width: 6rem;
+  min-height: 4rem;
+  padding: 0.75rem 1.25rem;
+  border: 0.125rem solid var(--nm-border);
+  border-radius: var(--nm-radius);
+  background: var(--nm-surface);
+  color: var(--nm-text);
+  font-family: var(--nm-font);
+  font-size: 1.5rem;
+  font-weight: 600;
+}
+
+.nm-game-host button.nm-pr-tile {
+  cursor: pointer;
+}
+
+.nm-game-host button.nm-pr-tile:hover {
+  border-color: var(--nm-primary);
+  background: #eff6ff;
+}
+
+.nm-game-host .nm-pr-tile.is-selected {
+  border-color: var(--nm-primary);
+  background: #dbeafe;
+}
+
+/* Right / wrong are told by the status line in words; the colour only adds */
+.nm-game-host .nm-pr-tile.is-right {
+  border-color: #15803d;
+  background: #dcfce7;
+}
+
+.nm-game-host .nm-pr-tile.is-wrong {
+  border-color: #b91c1c;
+  background: #fee2e2;
+}
+
+.nm-game-host .nm-pr-picture {
+  width: 4.5rem;
+  height: 4.5rem;
+  object-fit: contain;
+}
+
+.nm-game-host .nm-pr-picture-large {
+  width: 9rem;
+  height: 9rem;
+}
+
+.nm-game-host .nm-pr-frame {
+  padding: 1rem;
+}
+
+/* «Найди цель» */
+.nm-game-host .nm-pr-letter {
+  min-width: 5rem;
+  min-height: 5rem;
+  font-size: 2.75rem;
+  font-weight: 700;
+  color: #1e293b;
+}
+
+.nm-game-host .nm-pr-letter.is-red {
+  color: #dc2626;
+}
+
+.nm-game-host .nm-pr-letter > span {
+  display: inline-block;
+}
+
+.nm-game-host .nm-pr-sample {
+  font-size: var(--nm-font-body);
+}
+
+/* «Парные карточки»: the cards of the game, in a 4-card field */
+.nm-game-host .nm-pr-cards {
+  display: grid;
+  grid-template-columns: repeat(4, 7rem);
+  gap: 1rem;
+}
+
+.nm-game-host .nm-pr-cards .gm01-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  height: 8.5rem;
+  border: 0.0625rem solid #b8c8d1;
+  border-radius: 1.125rem;
+  background-color: #ffffff;
+  font-size: 2.25rem;
+  cursor: pointer;
+}
+
+.nm-game-host .nm-pr-cards .gm01-card:not(.nm-card-back) {
+  color: #17212b;
+}
+
+.nm-game-host .nm-pr-cards .gm01-card small {
+  font-size: 1rem;
+}
+
+/* ---- More pieces of the practice rounds ---- */
+
+.nm-game-host .nm-pr-gap-large {
+  gap: 2.5rem;
+}
+
+.nm-game-host .nm-pr-small-gap {
+  gap: 0.375rem;
+}
+
+.nm-game-host .nm-pr-caption {
+  margin: 0;
+  color: var(--nm-text-dim);
+  font-size: var(--nm-font-caption);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.nm-game-host .nm-pr-caption-active {
+  color: var(--nm-primary);
+}
+
+.nm-game-host .nm-pr-number {
+  font-size: 3.5rem;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--nm-text);
+}
+
+.nm-game-host .nm-pr-heading {
+  font-size: 2.25rem;
+  font-weight: 700;
+  color: var(--nm-text);
+}
+
+.nm-game-host .nm-pr-grid-4 {
+  grid-template-columns: repeat(4, minmax(5rem, 1fr));
+}
+
+.nm-game-host .nm-pr-shape {
+  min-width: 4.5rem;
+  min-height: 4.5rem;
+  padding: 0.5rem;
+  color: var(--nm-primary);
+  font-size: 2.25rem;
+}
+
+/* Cells (sequence, location, objects) */
+.nm-game-host .nm-pr-cells {
+  grid-template-columns: repeat(3, 5.5rem);
+}
+
+.nm-game-host .nm-pr-cell {
+  width: 5.5rem;
+  height: 5.5rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border: 0.125rem solid #b9ccd5;
+  border-radius: 1rem;
+  background: #e5edf1;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.nm-game-host .nm-pr-cell-object {
+  background: var(--nm-surface);
+  font-size: var(--nm-font-caption);
+  color: var(--nm-text);
+}
+
+.nm-game-host .nm-pr-cell-object .nm-pr-picture {
+  width: 3rem;
+  height: 3rem;
+}
+
+.nm-game-host .nm-pr-cell.is-lit {
+  border-color: transparent;
+  background: linear-gradient(135deg, #70d5ed, #9d83ff);
+}
+
+.nm-game-host .nm-pr-cell.is-selected {
+  border-color: var(--nm-primary);
+  background: #bfdbfe;
+}
+
+.nm-game-host .nm-pr-cell.is-right {
+  border-color: #15803d;
+  background: #dcfce7;
+}
+
+.nm-game-host .nm-pr-cell.is-wrong {
+  border-color: #b91c1c;
+  background: #fee2e2;
+}
+
+/* «Ритмическое повторение» */
+.nm-game-host .nm-pr-pad {
+  width: 6.5rem;
+  height: 6.5rem;
+  border: 0.25rem solid rgba(15, 23, 42, 0.15);
+  border-radius: 50%;
+  cursor: pointer;
+  opacity: 0.75;
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+.nm-game-host .nm-pr-pad.is-low {
+  background: #5fb3e6;
+}
+
+.nm-game-host .nm-pr-pad.is-middle {
+  background: #78cf8d;
+}
+
+.nm-game-host .nm-pr-pad.is-high {
+  background: #e98a96;
+}
+
+.nm-game-host .nm-pr-pad.is-lit {
+  opacity: 1;
+  transform: scale(1.08);
+  box-shadow: 0 0 0 0.5rem rgba(59, 130, 246, 0.25);
+}
+
+/* «Стоп-сигнал» */
+.nm-game-host .nm-pr-stimulus {
+  width: 9rem;
+  height: 9rem;
+  font-size: 5rem;
+  font-weight: 700;
+}
+
+.nm-game-host .nm-pr-stimulus.is-mirrored {
+  transform: scaleX(-1);
+}
+
+/* «Отслеживание объекта» */
+.nm-game-host .nm-pr-field {
+  position: relative;
+  width: 24rem;
+  height: 15rem;
+  border: 0.0625rem solid var(--nm-border);
+  border-radius: var(--nm-radius);
+  background: var(--nm-surface);
+}
+
+.nm-game-host .nm-pr-dot {
+  position: absolute;
+  width: 2.75rem;
+  height: 2.75rem;
+  margin: 0;
+  border: 0.1875rem solid #64748b;
+  border-radius: 50%;
+  background: #cbd5e1;
+  cursor: pointer;
+  transition: left 1.5s ease-in-out, top 1.5s ease-in-out, background 150ms ease;
+}
+
+.nm-game-host .nm-pr-field.is-still .nm-pr-dot {
+  transition: none;
+}
+
+.nm-game-host .nm-pr-dot.is-target {
+  border-color: #b45309;
+  background: #f59e0b;
+}
+
+.nm-game-host .nm-pr-dot.is-selected {
+  border-color: var(--nm-primary);
+  background: #93c5fd;
+}
+
+/* «Найди отличие»: a small drawn scene */
+.nm-game-host .nm-pr-scene {
+  position: relative;
+  display: block;
+  width: 13rem;
+  height: 9rem;
+  overflow: hidden;
+  border-radius: var(--nm-radius);
+  background: linear-gradient(#dbeafe 65%, #bbf7d0 65%);
+}
+
+.nm-game-host .nm-pr-column > .nm-pr-scene {
+  border: 0.125rem solid var(--nm-border);
+}
+
+.nm-game-host .nm-pr-scene > span {
+  position: absolute;
+}
+
+.nm-game-host .nm-pr-scene-house {
+  left: 1.5rem;
+  bottom: 1.5rem;
+  width: 4.5rem;
+  height: 3rem;
+  background: #f59e0b;
+}
+
+.nm-game-host .nm-pr-scene-roof {
+  left: 1.25rem;
+  bottom: 4.5rem;
+  width: 0;
+  height: 0;
+  border-left: 2.5rem solid transparent;
+  border-right: 2.5rem solid transparent;
+  border-bottom: 1.75rem solid #b91c1c;
+}
+
+.nm-game-host .nm-pr-scene-door {
+  left: 3.25rem;
+  bottom: 1.5rem;
+  width: 1rem;
+  height: 1.75rem;
+  background: #78350f;
+}
+
+.nm-game-host .nm-pr-scene-tree {
+  right: 2rem;
+  bottom: 1.5rem;
+  width: 2.5rem;
+  height: 3.5rem;
+  border-radius: 50% 50% 0.25rem 0.25rem;
+  background: #16a34a;
+}
+
+.nm-game-host .nm-pr-scene-sun {
+  right: 1rem;
+  top: 0.75rem;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+  background: #facc15;
+}
+
+/* Where the sun should be on the right picture — the difference */
+.nm-game-host .nm-pr-scene-spot {
+  right: 0.5rem;
+  top: 0.25rem;
+  width: 3rem;
+  height: 3rem;
+  border-radius: 50%;
+}
+
+.nm-game-host .nm-pr-scene-spot.is-found {
+  border: 0.25rem solid #e11d48;
+}
+
+.nm-game-host .nm-pr-scene-button {
+  padding: 0;
+  border: 0.1875rem solid var(--nm-primary);
+  border-radius: calc(var(--nm-radius) + 0.125rem);
+  background: none;
+  cursor: pointer;
+}
+
+/* «Собери слово» */
+.nm-game-host .nm-pr-slot,
+.nm-game-host .nm-pr-letter-tile {
+  width: 4.5rem;
+  min-width: 4.5rem;
+  height: 4.5rem;
+  min-height: 4.5rem;
+  padding: 0;
+  font-size: 2rem;
+}
+
+.nm-game-host .nm-pr-slot {
+  border-style: dashed;
+}
+
+.nm-game-host .nm-pr-bank {
+  min-height: 6rem;
+  padding: 0.75rem 1.5rem;
+  border: 0.125rem dashed var(--nm-border);
+  border-radius: var(--nm-radius);
+  background: #eef2f5;
+}
+
+.nm-game-host .nm-pr-letter-tile[hidden] {
+  display: none;
+}
+
+/* «Сортировка по правилу» */
+.nm-game-host .nm-pr-card-face {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  font-size: 1.75rem;
+  line-height: 1;
+}
+
+.nm-game-host .nm-pr-card-face > span {
+  display: block;
+}
+
+/* The cards of «Сортировка по правилу» are all the same size */
+.nm-game-host .nm-pr-tile:has(> .nm-pr-card-face) {
+  width: 8rem;
+  height: 5.5rem;
+  padding: 0;
+}
+
+.nm-game-host .nm-pr-card-face.is-red {
+  color: #dc2626;
+}
+
+.nm-game-host .nm-pr-card-face.is-green {
+  color: #16a34a;
+}
+
+.nm-game-host .nm-pr-card-face.is-blue {
+  color: #2563eb;
+}
+
+/* «Поверни фигуру» */
+.nm-game-host .nm-pr-figure {
+  display: grid;
+  grid-template-columns: repeat(3, 1.5rem);
+  grid-auto-rows: 1.5rem;
+}
+
+.nm-game-host .nm-pr-figure > .is-on {
+  background: #1e293b;
+}
+
+/* «Пазлы» */
+.nm-game-host .nm-pr-puzzle {
+  display: grid;
+  grid-template-columns: repeat(2, 9rem);
+  grid-auto-rows: 6.3rem;
+  gap: 0.125rem;
+  padding: 0.125rem;
+  border: 0.1875rem solid #b8cbd4;
+  border-radius: var(--nm-radius);
+  background: #dce6eb;
+}
+
+.nm-game-host .nm-pr-piece {
+  padding: 0;
+  border: 0;
+  background-size: 200% 200%;
+  background-repeat: no-repeat;
+  cursor: pointer;
+}
+
+.nm-game-host .nm-pr-piece.is-selected {
+  box-shadow: inset 0 0 0 0.375rem #2fa6bd;
+}
+
+.nm-game-host .nm-pr-puzzle.is-solved {
+  gap: 0;
+  border-color: #15803d;
+  box-shadow: 0 0 0 0.375rem rgba(21, 128, 61, 0.25);
+}
+
+.nm-game-host .nm-pr-puzzle-sample {
+  width: 9rem;
+  border: 0.125rem solid #c6d5dc;
+  border-radius: 0.75rem;
+}
+
+/* «Лабиринт» */
+.nm-game-host .nm-pr-maze {
+  display: grid;
+  grid-template-columns: repeat(3, 5rem);
+  grid-auto-rows: 5rem;
+  touch-action: none;
+  user-select: none;
+  background: #f4f7f8;
+}
+
+.nm-game-host .nm-pr-maze-cell {
+  position: relative;
+  display: grid;
+  place-items: center;
+  border: 0.1875rem solid transparent;
+  cursor: pointer;
+}
+
+.nm-game-host .nm-pr-maze-cell.wall-top {
+  border-top-color: #1e293b;
+}
+
+.nm-game-host .nm-pr-maze-cell.wall-right {
+  border-right-color: #1e293b;
+}
+
+.nm-game-host .nm-pr-maze-cell.wall-bottom {
+  border-bottom-color: #1e293b;
+}
+
+.nm-game-host .nm-pr-maze-cell.wall-left {
+  border-left-color: #1e293b;
+}
+
+.nm-game-host .nm-pr-maze-cell.is-path {
+  background: #bfdbfe;
+}
+
+.nm-game-host .nm-pr-maze.is-solved .nm-pr-maze-cell.is-path {
+  background: #bbf7d0;
+}
+
+.nm-game-host .nm-pr-maze-start,
+.nm-game-host .nm-pr-maze-finish {
+  width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+  background: #16a34a;
+  pointer-events: none;
+}
+
+.nm-game-host .nm-pr-maze-finish {
+  background: #dc2626;
+}
+
+/* «Башня» */
+.nm-game-host .nm-pr-tower {
+  gap: 1rem;
+}
+
+.nm-game-host .nm-pr-rod {
+  position: relative;
+  display: flex;
+  flex-direction: column-reverse;
+  align-items: center;
+  justify-content: flex-start;
+  width: 9rem;
+  height: 9rem;
+  padding: 0 0 0.75rem;
+  border: 0.125rem solid var(--nm-border);
+  border-radius: var(--nm-radius);
+  background: var(--nm-surface);
+  cursor: pointer;
+}
+
+.nm-game-host .nm-pr-rod.is-selected {
+  border-color: var(--nm-primary);
+  background: #eff6ff;
+}
+
+.nm-game-host .nm-pr-rod-pole {
+  position: absolute;
+  bottom: 0.75rem;
+  left: 50%;
+  width: 0.375rem;
+  height: 6.5rem;
+  margin-left: -0.1875rem;
+  border-radius: 0.25rem;
+  background: #94a3b8;
+}
+
+.nm-game-host .nm-pr-disk {
+  position: relative;
+  height: 1.5rem;
+  margin-top: 0.25rem;
+  border-radius: 0.5rem;
+}
+
+.nm-game-host .nm-pr-disk.is-size-1 {
+  width: 3.5rem;
+  background: #55b7d2;
+}
+
+.nm-game-host .nm-pr-disk.is-size-2 {
+  width: 6rem;
+  background: #f2c14e;
+}
+
+.nm-game-host .nm-pr-tower.is-solved .nm-pr-rod:last-child {
+  border-color: #15803d;
+  background: #dcfce7;
+}

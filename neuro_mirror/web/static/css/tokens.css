@@ -1,0 +1,26 @@
+/* neuro_mirror/web/static/css/tokens.css
+   Design tokens for the new light-theme sidebar app. Values only, no selectors
+   other than :root. Contrast of --nm-text / --nm-text-dim on --nm-bg and
+   --nm-surface is >= 4.5:1 (deck slide 2). */
+
+:root {
+  --nm-bg: #f5f7fb;
+  --nm-surface: #ffffff;
+  --nm-text: #12233c;
+  --nm-text-dim: #4b5563;
+  --nm-border: #e2e8f0;
+  --nm-primary: #1d4ed8;
+  --nm-primary-dark: #0f1f38;
+  --nm-danger: #dc2626;
+  --nm-success: #16a34a;
+  --nm-radius: 0.75rem;
+  --nm-focus: 0.1875rem solid #1d4ed8;
+  --nm-font: "Manrope", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --nm-font-body: 1.125rem;
+  --nm-font-caption: 1rem;
+  /* Header and sidebar are this much smaller than the content */
+  --nm-shell-scale: 1;
+  --nm-header-h: calc(4rem * var(--nm-shell-scale));
+  --nm-sidebar-w: calc(15.5rem * var(--nm-shell-scale));
+  --nm-sidebar-w-collapsed: calc(4.5rem * var(--nm-shell-scale));
+}

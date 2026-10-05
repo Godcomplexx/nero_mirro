@@ -1,0 +1,31 @@
+/* neuro_mirror/web/static/css/components/domain.css
+   Cognitive-domain tag (js/components/domain-tag.js): dot + text. */
+
+.nm-domain {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.25rem 0.75rem;
+  border-radius: 62.4375rem;
+  background: #f1f5f9;
+  color: var(--nm-text);
+  font-size: var(--nm-font-caption);
+  font-weight: 600;
+}
+
+.nm-domain-dot {
+  width: 0.875rem;
+  height: 0.875rem;
+  border-radius: 50%;
+  background: #64748b;
+  flex-shrink: 0;
+}
+
+.nm-domain[data-tone="memory"] { background: #fee2e2; }
+.nm-domain[data-tone="memory"] .nm-domain-dot { background: #dc2626; }
+.nm-domain[data-tone="attention"] { background: #dbeafe; }
+.nm-domain[data-tone="attention"] .nm-domain-dot { background: #2563eb; }
+.nm-domain[data-tone="abstraction"] { background: #dcfce7; }
+.nm-domain[data-tone="abstraction"] .nm-domain-dot { background: #16a34a; }
+.nm-domain[data-tone="speech"] { background: #fef9c3; }
+.nm-domain[data-tone="speech"] .nm-domain-dot { background: #ca8a04; }

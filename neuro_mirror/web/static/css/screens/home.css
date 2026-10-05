@@ -1,0 +1,79 @@
+/* neuro_mirror/web/static/css/screens/home.css
+   Главное меню: subtitle, two-column card grid, resume banner, service link. */
+
+.nm-workarea-subtitle {
+  margin: 0 0 0.5rem;
+  font-size: 1.25rem;
+  color: var(--nm-text-dim);
+}
+
+.nm-card-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.25rem;
+  margin-top: 1.25rem;
+}
+
+@container workarea (min-width: 60rem) {
+  .nm-card-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@container workarea (max-width: 48rem) {
+  .nm-card-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.nm-resume-banner {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin: 1rem 0 0.25rem;
+  padding: 1rem 1.25rem;
+  background: #eff6ff;
+  border: 0.0625rem solid #bfdbfe;
+  border-radius: var(--nm-radius);
+  color: var(--nm-text);
+  font-size: var(--nm-font-body);
+}
+
+.nm-link-button {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.75rem;
+  margin-top: 1.5rem;
+  padding: 0.5rem 0.25rem;
+  border: none;
+  background: transparent;
+  color: var(--nm-primary);
+  font: inherit;
+  font-size: var(--nm-font-caption);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* Short windows (up to ~1600×900): tighter vertical spacing so the screen
+   fits without a scrollbar; text sizes stay ≥ 18 px. */
+@media (max-height: 940px) {
+  .nm-card-grid {
+    gap: 0.75rem;
+    margin-top: 0.75rem;
+  }
+
+  .nm-card {
+    gap: 0.75rem;
+    padding: 1rem 1.25rem;
+  }
+
+  .nm-resume-banner {
+    margin-top: 0.5rem;
+    padding: 0.5rem 1rem;
+  }
+
+  .nm-link-button {
+    margin-top: 0.5rem;
+  }
+}

@@ -1,0 +1,67 @@
+/* neuro_mirror/web/static/css/components/button.css
+   Reusable buttons for new screens: one primary action per screen (deck
+   slide 2), secondary actions visually quieter. Min 3rem tall, 1.125rem text. */
+
+.nm-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.625rem;
+  min-height: 3.25rem;
+  padding: 0.625rem 1.5rem;
+  border: 0.0625rem solid transparent;
+  border-radius: var(--nm-radius);
+  font-family: var(--nm-font);
+  font-size: var(--nm-font-body);
+  font-weight: 700;
+  line-height: 1.2;
+  text-align: center;
+  cursor: pointer;
+}
+
+.nm-btn svg {
+  flex-shrink: 0;
+  width: 1.375rem;
+  height: 1.375rem;
+}
+
+.nm-btn:focus-visible {
+  outline: var(--nm-focus);
+  outline-offset: 0.125rem;
+}
+
+.nm-btn-primary {
+  background: var(--nm-primary);
+  color: #ffffff;
+}
+
+.nm-btn-primary:hover:not(:disabled) {
+  background: var(--nm-primary-dark);
+}
+
+.nm-btn-secondary {
+  border-color: var(--nm-primary);
+  background: var(--nm-surface);
+  color: var(--nm-primary);
+}
+
+.nm-btn-secondary:hover:not(:disabled) {
+  background: #eff6ff;
+}
+
+.nm-btn:disabled {
+  border-color: transparent;
+  background: #cbd5e1;
+  color: #475569;
+  cursor: not-allowed;
+}
+
+.nm-btn-block {
+  width: 100%;
+}
+
+.nm-btn-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}

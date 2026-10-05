@@ -1,0 +1,97 @@
+/* neuro_mirror/web/static/css/screens/reports.css
+   «Отчёты»: result history cards (js/screens/reports.js). */
+
+.nm-tab-panel {
+  max-width: 61.25rem;
+}
+
+.nm-report-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+}
+
+.nm-report-card {
+  padding: 1.125rem 1.25rem;
+  border: 0.0625rem solid var(--nm-border);
+  border-radius: var(--nm-radius);
+  background: #f8fafc;
+}
+
+.nm-report-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.5rem 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.nm-report-card-title {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--nm-text);
+}
+
+.nm-report-card-date {
+  font-size: var(--nm-font-caption);
+  color: var(--nm-text-dim);
+}
+
+.nm-report-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.nm-report-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 9.375rem;
+  padding: 0.75rem 1rem;
+  border: 0.0625rem solid var(--nm-border);
+  border-radius: 0.625rem;
+  background: var(--nm-surface);
+}
+
+.nm-report-metric-label {
+  font-size: var(--nm-font-caption);
+  color: var(--nm-text-dim);
+}
+
+.nm-report-metric-value {
+  font-size: 1.625rem;
+  font-weight: 700;
+  color: var(--nm-text);
+}
+
+.nm-report-metric-value small {
+  font-size: var(--nm-font-caption);
+  font-weight: 400;
+  color: var(--nm-text-dim);
+}
+
+.nm-report-trend {
+  font-size: var(--nm-font-caption);
+  font-weight: 600;
+}
+
+.nm-report-trend-better {
+  color: #15803d;
+}
+
+.nm-report-trend-worse {
+  color: #b91c1c;
+}
+
+.nm-report-trend-same {
+  color: var(--nm-text-dim);
+}
+
+.nm-report-note {
+  margin: 0.75rem 0 0;
+  font-size: var(--nm-font-caption);
+  color: var(--nm-text-dim);
+}

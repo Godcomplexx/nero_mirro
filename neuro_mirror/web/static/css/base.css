@@ -1,0 +1,80 @@
+/* neuro_mirror/web/static/css/base.css
+   Global basics for the whole app (the old styles.css is gone). */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+/* Interface scale. Every size in the stylesheets is in rem, so this one value
+   scales the whole UI (the app is made for users 58+). It follows both the
+   window width and height, so a screen fits the window without a scrollbar:
+   a 2174×1263 window gets ~17.4 px (~1.09x); it never drops below 16 px
+   (body text stays ≥ 18 px) and never exceeds 24 px. Browser zoom (Ctrl +)
+   still works on top of it. */
+html {
+  font-size: clamp(16px, min(0.8vw, 1.45vh), 24px);
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  min-height: 100vh;
+  overflow: hidden;
+  background: var(--nm-bg);
+  color: var(--nm-text);
+  font-family: var(--nm-font);
+  font-size: var(--nm-font-body);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+/* The hidden attribute always wins over component display rules */
+[hidden] {
+  display: none !important;
+}
+
+*:focus-visible {
+  outline: var(--nm-focus);
+  outline-offset: 0.125rem;
+}
+
+/* Text for screen readers only */
+.nm-visually-hidden {
+  position: absolute;
+  width: 0.0625rem;
+  height: 0.0625rem;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* Kept in the document and decoding, but not visible (camera stream for
+   frame grabs); display:none could stop frames from being produced */
+.nm-offscreen {
+  position: fixed;
+  left: -0.625rem;
+  top: -0.625rem;
+  width: 0.0625rem;
+  height: 0.0625rem;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.nm-offscreen video {
+  width: 40rem;
+  height: 30rem;
+}

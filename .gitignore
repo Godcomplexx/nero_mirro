@@ -29,3 +29,6 @@ runtime/deidentified/
 runtime/dataset/
 runtime/models/tts/*.onnx
 runtime/models/tts/*.onnx.json
+
+.gstack/
+.claude/

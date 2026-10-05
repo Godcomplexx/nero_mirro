@@ -1,0 +1,399 @@
+/* neuro_mirror/web/static/css/screens/welcome.css
+   Окно приветствия / Новый пользователь (deck slide "Новый пользователь"):
+   the profile picker and the new-user form (#user-gate, driven by app.js).
+   It sits over the work area, so the header and sidebar stay visible. */
+
+.user-gate {
+  position: fixed;
+  top: var(--nm-header-h);
+  left: var(--nm-sidebar-w);
+  right: 0;
+  bottom: 0;
+  z-index: 40;
+  padding: 2rem 2.5rem;
+  overflow-y: auto;
+  background: var(--nm-bg);
+  color: var(--nm-text);
+  transition: left 220ms ease;
+}
+
+body[data-nm-sidebar-collapsed="true"] .user-gate {
+  left: var(--nm-sidebar-w-collapsed);
+}
+
+/* Same idea as the work area: one width, so the form never re-wraps while
+   the menu opens or closes (the space next to the open menu) */
+.user-gate-panel {
+  width: calc(100vw - var(--nm-sidebar-w) - 5rem);
+  margin: 0 auto;
+  container: gate / inline-size;
+  padding: 2rem 2.25rem;
+  border: 0.0625rem solid var(--nm-border);
+  border-radius: var(--nm-radius);
+  background: var(--nm-surface);
+}
+
+.user-gate-title {
+  margin: 0;
+  font-size: 2rem;
+  font-weight: 700;
+}
+
+.user-gate-sub {
+  margin: 0.375rem 0 1.5rem;
+  color: var(--nm-text-dim);
+}
+
+/* "Choose a profile first" notice (js/shell.js) */
+.nm-gate-notice {
+  margin: 0 0 1.25rem;
+  padding: 0.75rem 1rem;
+  border: 0.0625rem solid #fcd34d;
+  border-left-width: 0.375rem;
+  border-radius: var(--nm-radius);
+  background: #fffbeb;
+  color: var(--nm-text);
+  font-weight: 600;
+  text-align: left;
+}
+
+/* Field labels (markup still carries the old .mono class — neutralised) */
+.user-gate .device-label {
+  font-family: var(--nm-font);
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+
+/* ---- Profile picker ---- */
+
+.user-grid {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 1.25rem;
+  margin-bottom: 1.5rem;
+}
+
+.user-grid:empty {
+  display: none;
+}
+
+.user-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.625rem;
+  width: 14rem;
+  padding: 1.75rem 1rem 1.25rem;
+  border: 0.125rem solid var(--nm-border);
+  border-radius: var(--nm-radius);
+  background: var(--nm-surface);
+  color: var(--nm-text);
+  cursor: pointer;
+}
+
+.user-card:hover {
+  border-color: var(--nm-primary);
+  background: #eff6ff;
+}
+
+.user-card-avatar {
+  width: 8rem;
+  height: 8rem;
+  border: 0.0625rem solid var(--nm-border);
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.user-card-name {
+  font-size: 1.25rem;
+  font-weight: 700;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+.user-card-id {
+  font-family: var(--nm-font);
+  font-size: var(--nm-font-caption);
+  color: var(--nm-text-dim);
+}
+
+/* Profile picker is centred; «+ Новый пользователь» sized to its text */
+#user-select-view {
+  text-align: center;
+}
+
+.user-create-open {
+  display: flex;
+  margin: 0 auto;
+  padding: 0 2rem;
+}
+
+/* ---- New user form ---- */
+
+.user-create-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.user-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.user-name-input {
+  min-height: 3.25rem;
+  padding: 0.75rem 1rem;
+  border: 0.0625rem solid #94a3b8;
+  border-radius: var(--nm-radius);
+  background: var(--nm-surface);
+  color: var(--nm-text);
+}
+
+.user-name-input::placeholder {
+  color: #64748b;
+}
+
+.user-name-input:focus {
+  border-color: var(--nm-primary);
+  outline: var(--nm-focus);
+  outline-offset: 0.0625rem;
+}
+
+/* Deck: large, clearly distinguishable avatars with an explicit selection mark */
+.avatar-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.avatar-option {
+  position: relative;
+  width: 6rem;
+  height: 6rem;
+  padding: 0.375rem;
+  border: 0.1875rem solid var(--nm-border);
+  border-radius: 1rem;
+  background: #eef2f7;
+  cursor: pointer;
+}
+
+.avatar-option img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  border-radius: 0.75rem;
+  object-fit: cover;
+}
+
+.avatar-option:hover {
+  border-color: #93c5fd;
+}
+
+.avatar-option.selected {
+  border-color: var(--nm-primary);
+}
+
+/* Selection is shown by a check mark, not by the border color alone */
+.avatar-option.selected::after {
+  content: "✓";
+  position: absolute;
+  top: -0.625rem;
+  right: -0.625rem;
+  width: 1.75rem;
+  height: 1.75rem;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--nm-primary);
+  color: #ffffff;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.avatar-photo-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.avatar-photo-hint {
+  font-family: var(--nm-font);
+  font-size: var(--nm-font-caption);
+  color: var(--nm-text-dim);
+}
+
+.avatar-camera video {
+  width: 100%;
+  max-height: 16.25rem;
+  border: 0.0625rem solid var(--nm-border);
+  border-radius: var(--nm-radius);
+  object-fit: cover;
+  transform: scaleX(-1);
+}
+
+.avatar-camera-actions {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 0.625rem;
+}
+
+.consent-row {
+  display: flex;
+  align-items: center;
+  gap: 0.875rem;
+  min-height: 3.5rem;
+  padding: 0.75rem 1rem;
+  border: 0.0625rem solid var(--nm-border);
+  border-radius: var(--nm-radius);
+  background: var(--nm-surface);
+  cursor: pointer;
+}
+
+.consent-row input {
+  flex-shrink: 0;
+  width: 1.5rem;
+  height: 1.5rem;
+  margin: 0;
+  accent-color: var(--nm-primary);
+}
+
+.consent-row:has(input:focus-visible) {
+  outline: var(--nm-focus);
+  outline-offset: 0.125rem;
+}
+
+.user-create-error {
+  margin: 0;
+  color: var(--nm-danger);
+}
+
+/* Deck: «Назад» on the left, primary action on the right */
+.user-create-actions {
+  display: flex;
+  flex-direction: row-reverse;
+  justify-content: flex-start;
+  gap: 0.75rem;
+}
+
+/* ---- Buttons of the legacy markup (.icon-btn / .primary-btn) ---- */
+
+.user-gate .icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: 3.25rem;
+  padding: 0 1.5rem;
+  border: 0.0625rem solid #94a3b8;
+  border-radius: var(--nm-radius);
+  background: var(--nm-surface);
+  color: var(--nm-text);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.user-gate .icon-btn:hover:not(:disabled) {
+  border-color: var(--nm-primary);
+  background: #eff6ff;
+}
+
+.user-gate .primary-btn {
+  border-color: transparent;
+  background: var(--nm-primary);
+  color: #ffffff;
+}
+
+.user-gate .primary-btn:hover:not(:disabled) {
+  border-color: transparent;
+  background: var(--nm-primary-dark);
+}
+
+.user-gate .icon-btn:disabled {
+  border-color: transparent;
+  background: #cbd5e1;
+  color: #475569;
+  cursor: not-allowed;
+}
+
+/* Wide screens: two columns so the form fits the window without scrolling —
+   avatars on the left; name, consents and actions on the right. The last
+   row is flexible so the tall avatar block does not stretch gaps between
+   the consents. */
+@container gate (min-width: 60rem) {
+  .user-create-form {
+    display: grid;
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+    grid-template-rows: repeat(7, auto) 1fr;
+    grid-auto-flow: row dense;
+    align-content: start;
+    align-items: start;
+    column-gap: 2.5rem;
+    row-gap: 1rem;
+  }
+
+  .user-create-form > .user-field:nth-of-type(2) {
+    grid-column: 1;
+    grid-row: 1 / -1;
+  }
+
+  .user-create-form > .user-field:nth-of-type(1),
+  .user-create-form > .consent-row,
+  .user-create-form > .user-create-error,
+  .user-create-form > .user-create-actions {
+    grid-column: 2;
+  }
+}
+
+
+/* Short windows (up to ~1600×900): tighter vertical spacing so the screen
+   fits without a scrollbar; text sizes stay ≥ 18 px. */
+@media (max-height: 940px) {
+  .user-gate {
+    padding: 1rem 1.5rem;
+  }
+
+  .user-gate-panel {
+    width: calc(100vw - var(--nm-sidebar-w) - 3rem);
+    padding: 1.25rem 1.5rem;
+  }
+
+  .user-gate-title {
+    font-size: 1.625rem;
+  }
+
+  .user-gate-sub {
+    margin: 0.125rem 0 0.75rem;
+  }
+
+  .user-create-form {
+    gap: 0.75rem;
+  }
+
+  .avatar-picker {
+    gap: 0.5rem;
+  }
+
+  .avatar-option {
+    width: 4.5rem;
+    height: 4.5rem;
+    padding: 0.25rem;
+    border-width: 0.125rem;
+  }
+
+  .consent-row {
+    min-height: 2.75rem;
+    padding: 0.5rem 0.75rem;
+  }
+}
+
+/* Laptop-height windows (≈768 px): smallest avatar tiles so the form still
+   fits without a scrollbar */
+@media (max-height: 800px) {
+  .avatar-option {
+    width: 3.5rem;
+    height: 3.5rem;
+  }
+}

@@ -1,0 +1,551 @@
+/* neuro_mirror/web/static/css/screens/game.css
+   Frame for a training game (js/core/games.js). The markup inside
+   .nm-game-host is drawn by the game's own module that comes from the core;
+   these are the shared classes those modules rely on (.game-*-new, .icon-btn,
+   .primary-btn, .mono), restyled for the light sidebar app. Each game adds its
+   own specific styles itself. */
+
+.nm-game-host {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 0.75rem;
+  /* The game gets what is left of the window, so the screen does not scroll */
+  height: clamp(20rem, calc(100vh - var(--nm-header-h) - 14rem), 64rem);
+  min-height: 0;
+  color: var(--nm-text);
+}
+
+/* The game's own heading (name + instruction) is lifted to the top of the
+   work area, beside the section title and the task number: the whole height
+   below goes to the game field. The left half is kept for the screen's own
+   lines (see .nm-training-play-head). */
+.nm-workarea:has(.nm-game-host) {
+  position: relative;
+}
+
+.nm-workarea:has(.nm-game-host) .nm-training-play-head {
+  max-width: calc(40% - 1.25rem);
+}
+
+/* Placed on the content box (centred in the work area, one width), so the
+   heading glides with the content when the menu moves */
+.nm-game-host .game-header-new {
+  position: absolute;
+  top: 2rem;
+  right: calc((100% - var(--nm-content-w)) / 2);
+  left: calc((100% - var(--nm-content-w)) / 2 + var(--nm-content-w) * 0.4);
+  height: 5.75rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1.25rem;
+  overflow: hidden;
+}
+
+.nm-game-host .game-header-new h2 {
+  margin: 0 0 0.25rem;
+  font-size: 1.5rem;
+  font-weight: 700;
+}
+
+.nm-game-host .game-header-new p {
+  margin: 0;
+  color: var(--nm-text-dim);
+}
+
+/* The domain is already shown by the screen next to the task number */
+.nm-game-host .game-kicker-new {
+  display: none;
+}
+
+.nm-game-host .mono {
+  font-family: var(--nm-font);
+}
+
+.nm-game-host .game-progress-new {
+  flex: none;
+  padding: 0.5rem 1rem;
+  border: 0.0625rem solid var(--nm-border);
+  border-radius: 62rem;
+  background: var(--nm-surface);
+  color: var(--nm-text);
+  font-size: var(--nm-font-caption);
+}
+
+.nm-game-host .game-stage-new {
+  /* The field always takes exactly its row and keeps its content in the
+     middle, whatever a game's own styles ask for; the content is scaled to
+     the field (js/components/fit-box.js) */
+  width: 100% !important;
+  max-width: none !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  margin: 0 !important;
+  display: grid;
+  place-items: center !important;
+  align-content: center !important;
+  padding: 1.25rem !important;
+  border: 0.0625rem solid var(--nm-border);
+  border-radius: var(--nm-radius);
+  background: var(--nm-surface);
+  color: var(--nm-text);
+  overflow: auto;
+}
+
+.nm-game-host .game-intro-new,
+.nm-game-host .game-result-new {
+  max-width: 40rem;
+  text-align: center;
+}
+
+.nm-game-host .game-intro-new p,
+.nm-game-host .game-result-new p {
+  margin: 0 0 1.25rem;
+  color: var(--nm-text);
+  font-size: var(--nm-font-body);
+}
+
+.nm-game-host .game-result-new h3 {
+  margin: 0 0 0.625rem;
+  font-size: 1.5rem;
+}
+
+.nm-game-host .game-intro-new[hidden],
+.nm-game-host .game-result-new[hidden] {
+  display: none;
+}
+
+.nm-game-host .game-actions-new {
+  display: flex;
+  justify-content: center;
+  gap: 0.75rem;
+}
+
+/* Moving between tasks is done by the screen's own buttons below the game */
+.nm-game-host button[data-close],
+.nm-game-host button[data-close].icon-btn {
+  display: none;
+}
+
+.nm-game-host .game-options-new {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(11rem, 1fr));
+  gap: 0.875rem;
+  width: min(40rem, 100%);
+}
+
+.nm-game-host .game-option-new {
+  min-height: 3.25rem;
+  padding: 1rem;
+  border: 0.125rem solid var(--nm-border);
+  border-radius: var(--nm-radius);
+  background: var(--nm-surface);
+  color: var(--nm-text);
+  font-size: 1.25rem;
+  cursor: pointer;
+}
+
+.nm-game-host .game-option-new:hover {
+  border-color: var(--nm-primary);
+  background: #eff6ff;
+}
+
+/* Buttons of the game modules */
+.nm-game-host .icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: 3.25rem;
+  padding: 0.625rem 1.5rem;
+  border: 0.0625rem solid var(--nm-primary);
+  border-radius: var(--nm-radius);
+  background: var(--nm-surface);
+  color: var(--nm-primary);
+  font-family: var(--nm-font);
+  font-size: var(--nm-font-body);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.nm-game-host .icon-btn:hover:not(:disabled) {
+  background: #eff6ff;
+}
+
+.nm-game-host .icon-btn.primary-btn {
+  border-color: transparent;
+  background: var(--nm-primary);
+  color: #ffffff;
+}
+
+.nm-game-host .icon-btn.primary-btn:hover:not(:disabled) {
+  background: var(--nm-primary-dark);
+}
+
+.nm-game-host .icon-btn:disabled {
+  border-color: transparent;
+  background: #cbd5e1;
+  color: #475569;
+  cursor: not-allowed;
+}
+
+.nm-game-host button:focus-visible {
+  outline: var(--nm-focus);
+  outline-offset: 0.125rem;
+}
+
+/* ---- End of a game (js/screens/training.js showFinish): one clear screen
+   instead of whatever the game leaves on its field ---- */
+
+.nm-game-host.is-finished > :not(.nm-game-finish):not(.game-header-new) {
+  display: none !important;
+}
+
+/* The end screen has its own buttons — the row under the field would only
+   repeat them (kept in place, so nothing jumps) */
+.nm-training-play:has(> .nm-game-host.is-finished) > .nm-training-play-actions {
+  visibility: hidden;
+}
+
+.nm-game-host .nm-game-finish {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  min-height: 0;
+  padding: 2rem;
+  border: 0.0625rem solid var(--nm-border);
+  border-radius: var(--nm-radius);
+  background: var(--nm-surface);
+  text-align: center;
+  animation: nm-finish-in 320ms ease-out;
+}
+
+.nm-game-host .nm-game-finish-icon {
+  display: grid;
+  place-items: center;
+  width: 6rem;
+  height: 6rem;
+  margin-bottom: 0.5rem;
+  border-radius: 50%;
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.nm-game-host .nm-game-finish-icon svg {
+  width: 3.25rem;
+  height: 3.25rem;
+}
+
+.nm-game-host .nm-game-finish h3 {
+  margin: 0;
+  font-size: 2rem;
+  font-weight: 700;
+  color: var(--nm-text);
+}
+
+.nm-game-host .nm-game-finish h3:focus {
+  outline: none;
+}
+
+.nm-game-host .nm-game-finish-result[hidden] {
+  display: none;
+}
+
+.nm-game-host .nm-game-finish-result {
+  max-width: 40rem;
+  margin: 0;
+  color: var(--nm-text-dim);
+  font-size: 1.25rem;
+}
+
+.nm-game-host .nm-game-finish-actions {
+  justify-content: center;
+  margin-top: 1rem;
+}
+
+@keyframes nm-finish-in {
+  from {
+    opacity: 0;
+    transform: translateY(0.75rem);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nm-game-host .nm-game-finish {
+    animation: none;
+  }
+}
+
+/* ---- Adjustments for particular games (js/core/game-adjustments.js) ---- */
+
+/* «Найди отличие»: the pictures side by side — the field is wide, so each
+   picture gets the whole height instead of half of it */
+.nm-game-host .gm10-pair {
+  grid-template-rows: minmax(0, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.5rem;
+}
+
+.nm-game-host .gm10-reference,
+.nm-game-host .gm10-target {
+  padding-top: 1.75rem;
+}
+
+.nm-game-host .gm10-reference img,
+.nm-game-host .gm10-target img {
+  height: calc(100% - 1.75rem);
+}
+
+.nm-game-host .gm10-target > [data-marks] {
+  top: 1.75rem;
+}
+
+.nm-game-host .gm10-label {
+  font: 700 var(--nm-font-caption) / 1.5rem var(--nm-font);
+  letter-spacing: 0.04em;
+  color: var(--nm-text-dim);
+}
+
+.nm-game-host .gm10-label-active {
+  color: var(--nm-primary);
+}
+
+.nm-game-host .gm10 > p {
+  font-size: var(--nm-font-body);
+}
+
+/* «Парные карточки»: closed cards have a card back, and a card turns over
+   when it opens or closes (js/core/game-adjustments.js): the old side turns
+   away to the edge, then the new side turns in */
+.nm-game-host .gm01-card.nm-card-back {
+  color: transparent; /* the "?" stays for screen readers only */
+}
+
+.nm-game-host .gm01-card.nm-card-back,
+.nm-game-host .nm-card-old-side.nm-card-back-face {
+  border-color: #1e40af;
+  background:
+    radial-gradient(circle, transparent 0 20%, rgba(255, 255, 255, 0.6) 21% 25%, transparent 26%),
+    repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.12) 0 6px, transparent 6px 12px),
+    repeating-linear-gradient(-45deg, rgba(255, 255, 255, 0.12) 0 6px, transparent 6px 12px),
+    linear-gradient(135deg, #1e40af, #3b82f6);
+  box-shadow:
+    inset 0 0 0 6px #ffffff,
+    inset 0 0 0 8px rgba(30, 64, 175, 0.35),
+    0 8px 22px rgba(20, 35, 45, 0.12);
+}
+
+.nm-game-host .gm01-card.nm-card-back:hover:not(:disabled) {
+  border-color: #1e3a8a;
+}
+
+.nm-game-host .gm01-card {
+  position: relative;
+  transition: transform 140ms ease-out;
+}
+
+/* Hover: the card is pressed in where the pointer is — it tilts so that
+   point goes down, and a soft shade sits under the pointer (instead of the
+   game's own lift) */
+.nm-game-host .gm01-card:hover:not(:disabled) {
+  transform: perspective(40rem)
+    rotateY(calc((var(--nm-press-x, 0.5) - 0.5) * 16deg))
+    rotateX(calc((0.5 - var(--nm-press-y, 0.5)) * 16deg))
+    scale(0.97);
+}
+
+.nm-game-host .gm01-card:active:not(:disabled) {
+  transform: perspective(40rem)
+    rotateY(calc((var(--nm-press-x, 0.5) - 0.5) * 20deg))
+    rotateX(calc((0.5 - var(--nm-press-y, 0.5)) * 20deg))
+    scale(0.94);
+}
+
+.nm-game-host .gm01-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: radial-gradient(
+    circle at calc(var(--nm-press-x, 0.5) * 100%) calc(var(--nm-press-y, 0.5) * 100%),
+    rgba(15, 23, 42, 0.16),
+    transparent 55%
+  );
+  opacity: 0;
+  transition: opacity 140ms ease-out;
+  pointer-events: none;
+}
+
+.nm-game-host .gm01-card:hover:not(:disabled)::after {
+  opacity: 1;
+}
+
+/* The side that is turning away, laid over the card for the first half */
+.nm-game-host .nm-card-old-side {
+  position: absolute;
+  inset: -1px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid #b8c8d1;
+  border-radius: inherit;
+  background: #ffffff;
+  color: #17212b;
+  animation: nm-card-old-side 480ms linear forwards;
+}
+
+.nm-game-host .gm01-card.nm-card-flip {
+  z-index: 1;
+  animation: nm-card-turn 480ms ease-in-out;
+}
+
+@keyframes nm-card-turn {
+  0% {
+    transform: perspective(40rem) rotateY(0deg) scale(1);
+  }
+  50% {
+    transform: perspective(40rem) rotateY(90deg) scale(1.06);
+    box-shadow: 0 1.25rem 2.5rem rgba(20, 35, 45, 0.25);
+  }
+  50.01% {
+    transform: perspective(40rem) rotateY(-90deg) scale(1.06);
+  }
+  100% {
+    transform: perspective(40rem) rotateY(0deg) scale(1);
+  }
+}
+
+@keyframes nm-card-old-side {
+  0%,
+  50% {
+    opacity: 1;
+  }
+  50.01%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nm-game-host .gm01-card:hover:not(:disabled),
+  .nm-game-host .gm01-card:active:not(:disabled) {
+    transform: none;
+  }
+
+  .nm-game-host .gm01-card.nm-card-flip,
+  .nm-game-host .nm-card-old-side {
+    animation: none;
+  }
+
+  .nm-game-host .nm-card-old-side {
+    display: none;
+  }
+}
+
+/* «Пазлы»: the board in the middle of the field, the sample (larger) and
+   the move counter to its right */
+.nm-game-host .gm18 .gm18-info {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+  margin: 0 0 0.75rem;
+  font-size: var(--nm-font-body);
+  color: var(--nm-text);
+}
+
+.nm-game-host .gm18 .gm18-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  column-gap: 2rem;
+  width: 100%;
+  margin: 0;
+}
+
+.nm-game-host .gm18 .gm18-board {
+  grid-column: 2;
+}
+
+.nm-game-host .gm18 .gm18-reference {
+  grid-column: 3;
+  justify-self: start;
+  align-self: start;
+  margin-left: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: min(16rem, 100%);
+  color: var(--nm-text-dim);
+  font-size: var(--nm-font-caption);
+  letter-spacing: 0.06em;
+  text-align: left;
+}
+
+.nm-game-host .gm18 .gm18-reference [data-moves] {
+  margin-bottom: 0.75rem;
+  color: var(--nm-text);
+  font-size: var(--nm-font-body);
+  letter-spacing: normal;
+}
+
+.nm-game-host .gm18 .gm18-reference img {
+  margin-top: 0;
+}
+
+/* The line under the board («✓ Пазл собран верно» and hints) */
+.nm-game-host .gm18 [data-status] {
+  margin-top: 1.25rem;
+}
+
+/* «Пазлы»: the solved picture, shown whole and marked as correct (the mark
+   is the caption with a tick, the green frame only supports it) */
+.nm-game-host .gm18-board.nm-puzzle-solved {
+  border-color: #15803d;
+  background-size: 100% 100%;
+  box-shadow: 0 0 0 0.375rem rgba(21, 128, 61, 0.25);
+}
+
+.nm-game-host .gm18-board.nm-puzzle-solved .gm18-piece {
+  visibility: hidden;
+}
+
+.nm-game-host .nm-puzzle-solved-note {
+  color: #15803d;
+  font-weight: 700;
+}
+
+@media (max-height: 940px) {
+  .nm-game-host {
+    gap: 0.5rem;
+    height: clamp(18rem, calc(100vh - var(--nm-header-h) - 11rem), 64rem);
+  }
+
+  .nm-game-host .game-header-new {
+    top: 1rem;
+    height: 4.75rem;
+  }
+
+  .nm-game-host .game-header-new h2 {
+    margin: 0;
+  }
+
+  .nm-game-host .game-header-new p {
+    line-height: 1.3;
+  }
+
+  .nm-game-host .game-header-new h2 {
+    font-size: 1.25rem;
+  }
+
+  .nm-game-host .game-stage-new {
+    padding: 0.75rem !important;
+  }
+}

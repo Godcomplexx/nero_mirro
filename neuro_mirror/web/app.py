@@ -33,6 +33,7 @@ from neuro_mirror.core.settings import Settings
 from neuro_mirror.core.user_profiles import (
     CONSENT_TEXT,
     CONSENT_TEXTS,
+    KNOWN_AVATARS,
     PRESET_AVATARS,
     UserProfileStore,
 )
@@ -250,8 +251,6 @@ def create_app() -> FastAPI:
             {
                 "assistant_enabled": ctx.settings.enable_ai_assistant,
                 "tts_voice": ctx.settings.tts_voice,
-                "live2d_model_url": ctx.settings.web_live2d_model_url,
-                "live2d_cubism_core_url": ctx.settings.web_live2d_cubism_core_url,
                 "weather_source_label": ctx.runtime.weather_source_label,
                 "assistant_backend_label": ctx.runtime.assistant_backend_label,
                 "app_version": APP_VERSION,
@@ -279,6 +278,9 @@ def create_app() -> FastAPI:
             avatar_url = f"/api/users/{user['id']}/avatar"
         else:
             preset = avatar.get("value") or PRESET_AVATARS[0]
+            # Profiles created with a removed preset get the first current one
+            if preset not in KNOWN_AVATARS:
+                preset = PRESET_AVATARS[0]
             avatar_url = f"/static/assets/avatars/{preset}.svg"
         return {
             "id": user.get("id", ""),
