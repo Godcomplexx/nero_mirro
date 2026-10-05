@@ -77,6 +77,25 @@ export function watchCardFlips(container) {
   }).observe(container, { childList: true, subtree: true });
   sync();
   watchCardPress(container);
+  holdPressesWhileAnswering(container);
+}
+
+// The game locks its field only once the core has answered the second card
+// of a pair, and that answer is held back while the card turns. A card
+// pressed meanwhile would reach the core but be drawn closed again, and
+// pressing it once more is refused («Недопустимая карточка»). So presses
+// wait for the answer.
+function holdPressesWhileAnswering(container) {
+  container.addEventListener(
+    "click",
+    (event) => {
+      if (!container.classList.contains("nm-game-answering")) return;
+      if (!(event.target.closest && event.target.closest(".gm01-card"))) return;
+      event.preventDefault();
+      event.stopPropagation();
+    },
+    true,
+  );
 }
 
 // Hovering a card presses it in under the pointer: the card tilts so that

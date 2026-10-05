@@ -100,17 +100,25 @@ export async function mountGame(
       return previous;
     },
     async answer(payload) {
-      const reply = await request(`${base}/answer`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      if (adjust.beforeReply) {
-        try {
-          await adjust.beforeReply(reply, previous, container, payload);
-        } catch (_) {
-          // an adjustment must never break the game itself
+      // While an answer is on its way (and an adjustment holds it back), the
+      // field is marked, so adjustments can hold the player's next presses
+      container.classList.add("nm-game-answering");
+      let reply;
+      try {
+        reply = await request(`${base}/answer`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        if (adjust.beforeReply) {
+          try {
+            await adjust.beforeReply(reply, previous, container, payload);
+          } catch (_) {
+            // an adjustment must never break the game itself
+          }
         }
+      } finally {
+        container.classList.remove("nm-game-answering");
       }
       previous = reply;
       if (reply && reply.finished && !finished) {
