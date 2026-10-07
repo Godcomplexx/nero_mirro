@@ -345,6 +345,9 @@ function showFinish(stage, isCurrent, actions) {
 function playOn(stage, game, isCurrent, { onFinished, onClose }) {
   mountGame(game.game_code, stage, {
     fallbackTitle: game.title,
+    // Уровень приходит в составе занятия: его назначило ядро по прошлым
+    // прохождениям, здесь он только передаётся дальше.
+    difficultyLevel: game.difficulty_level ?? null,
     introStage: model.stage,
     onIntroStage(step) {
       if (isCurrent()) setStage(step);

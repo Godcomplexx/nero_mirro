@@ -50,15 +50,21 @@ class Gm12WordPicturePlugin(BrowserGamePlugin):
                                "choices": session.choices, "selected_word": selected, "correct": correct,
                                "reaction_ms": elapsed_ms, "client_timestamp_ms": payload.get("timestamp_ms")})
         session.index += 1
-        if session.index == len(session.order) or time.time() * 1000 - session.started_at_ms >= SESSION_DURATION_MS:
-            result = self._finish(session)
+        all_done = session.index == len(session.order)
+        time_up = time.time() * 1000 - session.started_at_ms >= SESSION_DURATION_MS
+        if all_done or time_up:
+            # Причина завершения нужна интерфейсу: досрочно выполненное задание
+            # и истёкшее время — разные события, и сообщать о них одинаково
+            # нельзя.
+            result = self._finish(session, reason="all_items" if all_done else "time_up")
             result["correct"] = correct
             return result
         result = self._payload(session)
         result["previous_correct"] = correct
         return result
 
-    def _finish(self, session):
+    def _finish(self, session, *, reason="time_up"):
         self._sessions.pop(session.session_id, None)
         metrics = score_gm12_trials(session.trials, expected_trials=len(session.trials))
-        return {"ok": True, "finished": True, "metrics": metrics, "events": session.trials}
+        return {"ok": True, "finished": True, "completion_reason": reason,
+                "metrics": metrics, "events": session.trials}

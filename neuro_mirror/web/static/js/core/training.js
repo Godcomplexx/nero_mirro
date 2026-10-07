@@ -21,7 +21,8 @@ async function detailOf(response) {
 
 // The ready-made session the core builds from the last cognitive test:
 // GET /api/training/session → { games: [{ position, domain, domain_code,
-// game_code, title, stimulus_set, reasons }], plan: { domain: count },
+// game_code, title, stimulus_set, difficulty_level, reasons }],
+// plan: { domain: count },
 // profile, session_size, skipped: [{ domain, reason }], source_session_id }.
 // Nothing is computed here — the list is played in the order given.
 //

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import mimetypes
 import os
 import tempfile
 from contextlib import asynccontextmanager
@@ -171,6 +172,25 @@ async def _wait_for_camera_release(
 
 
 # ---- Application factory ----
+
+def ensure_static_mime_types() -> None:
+    """Закрепить типы файлов интерфейса, не полагаясь на систему.
+
+    Windows берёт тип из реестра, и там расширение .js нередко помечено как
+    text/plain. Классический сценарий браузер при этом всё равно выполняет, а
+    модульный отвергает: для модулей проверка типа строгая. Интерфейс,
+    собранный из модулей, тогда не запускается вовсе — страница остаётся
+    пустой, и в журнале сервера никаких ошибок нет.
+    """
+    mimetypes.add_type("text/javascript", ".js")
+    mimetypes.add_type("text/javascript", ".mjs")
+    mimetypes.add_type("text/css", ".css")
+    mimetypes.add_type("application/json", ".json")
+    mimetypes.add_type("image/svg+xml", ".svg")
+
+
+ensure_static_mime_types()
+
 
 def create_app() -> FastAPI:
     static_dir = Path(__file__).resolve().parent / "static"

@@ -51,6 +51,9 @@ export async function mountGame(
     // Step to start at (intro | practice | done | game) and a report of steps
     introStage = "intro",
     onIntroStage = () => {},
+    // Сложность задания. Её назначает ядро по прошлым занятиям и отдаёт в
+    // составе занятия; интерфейс только передаёт её обратно при запуске.
+    difficultyLevel = null,
   } = {},
 ) {
   const catalog = await loadCatalog();
@@ -96,7 +99,12 @@ export async function mountGame(
   };
   const gameApi = {
     async start() {
-      previous = await request(`${base}/start`, { method: "POST" });
+      const options = { method: "POST" };
+      if (difficultyLevel != null) {
+        options.headers = { "Content-Type": "application/json" };
+        options.body = JSON.stringify({ difficulty_level: difficultyLevel });
+      }
+      previous = await request(`${base}/start`, options);
       return previous;
     },
     async answer(payload) {

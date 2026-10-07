@@ -155,3 +155,22 @@ def test_runtime_actually_starts(tmp_path, monkeypatch):
     )
     assert handle.session_store is not None
     assert handle.dataset_store is not None
+
+
+def test_interface_modules_are_served_as_javascript():
+    """Тип файлов интерфейса не должен зависеть от настроек машины.
+
+    Windows берёт тип из реестра, и там .js нередко помечен как text/plain.
+    Классический сценарий браузер при этом выполняет, а модульный отвергает:
+    для модулей проверка типа строгая. Интерфейс тогда не запускается вовсе —
+    страница пустая, а в журнале сервера ни одной ошибки.
+    """
+    import mimetypes
+
+    from neuro_mirror.web.app import ensure_static_mime_types
+
+    ensure_static_mime_types()
+    assert mimetypes.guess_type("shell.js")[0] == "text/javascript"
+    assert mimetypes.guess_type("shell.mjs")[0] == "text/javascript"
+    assert mimetypes.guess_type("tokens.css")[0] == "text/css"
+    assert mimetypes.guess_type("logo.svg")[0] == "image/svg+xml"
