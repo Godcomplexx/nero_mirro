@@ -13,7 +13,7 @@ export function mount({ container, definition, api, close }) {
   };
   const trainingChoices = trainingSets[String(definition.selected_stimulus_set || "").toLowerCase()] || TRAINING_CHOICES;
   container.innerHTML = `
-    <header class="game-header-new"><div><p class="game-kicker-new mono">АБСТРАКЦИЯ</p><h2>${definition.title}</h2><p data-instruction>Найдите предмет, который не относится к общей группе.</p></div><div class="game-progress-new" data-progress>1. Инструкция</div></header>
+    <header class="game-header-new"><div><p class="game-kicker-new mono">АБСТРАКЦИЯ</p><h2>${definition.title}</h2><p data-instruction>Найдите предмет, который не относится к общей группе.</p></div><div class="game-progress-new" data-progress>Инструкция</div></header>
     <main class="game-stage-new gm21 is-instruction-stage">
       <section class="gm21-tutorial" data-tutorial>
         <h3>Как выполнять задание</h3>

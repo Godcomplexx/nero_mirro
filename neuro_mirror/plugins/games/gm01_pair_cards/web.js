@@ -1,6 +1,6 @@
 export function mount({ container, definition, api, close }) {
   container.innerHTML = `
-    <header class="game-header-new"><div><p class="game-kicker-new mono">ПАМЯТЬ</p><h2>${definition.title}</h2><p data-instruction>Открывайте по две карточки и находите одинаковые пары.</p></div><div class="game-progress-new" data-progress>1. Инструкция</div></header>
+    <header class="game-header-new"><div><p class="game-kicker-new mono">ПАМЯТЬ</p><h2>${definition.title}</h2><p data-instruction>Открывайте по две карточки и находите одинаковые пары.</p></div><div class="game-progress-new" data-progress>Инструкция</div></header>
     <main class="game-stage-new gm01-stage is-instruction-stage" data-stage>
       <section class="gm01-instruction" data-intro><h3>Как выполнять задание</h3><ol><li>Откройте две закрытые карточки.</li><li>Запоминайте изображения и их расположение.</li><li>Найдите две карточки с одинаковым изображением.</li></ol><p class="gm01-example-title">Посмотрите пример</p><div class="gm01-media-placeholder" role="img" aria-label="Здесь будет видео-пример"><span aria-hidden="true">▶</span><strong>Здесь будет GIF с примером</strong><small>Визуальная инструкция будет добавлена позже</small></div><button type="button" class="icon-btn primary-btn" data-start-training><span>Перейти к тренировке</span></button></section>
       <section class="gm01-training" data-training hidden><h3>Тренировочный пример</h3><p>Откройте карточки и найдите одну одинаковую пару.</p><div class="gm01-board gm01-training-board" data-training-board></div><p class="gm01-feedback" data-training-feedback aria-live="polite"></p></section>
@@ -21,7 +21,7 @@ export function mount({ container, definition, api, close }) {
   const showOnly=target=>[intro,training,trainingComplete,game].forEach(section=>{section.hidden=section!==target;});
 
   function beginTraining(){
-    stage.classList.remove("is-instruction-stage");showOnly(training);progress.textContent="2. Тренировка";instruction.textContent="Найдите две одинаковые карточки.";
+    stage.classList.remove("is-instruction-stage");showOnly(training);progress.textContent="Тренировка";instruction.textContent="Найдите две одинаковые карточки.";
     trainingFeedback.textContent="";trainingFeedback.className="gm01-feedback";trainingPicks=[];locked=false;
     const cards=["Собака","Яблоко","Собака","Яблоко"];
     trainingBoard.replaceChildren(...cards.map((symbol,index)=>{const button=document.createElement("button");button.type="button";button.className="gm01-card";button.textContent="?";button.onclick=()=>chooseTraining(index,symbol,button);return button;}));
@@ -33,7 +33,29 @@ export function mount({ container, definition, api, close }) {
     trainingFeedback.textContent="Карточки разные. Запомните их и попробуйте ещё раз.";trainingFeedback.classList.add("is-wrong");later(()=>{if(!active)return;first.button.textContent="?";second.button.textContent="?";first.button.disabled=false;second.button.disabled=false;trainingPicks=[];locked=false;trainingFeedback.textContent="";trainingFeedback.className="gm01-feedback";},800);
   }
   const render=payload=>{if(!active)return;state=payload;locked=false;shownAt=performance.now();progress.textContent=`Уровень ${payload.board} из ${payload.board_count} · ${payload.pair_count} пар`;board.style.setProperty("--gm01-columns",String(payload.grid_columns||5));board.replaceChildren(...payload.cards.map((symbol,index)=>{const button=document.createElement("button");button.type="button";button.className="gm01-card";button.innerHTML=payload.matched.includes(index)?visual(symbol):"?";button.disabled=payload.matched.includes(index);button.onclick=()=>choose(index,button,symbol);return button;}));};
-  const choose=async(index,button,symbol)=>{if(locked||button.disabled)return;button.innerHTML=visual(symbol);button.disabled=true;const payload=await api.answer({session_id:state.session_id,selected_index:index,reaction_ms:performance.now()-shownAt});if(!active)return;if(payload.first_pick){state=payload;return;}locked=true;if(payload.finished){board.replaceChildren();progress.textContent="Завершено";result.textContent=`Ошибок: ${payload.metrics.u07_error_count}`;return;}later(()=>render(payload),payload.correct?250:800);};
+  // Показанная пара, ожидающая закрытия. Пока она висит, прежний код
+  // отбрасывал нажатия: человеку казалось, что игра подлагивает.
+  let pendingReveal=null;
+  const settlePending=()=>{if(!pendingReveal)return;clearTimeout(pendingReveal.timer);timers.delete(pendingReveal.timer);const payload=pendingReveal.payload;pendingReveal=null;render(payload);};
+  const choose=async(index,button,symbol)=>{
+    // Нажатие на следующую карточку закрывает показанную пару сразу и
+    // засчитывается, а не теряется в ожидании паузы.
+    if(pendingReveal){settlePending();const fresh=board.children[index];if(fresh&&!fresh.disabled)fresh.click();return;}
+    if(locked||button.disabled)return;
+    button.innerHTML=visual(symbol);button.disabled=true;
+    // Замок ставится до обращения к ядру: иначе за время ответа принимается
+    // ещё одно нажатие, и открытыми оказываются три карточки.
+    locked=true;
+    let payload;
+    try{payload=await api.answer({session_id:state.session_id,selected_index:index,reaction_ms:performance.now()-shownAt});}
+    catch(error){if(active){locked=false;button.disabled=false;button.innerHTML="?";result.textContent=`Не удалось проверить ход: ${error.message}`;}return;}
+    if(!active)return;
+    if(payload.first_pick){state=payload;locked=false;return;}
+    if(payload.finished){board.replaceChildren();progress.textContent="Завершено";result.textContent=`Ошибок: ${payload.metrics.u07_error_count}`;return;}
+    const timer=setTimeout(()=>{timers.delete(timer);pendingReveal=null;render(payload);},payload.correct?250:800);
+    timers.add(timer);
+    pendingReveal={timer,payload};
+  };
   async function beginGame(){locked=true;showOnly(game);progress.textContent="Подготовка…";instruction.textContent="Открывайте по две карточки и находите одинаковые пары.";result.textContent="";try{render(await api.start());}catch(error){result.textContent=`Не удалось начать игру: ${error.message}`;}}
 
   container.querySelector("[data-start-training]").onclick=beginTraining;container.querySelector("[data-repeat-training]").onclick=beginTraining;container.querySelector("[data-confirm-start]").onclick=beginGame;

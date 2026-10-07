@@ -14,7 +14,7 @@ const TRAINING_TRIALS = [
 
 export function mount({ container, definition, api, close }) {
   container.innerHTML = `
-    <header class="game-header-new"><div><p class="game-kicker-new mono">АБСТРАКЦИЯ</p><h2>${definition.title}</h2><p data-instruction>Определите скрытое правило и выберите подходящую карточку.</p></div><div class="game-progress-new" data-progress>1. Инструкция</div></header>
+    <header class="game-header-new"><div><p class="game-kicker-new mono">АБСТРАКЦИЯ</p><h2>${definition.title}</h2><p data-instruction>Определите скрытое правило и выберите подходящую карточку.</p></div><div class="game-progress-new" data-progress>Инструкция</div></header>
     <main class="game-stage-new gm20-module is-instruction-stage">
       <section class="gm20-tutorial" data-tutorial>
         <h3>Как выполнять задание</h3>
@@ -114,7 +114,7 @@ export function mount({ container, definition, api, close }) {
     trainingFeedback.className = "gm20-training-feedback";
     appendReferences(trainingReferences, TRAINING_REFERENCES, submitTraining);
     trainingStimulus.replaceChildren(createCard(trial.stimulus));
-    progress.textContent = `2. Тренировка · ${trainingIndex + 1} из ${TRAINING_TRIALS.length}`;
+    progress.textContent = `Тренировка · ${trainingIndex + 1} из ${TRAINING_TRIALS.length}`;
   }
 
   async function submitTraining(selected, card) {

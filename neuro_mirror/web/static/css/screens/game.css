@@ -7,7 +7,10 @@
 
 .nm-game-host {
   display: grid;
-  grid-template-rows: minmax(0, 1fr) auto;
+  /* Под строку с кнопками место отводится всегда, даже когда кнопок нет:
+     иначе появление «Готово» посреди задания отнимает высоту у поля, и оно
+     прыгает и меняет размер прямо во время выполнения. */
+  grid-template-rows: minmax(0, 1fr) minmax(3.25rem, auto);
   gap: 0.75rem;
   /* The game gets what is left of the window, so the screen does not scroll */
   height: clamp(20rem, calc(100vh - var(--nm-header-h) - 14rem), 64rem);
@@ -118,7 +121,9 @@
 .nm-game-host .game-actions-new {
   display: flex;
   justify-content: center;
+  align-items: flex-start;
   gap: 0.75rem;
+  min-height: 3.25rem;
 }
 
 /* Moving between tasks is done by the screen's own buttons below the game */
