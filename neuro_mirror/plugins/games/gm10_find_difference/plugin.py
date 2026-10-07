@@ -53,7 +53,7 @@ class Gm10FindDifferencePlugin(BrowserGamePlugin):
             session.scene_index+=1;session.found=set();session.shown_ms=time.time()*1000
             if session.scene_index==len(session.scenes):
                 events=list(session.round_events);self._sessions.pop(session.session_id,None)
-                return {"ok":True,"finished":True,"correct":True,"events":events,"metrics":score_gm10(events,sum(len(s["differences"]) for s in session.scenes))}
+                return {"ok":True,"finished":True,"correct":True,"events":events,"metrics":score_gm10(events,sum(len(s["differences"]) for s in session.scenes),finished=True)}
         result=self._payload(session);result.update({"correct":correct,"hit":hit,"scene_complete":scene_complete});return result
     def _payload(self,session):
         scene=session.scenes[session.scene_index]

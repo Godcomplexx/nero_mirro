@@ -100,7 +100,7 @@ class Gm11SerialCountPlugin(BrowserGamePlugin):
                         "finished": True,
                         "correct": True,
                         "events": events,
-                        "metrics": score_gm11(events),
+                        "metrics": score_gm11(events, expected_rules=len(session.rules)),
                     }
                 session.current = session.rules[session.rule_index]["start"]
         result = self._payload(session)

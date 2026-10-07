@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 
-def score_gm06(events: list[dict]) -> dict[str, float | int]:
+def score_gm06(events: list[dict], *, expected_rounds: int) -> dict[str, float | int]:
     expected = sum(len(item.get("expected_sequence") or ()) for item in events)
     correct_positions = sum(int(item.get("correct_positions") or 0) for item in events)
     order_errors = expected - correct_positions
@@ -14,4 +14,8 @@ def score_gm06(events: list[dict]) -> dict[str, float | int]:
         "m02_position_accuracy": correct_positions / expected if expected else 0.0,
         "m03_order_errors": order_errors,
         "m09_mean_rhythm_error_ms": sum(rhythm_errors) / len(rhythm_errors) if rhythm_errors else 0.0,
+        "u06_complete": len(events) >= max(1, expected_rounds),
+        # В каждой пробе должна быть загаданная последовательность: без неё
+        # сравнивать воспроизведение не с чем.
+        "u06_technically_valid": bool(events) and expected > 0,
     }

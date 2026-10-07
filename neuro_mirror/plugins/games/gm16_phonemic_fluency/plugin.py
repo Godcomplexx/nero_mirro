@@ -67,5 +67,5 @@ class Gm16PhonemicFluencyPlugin(BrowserGamePlugin):
             "ok": True,
             "finished": True,
             "events": events,
-            "metrics": score_gm16(events),
+            "metrics": score_gm16(events, expected_rounds=1),
         }

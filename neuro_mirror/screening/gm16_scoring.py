@@ -39,7 +39,7 @@ def analyse_phonemic_response(transcript: str, letter: str) -> dict[str, Any]:
     }
 
 
-def score_gm16(events: list[dict[str, Any]]) -> dict[str, float | int]:
+def score_gm16(events: list[dict[str, Any]], *, expected_rounds: int) -> dict[str, float | int]:
     valid_count = sum(len(event.get("valid_words") or ()) for event in events)
     repetition_count = sum(len(event.get("repetitions") or ()) for event in events)
     invalid_count = sum(len(event.get("invalid_words") or ()) for event in events)
@@ -53,4 +53,6 @@ def score_gm16(events: list[dict[str, Any]]) -> dict[str, float | int]:
         "l09_valid_words_per_minute": (
             valid_count * 60_000 / duration_ms if duration_ms else 0.0
         ),
+        "u06_complete": len(events) >= max(1, expected_rounds),
+        "u06_technically_valid": bool(events) and token_count > 0,
     }

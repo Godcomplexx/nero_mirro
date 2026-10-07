@@ -103,7 +103,7 @@ class Gm03ChangedObjectPlugin(BrowserGamePlugin):
             if session.room_index >= len(session.rooms):
                 events = list(session.round_events)
                 self._sessions.pop(session.session_id, None)
-                return {"ok": True, "finished": True, "correct": event["correct"], "events": events, "metrics": score_gm03(events)}
+                return {"ok": True, "finished": True, "correct": event["correct"], "events": events, "metrics": score_gm03(events, expected_rooms=len(session.rooms))}
         result = self._payload(session)
         result["correct"] = event["correct"]
         return result

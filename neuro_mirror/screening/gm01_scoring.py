@@ -11,4 +11,8 @@ def score_gm01(attempts: list[dict], *, pair_count: int, completed: bool) -> dic
         "u08_completion_rate": 1.0 if completed else 0.0,
         "u07_error_count": errors,
         "pair_attempts": moves,
+        "u06_complete": bool(completed),
+        # Ходов не меньше, чем пар: иначе доска не могла быть собрана, и
+        # запись хода игры неполна.
+        "u06_technically_valid": moves >= minimum if completed else bool(attempts),
     }

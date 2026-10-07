@@ -81,7 +81,7 @@ class Gm15PictureNamingPlugin(BrowserGamePlugin):
                 "ok": True,
                 "finished": True,
                 "events": events,
-                "metrics": score_gm15(events),
+                "metrics": score_gm15(events, expected_items=len(session.items)),
             }
         session.shown_at_ms = time.time() * 1000
         return self._payload(session)

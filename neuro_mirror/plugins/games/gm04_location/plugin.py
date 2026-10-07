@@ -84,7 +84,7 @@ class Gm04LocationPlugin(BrowserGamePlugin):
         if session.round_index >= len(session.patterns):
             events = list(session.round_events)
             self._sessions.pop(session.session_id, None)
-            return {"ok": True, "finished": True, "correct": event["correct"], "events": events, "metrics": score_gm04(events)}
+            return {"ok": True, "finished": True, "correct": event["correct"], "events": events, "metrics": score_gm04(events, expected_rounds=ROUNDS)}
         result = self._payload(session)
         result.update({"correct": event["correct"], "previous_targets": targets, "previous_selected": selected})
         return result

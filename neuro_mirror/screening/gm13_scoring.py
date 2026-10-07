@@ -69,7 +69,7 @@ def analyse_category_response(transcript: str, vocabulary: set[str]) -> dict[str
     }
 
 
-def score_gm13(events: list[dict[str, Any]]) -> dict[str, float | int]:
+def score_gm13(events: list[dict[str, Any]], *, expected_categories: int) -> dict[str, float | int]:
     valid_count = sum(len(event.get("valid_words") or ()) for event in events)
     repetition_count = sum(len(event.get("repetitions") or ()) for event in events)
     category_error_count = sum(len(event.get("invalid_words") or ()) for event in events)
@@ -86,5 +86,12 @@ def score_gm13(events: list[dict[str, Any]]) -> dict[str, float | int]:
         "l08_estimated_median_word_interval_ms": statistics.median(intervals) if intervals else 0.0,
         "l09_valid_words_per_minute": (
             valid_count * 60_000 / total_duration_ms if total_duration_ms else 0.0
+        ),
+        "u06_complete": len(events) >= max(1, expected_categories),
+        # Речевое задание пригодно, когда хоть что-то распознано: пустая
+        # запись говорит о микрофоне, а не о словарном запасе.
+        "u06_technically_valid": bool(events) and any(
+            event.get("tokens") or event.get("valid_words") or event.get("invalid_words")
+            for event in events
         ),
     }

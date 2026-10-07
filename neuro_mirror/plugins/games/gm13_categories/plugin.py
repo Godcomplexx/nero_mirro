@@ -73,7 +73,7 @@ class Gm13CategoriesPlugin(BrowserGamePlugin):
                 "ok": True,
                 "finished": True,
                 "events": events,
-                "metrics": score_gm13(events),
+                "metrics": score_gm13(events, expected_categories=len(session.categories)),
             }
         session.shown_at_ms = time.time() * 1000
         return self._payload(session)

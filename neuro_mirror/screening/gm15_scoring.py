@@ -5,7 +5,7 @@ import statistics
 from typing import Any
 
 
-def score_gm15(events: list[dict[str, Any]]) -> dict[str, float | int]:
+def score_gm15(events: list[dict[str, Any]], *, expected_items: int) -> dict[str, float | int]:
     valid_events = [event for event in events if event.get("valid")]
     correct_count = sum(bool(event.get("correct")) for event in events)
     reaction_times = [float(event.get("reaction_ms") or 0) for event in valid_events]
@@ -15,4 +15,8 @@ def score_gm15(events: list[dict[str, Any]]) -> dict[str, float | int]:
         "u07_error_count": sum(not bool(event.get("correct")) for event in events),
         "g03_median_response_ms": statistics.median(reaction_times) if reaction_times else 0.0,
         "g07_unrecognized_count": len(events) - len(valid_events),
+        "u06_complete": len(events) >= max(1, expected_items),
+        # Если не распознан ни один ответ, задание не о назывании, а об отказе
+        # микрофона.
+        "u06_technically_valid": bool(valid_events),
     }
