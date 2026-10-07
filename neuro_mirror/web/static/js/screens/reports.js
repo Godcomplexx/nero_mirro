@@ -169,18 +169,78 @@ function buildSessionsTab() {
   return panel;
 }
 
-// ---- «Динамика» (stub until the server provides per-domain history) --------
+// ---- «Динамика» -------------------------------------------------------------
+//
+// Профиль по доменам лежит в каждом сохранённом отчёте о скрининге
+// (domains.moca_domains), поэтому динамика строится из той же истории, что и
+// вкладка «Последняя сессия» — отдельного запроса к ядру не нужно.
+
+const DOMAIN_ORDER = ["Память", "Внимание", "Речь", "Абстракция"];
+
+// Прохождения с профилем по доменам, от старых к новым.
+function domainHistory(items) {
+  return (items || [])
+    .filter((item) => Array.isArray(item?.domains?.moca_domains) && item.domains.moca_domains.length)
+    .map((item) => ({
+      at: item.stored_at || "",
+      byDomain: new Map(item.domains.moca_domains.map((row) => [row.domain, row])),
+    }))
+    .sort((a, b) => String(a.at).localeCompare(String(b.at)));
+}
+
+function shortDate(value) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime())
+    ? "—"
+    : date.toLocaleDateString("ru-RU", { day: "numeric", month: "short" });
+}
+
+// Столбики по доле набранного: домены имеют разные максимумы, и сравнивать
+// их в баллах нельзя.
+function domainRow(domain, passes) {
+  const row = el("div", "nm-dyn-row");
+  row.append(el("div", "nm-dyn-name", domain));
+  const bars = el("div", "nm-dyn-bars");
+  for (const pass of passes) {
+    const entry = pass.byDomain.get(domain);
+    const bar = el("div", "nm-dyn-bar");
+    if (entry && entry.max_score) {
+      const share = Math.max(0, Math.min(1, Number(entry.score) / Number(entry.max_score)));
+      bar.style.setProperty("--nm-dyn-share", String(Math.round(share * 100)));
+      bar.title = `${shortDate(pass.at)}: ${entry.score} из ${entry.max_score}`;
+      bar.dataset.filled = "true";
+    } else {
+      bar.title = `${shortDate(pass.at)}: нет данных`;
+    }
+    bars.appendChild(bar);
+  }
+  row.append(bars);
+  return row;
+}
+
+async function loadDynamics(host) {
+  host.innerHTML = "";
+  host.appendChild(el("p", "nm-panel-text", "Загружаю историю…"));
+  try {
+    const data = await api("/api/results");
+    host.innerHTML = "";
+    renderDynamics(host, data.items || []);
+  } catch (error) {
+    host.innerHTML = "";
+    host.appendChild(
+      el("p", "nm-panel-text", `Не удалось загрузить историю: ${error.message || error}`),
+    );
+  }
+}
 
 function buildDynamicsTab() {
-  const panel = el("section", "nm-panel nm-stub");
-  panel.append(
-    el("h2", "nm-panel-title", "Динамика за период"),
-    el(
-      "p",
-      "nm-panel-text",
-      "Графики по доменам «Память», «Внимание», «Абстракция» и «Речь» за выбранный период появятся, когда сервер начнёт сохранять и отдавать историю результатов по доменам.",
-    ),
-  );
+  const panel = el("section", "nm-panel");
+  panel.append(el("h2", "nm-panel-title", "Динамика за период"));
+  const host = el("div", "nm-dyn-host");
+  host.setAttribute("aria-live", "polite");
+  panel.append(host);
+  loadDynamics(host);
+
   const row = el("div", "nm-btn-row");
   for (const label of ["Сформировать детальный отчёт", "Скачать PDF"]) {
     const btn = el("button", "nm-btn nm-btn-secondary", label);
@@ -190,6 +250,36 @@ function buildDynamicsTab() {
   }
   panel.append(row, el("p", "nm-status-line", "Детальный отчёт и выгрузка в PDF — в разработке."));
   return panel;
+}
+
+function renderDynamics(panel, items) {
+  const passes = domainHistory(items);
+  if (!passes.length) {
+    panel.append(
+      el("p", "nm-panel-text",
+        "Динамика появится после первого когнитивного теста: она строится по его результатам."),
+    );
+    return;
+  }
+  if (passes.length === 1) {
+    panel.append(
+      el("p", "nm-panel-text",
+        "Пройден один тест. Динамика покажется, когда появится второй — сравнивать пока не с чем."),
+    );
+  }
+
+  const chart = el("div", "nm-dyn-chart");
+  for (const domain of DOMAIN_ORDER) chart.append(domainRow(domain, passes));
+  panel.append(chart);
+
+  const first = passes[0];
+  const last = passes[passes.length - 1];
+  panel.append(
+    el("p", "nm-status-line",
+      `Прохождений: ${passes.length}. С ${shortDate(first.at)} по ${shortDate(last.at)}. ` +
+      "Высота столбика — доля набранных баллов домена."),
+  );
+
 }
 
 // ---- Screen ------------------------------------------------------------------

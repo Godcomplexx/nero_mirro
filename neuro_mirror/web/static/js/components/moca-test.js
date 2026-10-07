@@ -51,18 +51,20 @@ export function createMocaView() {
   repeat.type = "button";
   repeat.className = "nm-btn nm-btn-secondary";
   repeat.innerHTML = `${SPEAKER_ICON}<span>Повторить инструкцию</span>`;
-  repeat.disabled = true;
-  const stub = document.createElement("p");
-  stub.className = "nm-moca-stub";
-  stub.textContent =
-    "Повтор инструкции и запуск задания по кнопке появятся после доработки сервера. Сейчас задания идут одно за другим автоматически.";
-  actions.append(repeat);
+  repeat.onclick = () => mocaController.repeatPrompt();
+  const begin = document.createElement("button");
+  begin.type = "button";
+  begin.className = "nm-btn nm-btn-primary";
+  begin.textContent = "Приступить к выполнению";
+  begin.hidden = true;
+  begin.onclick = () => mocaController.beginTask();
+  actions.append(repeat, begin);
 
   const tip = document.createElement("p");
   tip.className = "nm-help-bar";
   tip.textContent = "Отвечайте вслух, когда увидите «Говорите». Говорите чётко и спокойно.";
 
-  card.append(kicker, task, voice, actions, stub);
+  card.append(kicker, task, voice, actions);
 
   const footer = document.createElement("div");
   footer.className = "nm-btn-row nm-moca-footer";
@@ -103,6 +105,12 @@ export function createMocaView() {
     } else {
       task.textContent = state.hint || "Слушайте инструкцию";
     }
+
+    // «Приступить» показывается, пока ядро ждёт готовности; повтор инструкции
+    // доступен всё задание, кроме времени записи ответа — иначе озвучка
+    // наложится на речь человека.
+    begin.hidden = !state.awaitingStart || finished;
+    repeat.disabled = state.recording || state.speaking || finished;
 
     voice.dataset.mode = state.recording ? "recording" : state.speaking ? "speaking" : "idle";
     if (state.recording) {

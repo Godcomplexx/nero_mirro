@@ -54,6 +54,9 @@ class Settings:
     voice_silence_duration: float = 1.8
     voice_min_speech_duration: float = 0.4
     save_moca_audio: bool = True
+    # Сколько ждать нажатия «Приступить» перед заданием MoCA. Ноль
+    # означает «начинать сразу»: так проверки не простаивают.
+    moca_start_grace_seconds: float = 25.0
     tts_voice: str = "ru-RU-SvetlanaNeural"
     tts_rate: str = "+15%"
 
@@ -127,6 +130,7 @@ class Settings:
         raw_voice_silence_threshold = os.getenv("NEURO_MIRROR_VOICE_SILENCE_THRESHOLD", "0.012").strip()
         raw_voice_silence_duration = os.getenv("NEURO_MIRROR_VOICE_SILENCE_DURATION", "1.8").strip()
         raw_voice_min_speech_duration = os.getenv("NEURO_MIRROR_VOICE_MIN_SPEECH_DURATION", "0.4").strip()
+        raw_moca_grace = os.getenv("NEURO_MIRROR_MOCA_START_GRACE", "25").strip()
         raw_save_moca_audio = os.getenv(
             "NEURO_MIRROR_SAVE_MOCA_AUDIO",
             "1",
@@ -191,6 +195,7 @@ class Settings:
             voice_silence_duration=float(raw_voice_silence_duration),
             voice_min_speech_duration=float(raw_voice_min_speech_duration),
             save_moca_audio=raw_save_moca_audio not in {"0", "false", "no"},
+            moca_start_grace_seconds=max(0.0, float(raw_moca_grace or 25)),
             tts_voice=raw_tts_voice,
             tts_rate=raw_tts_rate,
         )

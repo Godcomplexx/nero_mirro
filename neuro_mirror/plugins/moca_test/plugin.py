@@ -52,6 +52,27 @@ class RecordingUnavailableError(RuntimeError):
     """
 
 
+# Сколько ждать нажатия «Приступить», прежде чем начать задание самостоятельно.
+# Ожидание нужно, чтобы человек успел собраться; бесконечным оно быть не может —
+# иначе тест встанет на том, кто кнопку не заметил.
+START_GRACE_SECONDS = 25.0
+
+# Предел времени на одно задание (ТЗ: ориентир — до двух минут). Складывается
+# из ожидания нажатия, озвучивания и записи ответа; интерфейсу он передаётся,
+# чтобы показать спокойный таймер.
+TASK_TIME_LIMIT_SECONDS = 120.0
+
+
+def start_grace_seconds(settings: Any) -> float:
+    """Сколько ждать нажатия «Приступить» перед заданием.
+
+    Вынесено отдельно, чтобы проверки могли обнулить ожидание: кнопку в них
+    нажимать некому, и прогон простаивал бы по двадцать пять секунд на каждом
+    задании, ничего не проверяя.
+    """
+    return max(0.0, float(getattr(settings, "moca_start_grace_seconds", START_GRACE_SECONDS)))
+
+
 # ── Task definitions ───────────────────────────────────────────────────────────
 
 @dataclass
@@ -221,6 +242,11 @@ class MocaTestPlugin(ProcessorPlugin):
         self._answer_started_at = ""
         self._answer_finished_at = ""
         self._speech_metrics_buffer: list[dict[str, Any]] = []
+        # Задание не начинается само: человек нажимает «Приступить». Если он
+        # этого не делает, задание начнётся по истечении ожидания — иначе тест
+        # встанет на человеке, который не понял, чего от него ждут.
+        self._begin_gate: asyncio.Event | None = None
+        self._current_prompt = ""
 
     def subscribed_topics(self) -> tuple[str, ...]:
         return (Topics.MOCA_START, Topics.MOCA_STOP, Topics.UI_ACTION)
@@ -246,6 +272,19 @@ class MocaTestPlugin(ProcessorPlugin):
             action = str(event.payload.get("action") or event.payload.get("command") or "")
             if action == "moca_tts_finished":
                 self._handle_tts_finished(event.payload)
+                return
+            if action == "moca_begin_task":
+                if self._begin_gate is not None:
+                    self._begin_gate.set()
+                return
+            if action == "moca_repeat_prompt":
+                # Повтор идёт отдельной задачей: обработчик событий не должен
+                # ждать, пока договорит озвучка.
+                if self._running and self._current_prompt:
+                    asyncio.create_task(
+                        self._speak(self._current_prompt), name="moca-repeat-prompt"
+                    )
+                return
             return
 
         if self._running:
@@ -345,9 +384,17 @@ class MocaTestPlugin(ProcessorPlugin):
             ))
 
             # ── Speak prompt via TTS ───────────────────────────────────────────
+            self._current_prompt = task.prompt
             tts_ok = await self._speak(task.prompt)
             if not tts_ok:
                 logger.warning("moca_test: TTS не сработал для %s", task.task_id)
+
+            # ── Ждём «Приступить» ──────────────────────────────────────────────
+            # Инструкцию можно переслушать, пока задание не начато: за этим и
+            # нужна пауза между озвучиванием и записью.
+            await self._await_task_start(task, idx, total)
+            if self._stop_requested:
+                break
 
             # Short pause so patient knows it's their turn
             await asyncio.sleep(0.6)
@@ -522,6 +569,40 @@ class MocaTestPlugin(ProcessorPlugin):
         words = len(text.split())
         estimated = words / 2.2 + 6.0
         return min(60.0, max(5.0, estimated))
+
+    async def _await_task_start(self, task: MocaTask, index: int, total: int) -> None:
+        """Дождаться нажатия «Приступить» либо начать самостоятельно."""
+        self._begin_gate = asyncio.Event()
+        grace = start_grace_seconds(self.settings)
+        await self.bus.publish(Event(
+            topic=Topics.UI_UPDATE,
+            source=self.name,
+            payload={
+                "screen": "moca",
+                "moca_awaiting_start": True,
+                "moca_task_id": task.task_id,
+                "moca_task_index": index + 1,
+                "moca_task_total": total,
+                "moca_start_grace_seconds": grace,
+                "moca_task_limit_seconds": TASK_TIME_LIMIT_SECONDS,
+                "message": "Нажмите «Приступить к выполнению», когда будете готовы.",
+            },
+        ))
+        try:
+            if grace > 0:
+                await asyncio.wait_for(self._begin_gate.wait(), timeout=grace)
+        except asyncio.TimeoutError:
+            logger.info(
+                "moca_test: «Приступить» не нажато за %.0f с, начинаю задание %s",
+                grace, task.task_id,
+            )
+        finally:
+            self._begin_gate = None
+        await self.bus.publish(Event(
+            topic=Topics.UI_UPDATE,
+            source=self.name,
+            payload={"screen": "moca", "moca_awaiting_start": False},
+        ))
 
     def _handle_tts_finished(self, payload: dict[str, Any]) -> None:
         tts_id = str(payload.get("moca_tts_id") or "")

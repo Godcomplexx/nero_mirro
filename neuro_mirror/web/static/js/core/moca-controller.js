@@ -22,6 +22,10 @@ const moca = {
   recordingSince: 0,
   speaking: false,
   message: "",
+  // Ядро ждёт нажатия «Приступить»; пределы времени приходят оттуда же.
+  awaitingStart: false,
+  taskLimitSeconds: 0,
+  startGraceSeconds: 0,
 };
 
 const listeners = new Set();
@@ -67,6 +71,14 @@ function onSnapshot(event) {
     }
     moca.recording = recording;
     moca.message = snap.message || "";
+    // Ядро ждёт нажатия «Приступить»: пока ждёт, инструкцию можно переслушать.
+    if (snap.moca_awaiting_start !== undefined) {
+      moca.awaitingStart = Boolean(snap.moca_awaiting_start);
+    }
+    if (snap.moca_task_limit_seconds) moca.taskLimitSeconds = snap.moca_task_limit_seconds;
+    if (snap.moca_start_grace_seconds !== undefined) {
+      moca.startGraceSeconds = snap.moca_start_grace_seconds;
+    }
     if (snap.moca_tts_text) {
       moca.speaking = true;
       voice.playOnce(snap.moca_tts_text, snap.moca_tts_id || "");
@@ -107,9 +119,28 @@ export const mocaController = {
       // The server-side test ends on its own timeouts as well
     }
   },
+  // Инструкцию можно переслушать в любой момент задания.
+  async repeatPrompt() {
+    try {
+      await fetch("/api/actions/moca_repeat_prompt", { method: "POST" });
+    } catch (_) {
+      // Повтор — удобство, а не обязательный шаг: отказ не прерывает тест
+    }
+  },
+  // Задание начинается по готовности человека, а не само собой.
+  async beginTask() {
+    moca.awaitingStart = false;
+    emit();
+    try {
+      await fetch("/api/actions/moca_begin_task", { method: "POST" });
+    } catch (_) {
+      // Ядро начнёт задание само по истечении ожидания
+    }
+  },
   reset() {
     moca.status = "idle";
     moca.hint = "";
+    moca.awaitingStart = false;
     emit();
   },
 };
