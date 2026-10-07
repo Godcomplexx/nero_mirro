@@ -99,6 +99,28 @@ def test_interface_loads_fonts_and_scripts_from_the_project():
         assert "cdn.jsdelivr.net" not in path.read_text(encoding="utf-8"), path.name
 
 
+def test_animated_avatar_runtime_is_not_bundled():
+    """Анимация аватара удалена: библиотеки и модель не поставляются.
+
+    Проверка оставлена, потому что эти файлы весили 27 МБ и тянули за собой
+    отдельные лицензионные условия. Просматриваются все файлы интерфейса, а
+    не три известных: после разбиения на модули их список подвижен.
+    """
+    static = SOURCE_ROOT / "web" / "static"
+    assert not (static / "vendor").exists()
+    assert not (static / "assets" / "live2d").exists()
+    sources = [
+        path
+        for pattern in ("*.html", "*.css", "*.js")
+        for path in static.rglob(pattern)
+        if "fonts" not in path.parts
+    ]
+    assert sources, "файлы интерфейса не найдены"
+    for source in sources:
+        text = source.read_text(encoding="utf-8", errors="replace").lower()
+        assert "live2d" not in text and "cubism" not in text, source.name
+
+
 def test_bundled_assets_exist():
     static = SOURCE_ROOT / "web" / "static"
     assert (static / "fonts" / "fonts.css").is_file()
@@ -112,3 +134,24 @@ def test_vision_translation_does_not_use_public_services():
     )
     assert "translate.googleapis.com" not in backends
     assert "mymemory" not in backends.lower()
+
+
+def test_runtime_actually_starts(tmp_path, monkeypatch):
+    """Сборка runtime с настройками по умолчанию.
+
+    Удаление настройки может оставить висячую ссылку в сборке приложения:
+    все модульные тесты при этом проходят, а программа не запускается.
+
+    Каталог подменяется: хранилища пишут файлы относительно текущего, и без
+    подмены тест затирал бы рабочие данные и мешал соседним тестам.
+    """
+    import asyncio
+
+    from neuro_mirror.app.runtime import create_runtime
+
+    monkeypatch.chdir(tmp_path)
+    handle = create_runtime(
+        Settings.from_env(), stop_event=asyncio.Event(), include_ai_plugin=False
+    )
+    assert handle.session_store is not None
+    assert handle.dataset_store is not None

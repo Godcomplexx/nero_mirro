@@ -38,6 +38,7 @@ from neuro_mirror.screening.moca_scoring import (
     score_moca_task,
     summarize_moca_tasks,
 )
+from neuro_mirror.screening.speech_metrics import analyze_wav
 from neuro_mirror.utils.audio import VoiceRecorder, delete_temp_audio
 
 logger = logging.getLogger(__name__)
@@ -219,6 +220,7 @@ class MocaTestPlugin(ProcessorPlugin):
         self._session_id = ""
         self._answer_started_at = ""
         self._answer_finished_at = ""
+        self._speech_metrics_buffer: list[dict[str, Any]] = []
 
     def subscribed_topics(self) -> tuple[str, ...]:
         return (Topics.MOCA_START, Topics.MOCA_STOP, Topics.UI_ACTION)
@@ -304,8 +306,15 @@ class MocaTestPlugin(ProcessorPlugin):
     async def _run_test(self) -> None:
         stored_results = self._resume_checkpoint.get("results") or []
         results: list[dict[str, Any]] = [
-            {**item, **score_moca_task(str(item.get("task_id") or ""),
-                                      str(item.get("transcript") or ""))}
+            {**item, **score_moca_task(
+                str(item.get("task_id") or ""),
+                str(item.get("transcript") or ""),
+                acoustic_metrics=(
+                    [item["speech_metrics"]]
+                    if isinstance(item.get("speech_metrics"), dict)
+                    else None
+                ),
+            )}
             for item in stored_results if isinstance(item, dict)
         ]
         start_index = max(0, min(len(MOCA_TASKS), int(self._resume_checkpoint.get("next_index") or 0)))
@@ -344,6 +353,7 @@ class MocaTestPlugin(ProcessorPlugin):
             await asyncio.sleep(0.6)
 
             # ── Record patient response ────────────────────────────────────────
+            self._speech_metrics_buffer = []
             if task.task_id == "attention_serial":
                 transcript = await self._run_serial_subtraction(task, idx, total)
             else:
@@ -357,7 +367,11 @@ class MocaTestPlugin(ProcessorPlugin):
 
             # Для оценки достаточно идентификатора задания и транскрипции.
             # Результат задания формируется сразу после распознавания.
-            task_result = score_moca_task(task.task_id, transcript)
+            task_result = score_moca_task(
+                task.task_id,
+                transcript,
+                acoustic_metrics=list(self._speech_metrics_buffer),
+            )
             task_result["answered_at"] = datetime.now(UTC).isoformat()
             results.append(task_result)
             await self.bus.publish(Event(
@@ -411,6 +425,8 @@ class MocaTestPlugin(ProcessorPlugin):
                 "max_score": scoring["max_score"],
                 "percent": scoring["percent"],
                 "interpretation": scoring["interpretation"],
+                "modules": scoring["modules"],
+                "speech_summary": scoring["speech_summary"],
                 "notes": scoring["notes"],
             },
         ))
@@ -501,7 +517,8 @@ class MocaTestPlugin(ProcessorPlugin):
 
     @staticmethod
     def _tts_timeout_seconds(text: str) -> float:
-        # ~130 words/min Russian TTS = ~2.17 chars/sec; add 6s buffer for startup
+        # ~130 words/min Russian TTS = ~2.17 chars/sec; add 6s buffer for startup.
+        # Синтез локальный, ожидания сети нет — запас держим коротким.
         words = len(text.split())
         estimated = words / 2.2 + 6.0
         return min(60.0, max(5.0, estimated))
@@ -510,7 +527,7 @@ class MocaTestPlugin(ProcessorPlugin):
         tts_id = str(payload.get("moca_tts_id") or "")
         waiter = self._tts_waiters.pop(tts_id, None)
         if waiter is not None and not waiter.done():
-            waiter.set_result(True)
+            waiter.set_result(bool(payload.get("tts_ok", True)))
 
     def _resolve_pending_tts(self, result: bool) -> None:
         for waiter in list(self._tts_waiters.values()):
@@ -636,6 +653,7 @@ class MocaTestPlugin(ProcessorPlugin):
         split_on_silence: bool = False,
     ) -> str:
         transcript = ""
+        acoustic_metrics: dict[str, Any] = {}
         try:
             reply = await self.bus.request(
                 Event(
@@ -657,9 +675,17 @@ class MocaTestPlugin(ProcessorPlugin):
             logger.warning("moca_test: transcribe error: %s", exc)
             return ""
         finally:
+            acoustic_metrics = analyze_wav(audio_path)
+            if acoustic_metrics:
+                self._speech_metrics_buffer.append(acoustic_metrics)
             # Copy into the dataset while the file still exists; capture must
             # never interfere with the test, so failures are swallowed.
-            self._store_dataset_audio(audio_path, task=task, transcript=transcript)
+            self._store_dataset_audio(
+                audio_path,
+                task=task,
+                transcript=transcript,
+                acoustic_metrics=acoustic_metrics,
+            )
             delete_temp_audio(audio_path)
 
     def _store_dataset_audio(
@@ -668,8 +694,13 @@ class MocaTestPlugin(ProcessorPlugin):
         *,
         task: MocaTask | None,
         transcript: str,
+        acoustic_metrics: dict[str, Any] | None = None,
     ) -> None:
-        if self.dataset_store is None or not self._session_id:
+        if (
+            not self.settings.save_moca_audio
+            or self.dataset_store is None
+            or not self._session_id
+        ):
             return
         try:
             self.dataset_store.store_answer_audio(
@@ -685,6 +716,7 @@ class MocaTestPlugin(ProcessorPlugin):
                     "finished_at": self._answer_finished_at,
                     "sample_rate": self.settings.voice_sample_rate,
                     "channels": self.settings.voice_channels,
+                    "acoustic_metrics": acoustic_metrics or {},
                 },
             )
         except Exception as exc:  # noqa: BLE001 — capture is best-effort

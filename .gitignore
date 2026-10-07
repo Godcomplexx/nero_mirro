@@ -17,6 +17,8 @@ runtime/device_selection.json
 # Аудио и результаты экспериментов
 audio/
 moca_evaluation*/
+moca_validated_dataset/
+moca_validated_dataset_building/
 moca_recall_split_experiment/
 
 # Журналы запусков
@@ -25,6 +27,9 @@ moca_recall_split_experiment/
 # Локальные веса моделей (скачиваются при первом запуске)
 runtime/models/gigaam/*.ckpt
 runtime/models/gigaam/*.model
+# Технический журнал вместе с файлами ротации: правило *.log не покрывает
+# neuro_mirror.log.1 и последующие.
+runtime/logs/
 runtime/deidentified/
 runtime/dataset/
 runtime/models/tts/*.onnx

@@ -25,6 +25,9 @@ from neuro_mirror.plugins.video_analysis.plugin import VisionWorkerPlugin
 from neuro_mirror.plugins.voice_test.plugin import VoiceTestPlugin
 from neuro_mirror.plugins.moca_test.plugin import MocaTestPlugin
 from neuro_mirror.plugins.hads_test.plugin import HadsTestPlugin
+from neuro_mirror.plugins.games.registry import iter_game_plugins
+from neuro_mirror.plugins.games.coordinator import GameSessionCoordinator
+from neuro_mirror.plugins.games.history import GameHistoryStore
 
 
 @dataclass(slots=True)
@@ -34,9 +37,9 @@ class RuntimeHandle:
     plugin_manager: PluginManager
     stop_event: asyncio.Event
     assistant_backend_label: str
-    weather_source_label: str
     session_store: SessionStore
     dataset_store: DatasetStore
+    game_history_store: GameHistoryStore
 
     async def start(self) -> None:
         await self.plugin_manager.start_all()
@@ -86,11 +89,6 @@ def create_runtime(
         if settings.enable_ai_assistant
         else "выключен"
     )
-    weather_source_label = (
-        f"Фиксированная локация: {settings.weather_location}"
-        if settings.weather_location
-        else "Автоматическое определение по IP"
-    )
     appearance_composer = AppearanceResponseComposer(
         enabled=settings.enable_ai_assistant,
         ai_backend=settings.ai_backend,
@@ -106,6 +104,7 @@ def create_runtime(
     )
     session_store = SessionStore()
     dataset_store = DatasetStore()
+    game_history_store = GameHistoryStore()
 
     plugin_manager.register(DeviceManager(bus, settings=settings))
     plugin_manager.register(StoragePlugin(bus))
@@ -118,6 +117,15 @@ def create_runtime(
     plugin_manager.register(VoiceTestPlugin(bus, settings=settings))
     plugin_manager.register(MocaTestPlugin(bus, settings=settings, dataset_store=dataset_store))
     plugin_manager.register(HadsTestPlugin(bus, settings=settings, dataset_store=dataset_store))
+    for game_plugin in iter_game_plugins(bus):
+        plugin_manager.register(game_plugin)
+    plugin_manager.register(
+        GameSessionCoordinator(
+            bus,
+            session_store=session_store,
+            history_store=game_history_store,
+        )
+    )
     plugin_manager.register(
         AggregatorPlugin(
             bus,
@@ -147,7 +155,7 @@ def create_runtime(
         plugin_manager=plugin_manager,
         stop_event=stop_event,
         assistant_backend_label=assistant_backend_label,
-        weather_source_label=weather_source_label,
         session_store=session_store,
         dataset_store=dataset_store,
+        game_history_store=game_history_store,
     )

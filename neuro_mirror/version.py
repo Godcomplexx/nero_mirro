@@ -10,6 +10,7 @@ from __future__ import annotations
 APP_VERSION = "0.7.0"
 
 SCENARIO_VERSIONS: dict[str, str] = {
+    "training_game": "1.0.0",
     "screening": "1.0.0",  # базовый скрининг: видео-анализ + HADS
     "hads": "1.0.0",       # тест на тревожность (HADS), 14 вопросов
     "moca": "1.1.0",       # аудио-MoCA, 11 заданий

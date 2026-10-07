@@ -1,41 +1,83 @@
 from __future__ import annotations
 
 import re
+from collections import Counter
 from difflib import SequenceMatcher
 from typing import Any
+
+from neuro_mirror.screening.speech_metrics import (
+    build_speech_metrics,
+    normalize_words,
+    summarize_speech_metrics,
+)
 
 
 VOICE_MOCA_MAX_SCORE = 15
 
+MOCA_MODULES = (
+    {
+        "id": "memory",
+        "label": "Память",
+        "max_score": 5,
+        "task_ids": ("memory_1", "memory_2", "delayed_recall"),
+    },
+    {
+        "id": "attention",
+        "label": "Внимание",
+        "max_score": 5,
+        "task_ids": (
+            "attention_digits_forward",
+            "attention_digits_backward",
+            "attention_serial",
+        ),
+    },
+    {
+        "id": "speech",
+        "label": "Речь",
+        "max_score": 3,
+        "task_ids": (
+            "language_sentence_1",
+            "language_sentence_2",
+            "language_fluency",
+        ),
+    },
+    {
+        "id": "abstraction",
+        "label": "Абстракция",
+        "max_score": 2,
+        "task_ids": ("abstraction_1", "abstraction_2"),
+    },
+)
+
 # ── Когнитивные домены ─────────────────────────────────────────────────────────
-# Профиль строится по четырём доменам. Пробы заучивания (memory_1, memory_2)
-# в балл не входят и потому ни к какому домену не отнесены: их результат
-# фиксируется, но на профиль не влияет.
+# Профиль для подбора занятия строится по тем же четырём блокам, что и отчёт,
+# поэтому выводится из MOCA_MODULES, а не задаётся отдельным списком: две
+# независимые таблицы неизбежно разойдутся.
 DOMAIN_MEMORY = "Память"
 DOMAIN_ATTENTION = "Внимание"
 DOMAIN_SPEECH = "Речь"
 DOMAIN_ABSTRACTION = "Абстракция"
 
 # Порядок задаёт порядок вывода профиля в отчёте.
-COGNITIVE_DOMAINS: tuple[str, ...] = (
-    DOMAIN_MEMORY,
-    DOMAIN_ATTENTION,
-    DOMAIN_SPEECH,
-    DOMAIN_ABSTRACTION,
+COGNITIVE_DOMAINS: tuple[str, ...] = tuple(
+    str(module["label"]) for module in MOCA_MODULES
 )
 
-TASK_DOMAINS: dict[str, str] = {
-    # Серийный счёт относится к вниманию, как в исходной методике.
-    "attention_digits_forward": DOMAIN_ATTENTION,
-    "attention_digits_backward": DOMAIN_ATTENTION,
-    "attention_serial": DOMAIN_ATTENTION,
-    "language_sentence_1": DOMAIN_SPEECH,
-    "language_sentence_2": DOMAIN_SPEECH,
-    "language_fluency": DOMAIN_SPEECH,
-    "abstraction_1": DOMAIN_ABSTRACTION,
-    "abstraction_2": DOMAIN_ABSTRACTION,
-    "delayed_recall": DOMAIN_MEMORY,
-}
+
+def _build_task_domains() -> dict[str, str]:
+    """Задания, дающие баллы, с их доменом.
+
+    Пробы заучивания (memory_1, memory_2) баллов не дают и в профиль не
+    входят: их результат фиксируется, но на подбор занятия не влияет.
+    Признак — нулевой максимум задания, а не перечисление вручную.
+    """
+    mapping: dict[str, str] = {}
+    for module in MOCA_MODULES:
+        for task_id in module["task_ids"]:
+            if int(_score_task({"task_id": task_id, "transcript": ""})["max_score"]) > 0:
+                mapping[task_id] = str(module["label"])
+    return mapping
+
 
 MEMORY_WORDS = ("лицо", "бархат", "церковь", "фиалка", "красный")
 MEMORY_WORD_FORMS = {
@@ -77,6 +119,26 @@ SERIAL_NUMBER_FORMS = {
     "семидесяти": "семьдесят",
     "восьмидесяти": "восемьдесят",
     "девяноста": "девяносто",
+}
+SERIAL_CORRECTION_CUES = (
+    "ой",
+    "нет",
+    "ошиб",
+    "исправ",
+    "запут",
+    "пута",
+    "господи",
+    "проблем",
+    "не помню",
+    "не получается",
+)
+FLUENCY_EXCLUDED_NAMES = {
+    "лариса",
+    "леонид",
+    "лера",
+    "леша",
+    "леха",
+    "людмила",
 }
 DIGITS_FORWARD_EXPECTED = (2, 1, 8, 5, 4)
 DIGITS_BACKWARD_EXPECTED = (2, 4, 7)
@@ -121,9 +183,70 @@ TENS = {
 }
 
 
-def score_moca_task(task_id: str, transcript: str) -> dict[str, Any]:
+def score_moca_task(
+    task_id: str,
+    transcript: str,
+    *,
+    acoustic_metrics: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     """Оценить одно задание MoCA по идентификатору и транскрипции."""
-    return _score_task({"task_id": task_id, "transcript": transcript})
+    return _score_and_analyze(
+        {"task_id": task_id, "transcript": transcript},
+        acoustic_metrics=acoustic_metrics,
+    )
+
+
+def summarize_moca_tasks(
+    scored_tasks: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Сформировать общий результат из уже оценённых заданий."""
+    total = sum(int(task.get("score") or 0) for task in scored_tasks)
+    percent = round(total / VOICE_MOCA_MAX_SCORE, 3) if VOICE_MOCA_MAX_SCORE else 0.0
+    return {
+        "score": total,
+        "max_score": VOICE_MOCA_MAX_SCORE,
+        "percent": percent,
+        "interpretation": _interpret(total),
+        "tasks": scored_tasks,
+        "domains": summarize_domains(scored_tasks),
+        "modules": _group_moca_modules(scored_tasks),
+        "speech_summary": summarize_speech_metrics(scored_tasks),
+        "notes": (
+            "Автоматический подсчет основан на распознанной речи и требует проверки специалистом. "
+            "Это voice-only профиль MoCA без зрительно-пространственных заданий и ориентации."
+        ),
+    }
+
+
+def _group_moca_modules(
+    scored_tasks: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Собрать упражнения и баллы в четыре понятных блока отчёта."""
+    tasks_by_id = {
+        str(task.get("task_id") or ""): task
+        for task in scored_tasks
+        if isinstance(task, dict)
+    }
+    modules = []
+    for definition in MOCA_MODULES:
+        tasks = [
+            tasks_by_id[task_id]
+            for task_id in definition["task_ids"]
+            if task_id in tasks_by_id
+        ]
+        score = sum(int(task.get("score") or 0) for task in tasks)
+        max_score = int(definition["max_score"])
+        modules.append(
+            {
+                "id": definition["id"],
+                "label": definition["label"],
+                "score": score,
+                "max_score": max_score,
+                "percent": round(score / max_score, 3),
+                "tasks": tasks,
+            }
+        )
+    return modules
 
 
 def domain_max_scores() -> dict[str, int]:
@@ -134,7 +257,7 @@ def domain_max_scores() -> dict[str, int]:
     """
     totals = dict.fromkeys(COGNITIVE_DOMAINS, 0)
     for task_id, domain in TASK_DOMAINS.items():
-        totals[domain] += int(score_moca_task(task_id, "")["max_score"])
+        totals[domain] += int(_score_task({"task_id": task_id, "transcript": ""})["max_score"])
     return totals
 
 
@@ -165,37 +288,50 @@ def summarize_domains(scored_tasks: list[dict[str, Any]]) -> list[dict[str, Any]
     return profile
 
 
-def summarize_moca_tasks(
-    scored_tasks: list[dict[str, Any]],
-) -> dict[str, Any]:
-    """Сформировать общий результат из уже оценённых заданий."""
-    total = sum(int(task.get("score") or 0) for task in scored_tasks)
-    percent = round(total / VOICE_MOCA_MAX_SCORE, 3) if VOICE_MOCA_MAX_SCORE else 0.0
-    return {
-        "score": total,
-        "max_score": VOICE_MOCA_MAX_SCORE,
-        "percent": percent,
-        "interpretation": _interpret(total),
-        "domains": summarize_domains(scored_tasks),
-        "tasks": scored_tasks,
-        "notes": (
-            "Автоматический подсчет основан на распознанной речи и требует проверки специалистом. "
-            "Это voice-only профиль MoCA без зрительно-пространственных заданий и ориентации."
-        ),
-    }
-
-
 def score_moca_tasks(tasks: list[dict[str, Any]]) -> dict[str, Any]:
     """Оценить список заданий и вернуть баллы по заданиям и общий итог."""
-    scored_tasks = [_score_task(task) for task in tasks]
+    scored_tasks = [_score_and_analyze(task) for task in tasks]
     return summarize_moca_tasks(scored_tasks)
+
+
+def _score_and_analyze(
+    task: dict[str, Any],
+    *,
+    acoustic_metrics: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Добавить к стандартному баллу речевые и предметные показатели."""
+    scored = _score_task(task)
+    transcript = str(scored.get("transcript") or "")
+    previous_metrics = task.get("speech_metrics")
+    if acoustic_metrics is None and isinstance(previous_metrics, dict):
+        # При возобновлении теста сохраняем ранее рассчитанную акустику,
+        # но пересчитываем текстовые показатели текущим алгоритмом.
+        acoustic_metrics = [previous_metrics]
+    scored["speech_metrics"] = build_speech_metrics(
+        transcript,
+        acoustic_metrics,
+    )
+    scored["task_analysis"] = _build_task_analysis(scored)
+    return scored
 
 
 def _score_task(task: dict[str, Any]) -> dict[str, Any]:
     task_id = str(task.get("task_id") or "")
     transcript = str(task.get("transcript") or "")
+    module = next(
+        (
+            definition
+            for definition in MOCA_MODULES
+            if task_id in definition["task_ids"]
+        ),
+        None,
+    )
     base = {
         **task,
+        "task_id": task_id,
+        "transcript": transcript,
+        "module_id": module["id"] if module else "",
+        "domain": module["label"] if module else str(task.get("domain") or ""),
         "score": 0,
         "max_score": 0,
         "status": "not_scored",
@@ -233,31 +369,33 @@ def _score_task(task: dict[str, Any]) -> dict[str, Any]:
         return _score_abstraction(
             base,
             transcript,
-            expected="транспорт / средство передвижения",
-            word_stems=("транспорт", "передвиж", "перемещ", "езд", "ехать"),
+            expected=(
+                "средства передвижения / транспорт / на них можно ездить / "
+                "средства для путешествия"
+            ),
+            word_stems=("транспорт", "передвиж", "путешеств", "езд", "ехать"),
         )
 
     if task_id == "abstraction_2":
         return _score_abstraction(
             base,
             transcript,
-            expected="измерительные предметы",
+            expected=(
+                "измерительные приборы / используются для измерения / "
+                "измерение"
+            ),
             word_stems=(
                 "измер",
-                "замер",
                 "мерить",
-                "меряют",
-                "длин",
-                "врем",
-                "прибор",
-                "инструмент",
-                "шкал",
-                "делени",
-                "цифр",
-                "числ",
-                "циферблат",
             ),
-            fuzzy_phrases=("измерительный прибор",),
+            rejected_phrase_groups=(("часы это", "линейка это"),),
+            rejection_override_phrases=(
+                "оба измер",
+                "обе измер",
+                "общее измер",
+                "общая измер",
+                "замер измер",
+            ),
         )
 
     if task_id == "delayed_recall":
@@ -292,8 +430,12 @@ def _score_digit_span(
 
 
 def _score_serial_subtraction(base: dict[str, Any], transcript: str) -> dict[str, Any]:
+    normalized_transcript = _normalize_serial_number_forms(transcript)
+    normalized_transcript = _normalize_fragmented_serial_numbers(
+        normalized_transcript
+    )
     extracted_numbers = _split_serial_compound_hundreds(
-        _extract_numbers(_normalize_serial_number_forms(transcript))
+        _extract_numbers(normalized_transcript)
     )
     # 100 — исходное число, а однозначные числа обычно являются вслух
     # произнесённым оператором («минус семь»), а не результатом вычитания.
@@ -310,14 +452,22 @@ def _score_serial_subtraction(base: dict[str, Any], transcript: str) -> dict[str
         if previous - current == 7
     ][:5]
     correct_count = len(correct_transitions)
-    if correct_count >= 4:
-        score = 3
-    elif correct_count >= 2:
-        score = 2
-    elif correct_count == 1:
-        score = 1
-    else:
-        score = 0
+    transition_score = _serial_score_from_count(correct_count)
+
+    # В естественной речи испытуемый часто повторяет операнд,
+    # рассуждает вслух и исправляется. Это разрывает цепочку
+    # соседних переходов. При явных признаках самокоррекции дополнительно
+    # ищем эталонные ответы в правильном порядке, не удаляя ошибки.
+    has_correction_cue = any(
+        cue in normalized_transcript for cue in SERIAL_CORRECTION_CUES
+    )
+    ordered_expected_count = (
+        _longest_serial_expected_subsequence(raw_answers)
+        if has_correction_cue
+        else 0
+    )
+    recovery_score = _serial_score_from_count(ordered_expected_count)
+    score = max(transition_score, recovery_score)
     return {
         **base,
         "score": score,
@@ -330,9 +480,52 @@ def _score_serial_subtraction(base: dict[str, Any], transcript: str) -> dict[str
             f"{_format_serial_transitions(correct_transitions)}. "
             f"Результаты: {' '.join(map(str, answers)) or '-'}. "
             f"Исправления: "
-            f"{' '.join(map(str, corrected_answers)) or '-'}"
+            f"{' '.join(map(str, corrected_answers)) or '-'}. "
+            f"Эталонных ответов по порядку: "
+            f"{ordered_expected_count}/5"
         ),
     }
+
+
+def _serial_score_from_count(correct_count: int) -> int:
+    """Перевести число верных ответов в балл серийного счёта."""
+    if correct_count >= 4:
+        return 3
+    if correct_count >= 2:
+        return 2
+    if correct_count == 1:
+        return 1
+    return 0
+
+
+def _longest_serial_expected_subsequence(answers: list[int]) -> int:
+    """Посчитать эталонные ответы, встреченные в нужном порядке."""
+    previous_row = [0] * (len(SERIAL_EXPECTED) + 1)
+    for answer in answers:
+        current_row = [0]
+        for index, expected in enumerate(SERIAL_EXPECTED, start=1):
+            if answer == expected:
+                current_row.append(previous_row[index - 1] + 1)
+            else:
+                current_row.append(
+                    max(previous_row[index], current_row[index - 1])
+                )
+        previous_row = current_row
+    return previous_row[-1]
+
+
+def _normalize_fragmented_serial_numbers(text: str) -> str:
+    """Склеить разорванные ASR числа вида «восемьдесят это шесть»."""
+    normalized = text
+    fillers = r"(?:это|(?:у\s+меня\s+)?будет|так|ну)"
+    for tens_word in TENS:
+        for unit_word in UNITS:
+            normalized = re.sub(
+                rf"(?<![а-я]){tens_word}\s+{fillers}\s+{unit_word}(?![а-я])",
+                f"{tens_word} {unit_word}",
+                normalized,
+            )
+    return normalized
 
 
 def _normalize_serial_number_forms(text: str) -> str:
@@ -428,35 +621,19 @@ def _score_sentence_words(
     transcript: str,
     expected: str,
 ) -> dict[str, Any]:
-    """Проверить строгий порядок слов, разрешив изменение окончаний."""
+    """Проверить дословное совпадение всего ответа с предложением."""
     expected_words = _normalize_text(expected).split()
     actual_words = _normalize_text(transcript).split()
-    same_length = len(actual_words) == len(expected_words)
-    mismatches = [
-        (index, expected_word, actual_word)
-        for index, (expected_word, actual_word) in enumerate(
-            zip(expected_words, actual_words),
-            start=1,
-        )
-        if not _same_word_with_different_ending(expected_word, actual_word)
-    ]
-    correct = same_length and not mismatches
-
-    if not same_length:
+    correct = actual_words == expected_words
+    if correct:
+        details = "Ответ дословно совпал с предложением."
+    elif len(actual_words) != len(expected_words):
         details = (
             "Количество слов не совпало: "
             f"ожидалось {len(expected_words)}, распознано {len(actual_words)}."
         )
-    elif mismatches:
-        details = "Не совпали слова: " + "; ".join(
-            f"{index}: {expected_word} ≠ {actual_word}"
-            for index, expected_word, actual_word in mismatches
-        )
     else:
-        details = (
-            "Строгая последовательность слов совпала; "
-            "различия окончаний разрешены."
-        )
+        details = "Не совпали слова или их порядок."
     return {
         **base,
         "score": 1 if correct else 0,
@@ -466,30 +643,17 @@ def _score_sentence_words(
         "details": details,
     }
 
-
-def _same_word_with_different_ending(expected: str, actual: str) -> bool:
-    """Сравнить слова, допуская замену не более трёх букв окончания."""
-    if expected == actual:
-        return True
-    common_prefix_length = 0
-    for expected_char, actual_char in zip(expected, actual):
-        if expected_char != actual_char:
-            break
-        common_prefix_length += 1
-    return (
-        common_prefix_length >= 4
-        and len(expected) - common_prefix_length <= 3
-        and len(actual) - common_prefix_length <= 3
-    )
-
-
 def _score_fluency(base: dict[str, Any], transcript: str) -> dict[str, Any]:
     # Длительность здесь намеренно не проверяется: оценщик обрабатывает весь
     # диапазон аудио, который был передан между маркерами начала и окончания.
     words = {
         word
         for word in _normalize_text(transcript).split()
-        if len(word) > 1 and word.startswith("л")
+        if (
+            len(word) > 1
+            and word.startswith("л")
+            and word not in FLUENCY_EXCLUDED_NAMES
+        )
     }
     correct = len(words) >= 11
     return {
@@ -508,10 +672,31 @@ def _score_abstraction(
     *,
     expected: str,
     word_stems: tuple[str, ...],
-    fuzzy_phrases: tuple[str, ...] = (),
+    rejected_phrase_groups: tuple[tuple[str, ...], ...] = (),
+    rejection_override_phrases: tuple[str, ...] = (),
 ) -> dict[str, Any]:
     normalized = _normalize_text(transcript)
     words = normalized.split()
+    describes_separately = any(
+        all(_normalize_text(phrase) in normalized for phrase in group)
+        for group in rejected_phrase_groups
+    )
+    has_category_override = any(
+        _normalize_text(phrase) in normalized
+        for phrase in rejection_override_phrases
+    )
+    if describes_separately and not has_category_override:
+        return {
+            **base,
+            "score": 0,
+            "max_score": 1,
+            "status": "incorrect",
+            "expected": expected,
+            "details": (
+                "Предметы описаны по отдельности, но общая категория "
+                "не названа."
+            ),
+        }
     matched_rule = next(
         (
             stem
@@ -521,8 +706,6 @@ def _score_abstraction(
         ),
         "",
     )
-    if not matched_rule:
-        matched_rule = _find_fuzzy_phrase(words, fuzzy_phrases)
     correct = bool(matched_rule)
     return {
         **base,
@@ -536,31 +719,6 @@ def _score_abstraction(
             else "Категория не найдена автоматически."
         ),
     }
-
-
-def _find_fuzzy_phrase(
-    words: list[str],
-    expected_phrases: tuple[str, ...],
-) -> str:
-    """Найти фразу с типичными небольшими ошибками ASR."""
-    for expected in expected_phrases:
-        normalized_expected = _normalize_text(expected)
-        expected_length = len(normalized_expected.split())
-        for window_length in range(
-            max(1, expected_length - 1),
-            expected_length + 2,
-        ):
-            for start in range(len(words) - window_length + 1):
-                candidate = " ".join(words[start : start + window_length])
-                similarity = SequenceMatcher(
-                    None,
-                    candidate,
-                    normalized_expected,
-                ).ratio()
-                if similarity >= 0.75:
-                    return candidate
-    return ""
-
 
 def _score_delayed_recall(base: dict[str, Any], transcript: str) -> dict[str, Any]:
     recalled = [
@@ -643,6 +801,241 @@ def _contains_word_like(text: str, expected: str) -> bool:
     return False
 
 
+def _build_task_analysis(task: dict[str, Any]) -> dict[str, Any]:
+    """Разложить ответ на верные элементы, повторы и посторонние элементы."""
+    task_id = str(task.get("task_id") or "")
+    transcript = str(task.get("transcript") or "")
+    if task_id in {"memory_1", "memory_2", "delayed_recall"}:
+        return _memory_task_analysis(transcript)
+    if task_id == "attention_digits_forward":
+        return _number_task_analysis(transcript, DIGITS_FORWARD_EXPECTED)
+    if task_id == "attention_digits_backward":
+        return _number_task_analysis(transcript, DIGITS_BACKWARD_EXPECTED)
+    if task_id == "attention_serial":
+        return _serial_task_analysis(transcript)
+    if task_id in {"language_sentence_1", "language_sentence_2"}:
+        return _sentence_task_analysis(transcript, str(task.get("expected") or ""))
+    if task_id == "language_fluency":
+        return _fluency_task_analysis(transcript)
+    if task_id.startswith("abstraction_"):
+        return _abstraction_task_analysis(task_id, transcript, task)
+    return _analysis_result([], [], normalize_words(transcript))
+
+
+def _analysis_result(
+    correct: list[Any],
+    repeated: list[Any],
+    extraneous: list[Any],
+    **extra: Any,
+) -> dict[str, Any]:
+    return {
+        "correct_elements": {"count": len(correct), "items": correct},
+        "repeated_elements": {"count": len(repeated), "items": repeated},
+        "extraneous_elements": {"count": len(extraneous), "items": extraneous},
+        **extra,
+    }
+
+
+def _memory_task_analysis(transcript: str) -> dict[str, Any]:
+    recognized = []
+    extraneous = []
+    for word in normalize_words(transcript):
+        canonical = next(
+            (
+                expected
+                for expected in MEMORY_WORDS
+                if _contains_word_like(word, expected)
+            ),
+            "",
+        )
+        if canonical:
+            recognized.append(canonical)
+        else:
+            extraneous.append(word)
+    counts = Counter(recognized)
+    correct = [word for word in MEMORY_WORDS if counts[word]]
+    # Формируем точное число лишних повторений, не теряя порядок слов.
+    seen: Counter[str] = Counter()
+    repeated = []
+    for word in recognized:
+        seen[word] += 1
+        if seen[word] > 1:
+            repeated.append(word)
+    return _analysis_result(correct, repeated, extraneous)
+
+
+def _number_task_analysis(
+    transcript: str,
+    expected: tuple[int, ...],
+) -> dict[str, Any]:
+    actual = _extract_numbers(transcript)
+    expected_counts = Counter(expected)
+    correct = [
+        number
+        for index, number in enumerate(actual[:len(expected)])
+        if number == expected[index]
+    ]
+    repeated: list[int] = []
+    extraneous = [number for number in actual if number not in expected_counts]
+    seen: Counter[int] = Counter()
+    for number in actual:
+        seen[number] += 1
+        if number in expected_counts and seen[number] > expected_counts[number]:
+            repeated.append(number)
+    errors = [
+        {
+            "position": index + 1,
+            "expected": expected[index],
+            "actual": actual[index] if index < len(actual) else None,
+        }
+        for index in range(len(expected))
+        if index >= len(actual) or actual[index] != expected[index]
+    ]
+    return _analysis_result(
+        correct,
+        repeated,
+        extraneous,
+        sequence={
+            "expected": list(expected),
+            "actual": actual,
+            "exact": actual == list(expected),
+            "errors": errors,
+            "error_count": len(errors),
+        },
+    )
+
+
+def _serial_task_analysis(transcript: str) -> dict[str, Any]:
+    normalized = _normalize_fragmented_serial_numbers(
+        _normalize_serial_number_forms(transcript)
+    )
+    extracted = _split_serial_compound_hundreds(_extract_numbers(normalized))
+    raw_answers = [number for number in extracted if 10 <= number < 100]
+    answers, corrected_answers = _remove_immediate_serial_corrections(raw_answers)
+    expected = list(SERIAL_EXPECTED)
+    correct = []
+    errors = []
+    repeated = []
+    for index, actual in enumerate(answers[: len(expected)]):
+        expected_value = expected[index]
+        if actual == expected_value:
+            correct.append(actual)
+        else:
+            errors.append(
+                {"position": index + 1, "expected": expected_value, "actual": actual}
+            )
+        if index and actual in answers[:index]:
+            repeated.append(actual)
+    for index in range(len(answers), len(expected)):
+        errors.append(
+            {"position": index + 1, "expected": expected[index], "actual": None}
+        )
+    extra_answers = answers[len(expected):]
+    return _analysis_result(
+        correct,
+        repeated,
+        extra_answers,
+        sequence={
+            "expected": expected,
+            "raw": raw_answers,
+            "accepted": answers,
+            "self_corrected": corrected_answers,
+            "errors": errors,
+            "error_count": len(errors),
+        },
+    )
+
+
+def _sentence_task_analysis(transcript: str, expected: str) -> dict[str, Any]:
+    expected_words = normalize_words(expected)
+    actual_words = normalize_words(transcript)
+    matcher = SequenceMatcher(None, expected_words, actual_words)
+    correct = []
+    extraneous = []
+    for tag, _i1, _i2, j1, j2 in matcher.get_opcodes():
+        if tag == "equal":
+            correct.extend(actual_words[j1:j2])
+        elif tag in {"replace", "insert"}:
+            extraneous.extend(actual_words[j1:j2])
+    expected_counts = Counter(expected_words)
+    seen: Counter[str] = Counter()
+    repeated = []
+    for word in actual_words:
+        seen[word] += 1
+        if seen[word] > expected_counts[word] and word in expected_counts:
+            repeated.append(word)
+    return _analysis_result(correct, repeated, extraneous)
+
+
+def _fluency_task_analysis(transcript: str) -> dict[str, Any]:
+    words = [word for word in normalize_words(transcript) if len(word) > 1]
+    valid_occurrences = [
+        word
+        for word in words
+        if word.startswith("л") and word not in FLUENCY_EXCLUDED_NAMES
+    ]
+    valid_unique = list(dict.fromkeys(valid_occurrences))
+    seen: set[str] = set()
+    repetitions = []
+    for word in valid_occurrences:
+        if word in seen:
+            repetitions.append(word)
+        seen.add(word)
+    invalid = [word for word in words if word not in valid_occurrences]
+    return _analysis_result(
+        valid_unique,
+        repetitions,
+        invalid,
+        fluency={
+            "valid_word_count": len(valid_unique),
+            "valid_words": valid_unique,
+            "repetition_count": len(repetitions),
+            "repetitions": repetitions,
+        },
+    )
+
+
+def _abstraction_task_analysis(
+    task_id: str,
+    transcript: str,
+    scored_task: dict[str, Any],
+) -> dict[str, Any]:
+    normalized = _normalize_text(transcript)
+    if task_id == "abstraction_1":
+        concepts = {
+            "transport": (
+                "транспорт",
+                "передвиж",
+                "путешеств",
+                "езд",
+                "ехать",
+            ),
+        }
+    else:
+        concepts = {
+            "measurement": (
+                "измер",
+                "мерить",
+            ),
+        }
+    matched = {
+        concept: [stem for stem in stems if stem in normalized]
+        for concept, stems in concepts.items()
+    }
+    matched = {concept: stems for concept, stems in matched.items() if stems}
+    correct = list(matched)
+    return _analysis_result(
+        correct,
+        [],
+        [] if scored_task.get("score") else normalize_words(transcript),
+        semantic_features={
+            "expected_category": str(scored_task.get("expected") or ""),
+            "matched_concepts": matched,
+            "abstract_category_detected": bool(scored_task.get("score")),
+        },
+    )
+
+
 def _normalize_text(text: str) -> str:
     lowered = text.lower().replace("ё", "е")
     return re.sub(r"[^0-9a-zа-я]+", " ", lowered).strip()
@@ -654,3 +1047,8 @@ def _interpret(score: int) -> str:
     if score >= 10:
         return "Промежуточный результат voice-MoCA; рекомендуется проверка ответов специалистом."
     return "Низкий результат voice-MoCA или плохое качество распознавания; нужна ручная проверка."
+
+
+# Собирается после объявления правил оценки: максимум задания берётся из них,
+# поэтому таблица не может разойтись с фактически достижимым баллом.
+TASK_DOMAINS: dict[str, str] = _build_task_domains()

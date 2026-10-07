@@ -1,0 +1,337 @@
+from __future__ import annotations
+
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+
+import pytest
+
+from neuro_mirror.plugins.games.catalog import GAME_CATALOG, get_game_definition
+from neuro_mirror.plugins.games.contracts import (
+    Domain,
+    GameDefinition,
+    Modality,
+    ResponseType,
+)
+from neuro_mirror.plugins.games.registry import (
+    discover_game_registrations,
+    implemented_game_codes,
+)
+from neuro_mirror.plugins.games.base import BrowserGamePlugin
+from neuro_mirror.core.event_bus import EventBus
+from neuro_mirror.plugins.games.history import GameHistoryStore
+from neuro_mirror.plugins.games.selector import (
+    NoEligibleGameError,
+    Presentation,
+    select_game,
+)
+
+
+def _selection_game(
+    code: str,
+    *,
+    mechanics: tuple[str, ...],
+    modalities: tuple[Modality, ...],
+    stimulus_sets: tuple[str, ...] = ("set-1",),
+) -> GameDefinition:
+    return GameDefinition(
+        code=code,
+        slug=code.lower().replace("-", "_"),
+        title=code,
+        domains=(Domain.MEMORY,),
+        mechanics=mechanics,
+        modalities=modalities,
+        response_type=ResponseType.CLICK,
+        stimulus_sets=stimulus_sets,
+    )
+
+
+def test_catalog_contains_all_spreadsheet_forms() -> None:
+    assert len(GAME_CATALOG) == 24
+    assert {item.code for item in GAME_CATALOG} == {
+        f"GM-{index:02d}" for index in range(1, 25)
+    }
+    assert get_game_definition("gm19").primary_domain == Domain.ABSTRACTION
+    assert get_game_definition("gm14_word_builder").primary_domain == Domain.SPEECH
+
+
+def test_plugin_can_define_a_game_outside_initial_catalog() -> None:
+    class CustomGame(BrowserGamePlugin):
+        game_code = "GM-CUSTOM-99"
+        game_definition = GameDefinition(
+            code=game_code,
+            slug="custom_game",
+            title="Пользовательская игра",
+            domains=(Domain.MEMORY,),
+            mechanics=("custom",),
+            modalities=(Modality.VISUAL,),
+            response_type=ResponseType.CLICK,
+            stimulus_sets=("set-1",),
+        )
+
+    plugin = CustomGame(EventBus())
+    assert plugin.definition.code == "GM-CUSTOM-99"
+
+
+def test_base_report_uses_metrics_and_keeps_undeclared_validity_unknown() -> None:
+    class ReportingGame(BrowserGamePlugin):
+        game_code = "GM-REPORT-01"
+        game_definition = GameDefinition(
+            code=game_code,
+            slug="reporting_game",
+            title="Reporting game",
+            domains=(Domain.MEMORY,),
+            mechanics=("reporting",),
+            modalities=(Modality.VISUAL,),
+            response_type=ResponseType.CLICK,
+            stimulus_sets=("set-1",),
+        )
+
+        def _answer(self, payload):
+            return {
+                "ok": True,
+                "finished": True,
+                "metrics": {"u06_complete": False},
+                "events": [{"answer": "x", "elapsed_ms": 10}],
+            }
+
+    result = ReportingGame(EventBus()).answer_game({"session_id": "session-1"})
+    assert result["report"]["completion_status"] == "incomplete"
+    assert result["report"]["technical_validity"] == "unknown"
+    assert result["report"]["trials"][0]["valid"] is None
+
+
+def test_registry_discovers_current_plugins_without_runtime_imports() -> None:
+    registrations = discover_game_registrations()
+    assert len(registrations) == len(GAME_CATALOG)
+    assert all(issubclass(item.plugin_class, BrowserGamePlugin) for item in registrations)
+    assert implemented_game_codes() == {
+        definition.code for definition in GAME_CATALOG
+    }
+    for registration in registrations:
+        package = __import__(registration.package_name, fromlist=["__path__"])
+        folder = next(iter(package.__path__))
+        assert (Path(folder) / "plugin.py").is_file()
+        assert (Path(folder) / "stimuli.py").is_file()
+        assert (Path(folder) / "web.js").is_file()
+
+
+def test_selector_does_not_repeat_form_and_prefers_new_mechanic() -> None:
+    now = datetime.now(UTC)
+    history = (
+        Presentation(
+            game_code="GM-02",
+            mechanics=("spatial_sequence_recall",),
+            modalities=(Modality.VISUAL,),
+            stimulus_set="квадраты",
+            presented_at=now - timedelta(days=1),
+        ),
+    )
+    decision = select_game(
+        Domain.MEMORY,
+        session_game_codes=frozenset({"GM-02"}),
+        history=history,
+        available_codes=frozenset({"GM-02", "GM-05"}),
+    )
+    assert decision.game.code == "GM-05"
+    assert decision.game.primary_domain == Domain.MEMORY
+    assert "форма не повторяется в занятии" in decision.reasons
+
+
+def test_selector_accepts_future_game_definitions() -> None:
+    custom = GameDefinition(
+        code="GM-FUTURE-01",
+        slug="future_game",
+        title="Будущая игра",
+        domains=(Domain.MEMORY,),
+        mechanics=("new_mechanic",),
+        modalities=(Modality.VISUAL,),
+        response_type=ResponseType.CLICK,
+        stimulus_sets=("future-set",),
+    )
+    decision = select_game(
+        Domain.MEMORY,
+        available_codes=frozenset({custom.code}),
+        definitions=(custom,),
+    )
+    assert decision.game.code == custom.code
+    assert decision.stimulus_set == "future-set"
+
+
+def test_selector_rejects_repeating_the_only_form_in_session() -> None:
+    game = _selection_game(
+        "GM-TEST-01",
+        mechanics=("matching",),
+        modalities=(Modality.VISUAL,),
+    )
+
+    with pytest.raises(NoEligibleGameError):
+        select_game(
+            Domain.MEMORY,
+            session_game_codes=frozenset({game.code}),
+            definitions=(game,),
+        )
+
+
+def test_selector_prefers_a_new_mechanic_before_other_preferences() -> None:
+    now = datetime.now(UTC)
+    repeated_mechanic = _selection_game(
+        "GM-TEST-01",
+        mechanics=("matching",),
+        modalities=(Modality.AUDITORY,),
+    )
+    new_mechanic = _selection_game(
+        "GM-TEST-02",
+        mechanics=("sequence",),
+        modalities=(Modality.VISUAL,),
+    )
+    history = (
+        Presentation(
+            game_code="GM-PREVIOUS",
+            mechanics=("matching",),
+            modalities=(Modality.VISUAL,),
+            stimulus_set="old-set",
+            presented_at=now,
+        ),
+    )
+
+    decision = select_game(
+        Domain.MEMORY,
+        history=history,
+        definitions=(repeated_mechanic, new_mechanic),
+    )
+
+    assert decision.game.code == new_mechanic.code
+
+
+def test_selector_prefers_a_new_modality_when_mechanics_are_equally_new() -> None:
+    now = datetime.now(UTC)
+    repeated_modality = _selection_game(
+        "GM-TEST-01",
+        mechanics=("matching",),
+        modalities=(Modality.VISUAL,),
+    )
+    new_modality = _selection_game(
+        "GM-TEST-02",
+        mechanics=("sequence",),
+        modalities=(Modality.AUDITORY,),
+    )
+    history = (
+        Presentation(
+            game_code="GM-PREVIOUS",
+            mechanics=("search",),
+            modalities=(Modality.VISUAL,),
+            stimulus_set="old-set",
+            presented_at=now,
+        ),
+    )
+
+    decision = select_game(
+        Domain.MEMORY,
+        history=history,
+        definitions=(repeated_modality, new_modality),
+    )
+
+    assert decision.game.code == new_modality.code
+
+
+def test_selector_prefers_the_least_presented_form_when_other_rules_are_equal() -> None:
+    now = datetime.now(UTC)
+    frequent = _selection_game(
+        "GM-TEST-01",
+        mechanics=("matching",),
+        modalities=(Modality.VISUAL,),
+    )
+    rare = _selection_game(
+        "GM-TEST-02",
+        mechanics=("matching",),
+        modalities=(Modality.VISUAL,),
+    )
+    history = (
+        Presentation(
+            frequent.code,
+            frequent.mechanics,
+            frequent.modalities,
+            "a",
+            now - timedelta(days=3),
+        ),
+        Presentation(
+            frequent.code,
+            frequent.mechanics,
+            frequent.modalities,
+            "b",
+            now - timedelta(days=2),
+        ),
+        Presentation(
+            rare.code,
+            rare.mechanics,
+            rare.modalities,
+            "a",
+            now - timedelta(days=1),
+        ),
+    )
+
+    decision = select_game(
+        Domain.MEMORY,
+        history=history,
+        definitions=(frequent, rare),
+    )
+
+    assert decision.game.code == rare.code
+
+
+def test_selector_avoids_stimuli_used_in_history_and_current_session() -> None:
+    now = datetime.now(UTC)
+    game = _selection_game(
+        "GM-TEST-01",
+        mechanics=("matching",),
+        modalities=(Modality.VISUAL,),
+        stimulus_sets=("set-1", "set-2", "set-3"),
+    )
+    history = (
+        Presentation(game.code, game.mechanics, game.modalities, "set-1", now),
+    )
+
+    decision = select_game(
+        Domain.MEMORY,
+        session_stimulus_sets=frozenset({(game.code, "set-2")}),
+        history=history,
+        definitions=(game,),
+    )
+
+    assert decision.stimulus_set == "set-3"
+
+
+def test_presentation_history_is_isolated_by_user(tmp_path) -> None:
+    store = GameHistoryStore(tmp_path / "history.json")
+    store.record(
+        user_id="user-1",
+        session_id="session-1",
+        game_code="GM-07",
+        stimulus_set="set-1",
+        difficulty_level=1,
+    )
+    store.record(
+        user_id="user-2",
+        session_id="session-2",
+        game_code="GM-08",
+        stimulus_set="set-2",
+        difficulty_level=1,
+    )
+
+    assert [item.game_code for item in store.for_user("user-1")] == ["GM-07"]
+    assert [item.game_code for item in store.for_user("user-2")] == ["GM-08"]
+
+
+def test_presentation_history_round_trip(tmp_path) -> None:
+    store = GameHistoryStore(tmp_path / "history.json")
+    store.record(
+        user_id="user-1",
+        session_id="session-1",
+        game_code="GM-07",
+        stimulus_set="буква Т",
+        difficulty_level=1,
+    )
+    history = GameHistoryStore(tmp_path / "history.json").for_user("user-1")
+    assert len(history) == 1
+    assert history[0].game_code == "GM-07"
+    assert history[0].mechanics == ("conjunction_visual_search",)

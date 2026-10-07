@@ -53,6 +53,7 @@ class Settings:
     voice_silence_threshold: float = 0.012
     voice_silence_duration: float = 1.8
     voice_min_speech_duration: float = 0.4
+    save_moca_audio: bool = True
     tts_voice: str = "ru-RU-SvetlanaNeural"
     tts_rate: str = "+15%"
 
@@ -61,7 +62,6 @@ class Settings:
         base_dir = Path(__file__).resolve().parents[2]
         default_vision_script = base_dir / "runtime" / "vision_worker" / "worker.py"
         default_speech_script = base_dir / "runtime" / "speech_worker" / "worker.py"
-
         raw_ai = os.getenv("NEURO_MIRROR_ENABLE_AI_ASSISTANT", "1").strip().lower()
         raw_auto_start = os.getenv("NEURO_MIRROR_AUTO_START", "").strip().lower()
         raw_web_host = os.getenv("NEURO_MIRROR_WEB_HOST", "127.0.0.1").strip()
@@ -127,6 +127,10 @@ class Settings:
         raw_voice_silence_threshold = os.getenv("NEURO_MIRROR_VOICE_SILENCE_THRESHOLD", "0.012").strip()
         raw_voice_silence_duration = os.getenv("NEURO_MIRROR_VOICE_SILENCE_DURATION", "1.8").strip()
         raw_voice_min_speech_duration = os.getenv("NEURO_MIRROR_VOICE_MIN_SPEECH_DURATION", "0.4").strip()
+        raw_save_moca_audio = os.getenv(
+            "NEURO_MIRROR_SAVE_MOCA_AUDIO",
+            "1",
+        ).strip().lower()
         if raw_stt_hotwords.startswith("\u0420") and "\u043a\u0430\u043c\u0435\u0440\u0430" not in raw_stt_hotwords.lower():
             raw_stt_hotwords = (
                 "\u043a\u0430\u043c\u0435\u0440\u0430, \u0447\u0442\u043e \u0443 \u043c\u0435\u043d\u044f \u0432 \u0440\u0443\u043a\u0430\u0445, "
@@ -186,6 +190,7 @@ class Settings:
             voice_silence_threshold=float(raw_voice_silence_threshold),
             voice_silence_duration=float(raw_voice_silence_duration),
             voice_min_speech_duration=float(raw_voice_min_speech_duration),
+            save_moca_audio=raw_save_moca_audio not in {"0", "false", "no"},
             tts_voice=raw_tts_voice,
             tts_rate=raw_tts_rate,
         )

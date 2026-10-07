@@ -301,7 +301,10 @@ class HadsTestPlugin(ProcessorPlugin):
                     matched = match_hads_answer(transcript, question.options)
                     if matched is not None:
                         return matched
-                    logger.info("hads_test: не распознан ответ из %r", transcript[:80])
+                    logger.info(
+                        "hads_test: ответ не распознан, длина %d",
+                        len(transcript),
+                    )
 
                 if attempt < VOICE_RETRIES:
                     await self._speak(
