@@ -53,6 +53,11 @@ from neuro_mirror.core.access_journal import (
     VIEW_RESULTS,
     AccessJournal,
 )
+from neuro_mirror.screening.san_survey import (
+    MOMENTS,
+    questionnaire as san_questionnaire,
+    score_san,
+)
 from neuro_mirror.screening.training_session import build_training_session
 from neuro_mirror.plugins.ui.web_plugin import WebUIPlugin, WebUIStateStore
 from neuro_mirror.plugins.user_progress.plugin import UserProgressPlugin
@@ -121,6 +126,14 @@ class ClientLogIn(BaseModel):
 
 class SessionFrameIn(BaseModel):
     image_base64: str
+
+
+class SanAnswersIn(BaseModel):
+    # Когда опросник заполнен: до занятия или после. Сравнение «до» и
+    # «после» — и есть смысл этой оценки.
+    moment: str = "before"
+    answers: dict[str, int] = Field(default_factory=dict)
+    session_id: str = ""
 
 
 class GameSelectionIn(BaseModel):
@@ -302,6 +315,40 @@ def create_app() -> FastAPI:
         return JSONResponse(
             [item.to_public_dict(implemented=item.code in implemented) for item in all_game_definitions()]
         )
+
+    @app.get("/api/questionnaires/san")
+    async def san_questions() -> JSONResponse:
+        """Вопросы опросника самочувствия.
+
+        Содержание опросника принадлежит ядру, как у MoCA и HADS: интерфейс
+        его только показывает.
+        """
+        return JSONResponse(san_questionnaire())
+
+    @app.post("/api/questionnaires/san")
+    async def save_san_answers(payload: SanAnswersIn) -> JSONResponse:
+        ctx: WebAppContext = app.state.context
+        active = _active_user_or_400()
+        moment = payload.moment.strip().lower()
+        if moment not in MOMENTS:
+            raise HTTPException(
+                status_code=400,
+                detail="Укажите, когда заполнен опросник: до занятия или после.",
+            )
+        result = score_san(payload.answers)
+        record = {
+            "report_type": "san_survey",
+            "type": "san_survey",
+            "moment": moment,
+            "user_id": str(active.get("id") or ""),
+            "session_id": payload.session_id,
+            "stored_at": datetime.now(UTC).isoformat(),
+            **result,
+        }
+        await ctx.runtime.bus.publish(
+            Event(topic=Topics.STORAGE_WRITE, source="web.san", payload=record)
+        )
+        return JSONResponse(result)
 
     @app.get("/api/training/session")
     async def training_session() -> JSONResponse:
