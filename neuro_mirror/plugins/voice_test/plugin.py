@@ -56,7 +56,10 @@ class VoiceTestPlugin(ProcessorPlugin):
             return
 
         try:
-            result = await asyncio.to_thread(analyze_audio, audio_path)
+            # Расшифровка нужна только для темпа речи: без неё считать
+            # слова не из чего, и темп остаётся пустым.
+            transcript = str(event.payload.get("transcript") or "")
+            result = await asyncio.to_thread(analyze_audio, audio_path, transcript)
             logger.info(
                 "voice_test: анализ завершён — speech_score=%s, reaction_ms=%s",
                 result.speech_score,

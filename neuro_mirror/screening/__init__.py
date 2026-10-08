@@ -1,8 +1,10 @@
-"""Screening analysis adapters.
+"""Разбор записей скрининга.
 
-This package provides a thin adapter layer around the external screening
-analysis code.  When the real analysis modules are available, replace the
-stub function bodies in ``video_analyzer.py`` and ``audio_analyzer.py``.
+Измеримое измеряется: по аудиозаписи считаются задержка ответа, паузы и темп
+речи, по кадрам определяется присутствие лица. Сводные клинические оценки —
+оценка речи, изменчивость высоты голоса, внимание, устойчивость взгляда —
+остаются пустыми: для них нужна утверждённая методика, и подставлять вместо
+неё собственную формулу нельзя, числа уходят специалисту.
 """
 
 from neuro_mirror.screening.video_analyzer import VideoAnalysisResult, analyze_frames
