@@ -121,7 +121,7 @@ class _FakeSpeechWorker:
 
 
 class MocaSpeechUiTest(unittest.IsolatedAsyncioTestCase):
-    async def test_moca_transcription_does_not_switch_screen_to_assistant(self) -> None:
+    async def test_moca_transcription_does_not_touch_the_screen(self) -> None:
         bus = EventBus()
         plugin = SpeechWorkerPlugin(bus, settings=Settings())
         plugin.worker = _FakeSpeechWorker()  # type: ignore[assignment]
@@ -141,7 +141,9 @@ class MocaSpeechUiTest(unittest.IsolatedAsyncioTestCase):
         )
 
         response = await asyncio.wait_for(responses.queue.get(), timeout=1)
-        self.assertEqual(response.payload["transcript"], "Тестовый ответ")
+        # Ответ оценивается в том виде, в каком произнесён: прежде его
+        # переписывали правила разбора команд ассистента.
+        self.assertEqual(response.payload["transcript"], "тестовый ответ")
 
         with self.assertRaises(asyncio.TimeoutError):
             await asyncio.wait_for(ui_updates.queue.get(), timeout=0.05)
@@ -149,3 +151,34 @@ class MocaSpeechUiTest(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TranscriptIsNotRewrittenTest(unittest.TestCase):
+    """Распознанный ответ не переписывается до оценки.
+
+    Прежде он проходил через правила разбора команд ассистента: начальные
+    «ну», «а», «и» стирались. «А кошка всегда пряталась…» засчитывалось как
+    дословное повторение, хотя лишнее слово делает ответ неверным, а «ну»
+    исчезало до подсчёта слов-заполнителей.
+    """
+
+    def test_leading_words_are_kept(self) -> None:
+        from neuro_mirror.plugins.speech_worker.plugin import clean_transcript
+
+        for raw in ("а кошка всегда пряталась под диваном",
+                    "ну лодка лампа лес",
+                    "и я знаю только одно"):
+            self.assertEqual(clean_transcript(raw), raw)
+
+    def test_only_spacing_is_tidied(self) -> None:
+        from neuro_mirror.plugins.speech_worker.plugin import clean_transcript
+
+        self.assertEqual(clean_transcript("  кошка   всегда\n пряталась "), "кошка всегда пряталась")
+
+    def test_an_extra_word_breaks_verbatim_repetition(self) -> None:
+        """Методист подтвердил: верно только дословное повторение."""
+        from neuro_mirror.plugins.speech_worker.plugin import clean_transcript
+        from neuro_mirror.screening.moca_scoring import score_moca_task
+
+        said = clean_transcript("а кошка всегда пряталась под диваном когда собаки были в комнате")
+        self.assertEqual(score_moca_task("language_sentence_2", said)["score"], 0)

@@ -3,8 +3,9 @@
 // Базовый скрининг (deck slide 4): «Проверка оборудования → Видеоанализ →
 // Самочувствие». Step 3 is the HADS test the backend chains after the video
 // analysis on its own (shown in place, js/components/hads-test.js), then
-// the SAN questionnaire. Its questions come from the server; until the server
-// provides them (and stores answers) the step shows a stub.
+// the SAN questionnaire. Its questions come from the server; the step falls
+// back to a stub only if the server returns nothing usable. The answers are
+// not sent back to the server yet.
 //
 // The screen keeps its progress in module state, so leaving the section and
 // coming back (deck: navigation must not reset progress) shows where the

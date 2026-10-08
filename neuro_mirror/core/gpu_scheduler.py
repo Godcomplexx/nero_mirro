@@ -2,20 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import threading
-from contextlib import asynccontextmanager, contextmanager
-from typing import Iterator
+from contextlib import asynccontextmanager
 
 
 _GPU_LOCK = threading.Lock()
-
-
-@contextmanager
-def exclusive_gpu_task_sync(_task_name: str = "") -> Iterator[None]:
-    _GPU_LOCK.acquire()
-    try:
-        yield
-    finally:
-        _GPU_LOCK.release()
 
 
 @asynccontextmanager

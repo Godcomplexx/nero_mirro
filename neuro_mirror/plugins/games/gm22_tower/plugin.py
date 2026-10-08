@@ -7,9 +7,7 @@ from typing import Any
 
 from neuro_mirror.plugins.games.base import BrowserGamePlugin
 from neuro_mirror.plugins.games.gm22_tower.stimuli import (
-    BONUS_DISKS,
     DISK_LEVELS,
-    MINIMUM_SESSION_MS,
 )
 from neuro_mirror.screening.gm22_scoring import score_gm22
 

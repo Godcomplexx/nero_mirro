@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from neuro_mirror.plugins.games.catalog import get_game_definition
+
 import asyncio
 
 from neuro_mirror.core.event_bus import EventBus
@@ -54,14 +56,14 @@ def test_gm02_plugin_stops_on_first_incorrect_round() -> None:
         await plugin.start()
         try:
             started = await bus.request(
-                Event(topic=Topics.REQ_GM02_START, source="test")
+                Event(topic=get_game_definition("GM-02").start_request_topic, source="test")
             )
             assert started["sequence"] == [3]
             assert started["round"] == 1
 
             second = await bus.request(
                 Event(
-                    topic=Topics.REQ_GM02_ANSWER,
+                    topic=get_game_definition("GM-02").answer_request_topic,
                     source="test",
                     payload={
                         "session_id": started["session_id"],
@@ -74,7 +76,7 @@ def test_gm02_plugin_stops_on_first_incorrect_round() -> None:
 
             failed = await bus.request(
                 Event(
-                    topic=Topics.REQ_GM02_ANSWER,
+                    topic=get_game_definition("GM-02").answer_request_topic,
                     source="test",
                     payload={
                         "session_id": started["session_id"],

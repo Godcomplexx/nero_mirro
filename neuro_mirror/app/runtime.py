@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from pathlib import Path
 
 from neuro_mirror.core.dataset_store import DatasetStore
 from neuro_mirror.core.event_bus import EventBus
@@ -13,10 +12,6 @@ from neuro_mirror.core.session_store import SessionStore
 from neuro_mirror.interfaces.plugin import Plugin
 from neuro_mirror.models.events import Event, Topics
 from neuro_mirror.plugins.aggregator.plugin import AggregatorPlugin
-from neuro_mirror.plugins.ai_assistant.appearance_response import AppearanceResponseComposer
-from neuro_mirror.plugins.ai_assistant.appearance_memory import AppearanceMemoryStore
-from neuro_mirror.plugins.ai_assistant.backends import build_assistant_backend
-from neuro_mirror.plugins.ai_assistant.plugin import AIAssistantPlugin
 from neuro_mirror.plugins.camera.plugin import CameraPlugin
 from neuro_mirror.plugins.microphone.plugin import MicrophonePlugin
 from neuro_mirror.plugins.speech_worker.plugin import SpeechWorkerPlugin
@@ -36,7 +31,6 @@ class RuntimeHandle:
     bus: EventBus
     plugin_manager: PluginManager
     stop_event: asyncio.Event
-    assistant_backend_label: str
     session_store: SessionStore
     dataset_store: DatasetStore
     game_history_store: GameHistoryStore
@@ -54,16 +48,6 @@ class RuntimeHandle:
         if not auto_start:
             return
 
-        if self.settings.enable_ai_assistant:
-            await self.bus.publish(
-                Event(
-                    topic=Topics.VOICE_INTENT,
-                    source="bootstrap",
-                    payload={"intent": "start_screening"},
-                )
-            )
-            return
-
         await self.bus.publish(
             Event(
                 topic=Topics.UI_ACTION,
@@ -77,31 +61,12 @@ def create_runtime(
     settings: Settings,
     *,
     stop_event: asyncio.Event | None = None,
-    include_ai_plugin: bool = True,
     extra_plugins: list[Plugin] | None = None,
 ) -> RuntimeHandle:
     bus = EventBus()
     plugin_manager = PluginManager()
     stop_event = stop_event or asyncio.Event()
 
-    assistant_backend_label = (
-        f"{settings.ai_backend}:{settings.ollama_model}"
-        if settings.enable_ai_assistant
-        else "выключен"
-    )
-    appearance_composer = AppearanceResponseComposer(
-        enabled=settings.enable_ai_assistant,
-        ai_backend=settings.ai_backend,
-        ollama_base_url=settings.ollama_base_url,
-        ollama_model=settings.ollama_model,
-        ollama_vision_model=settings.ollama_vision_model,
-        timeout_seconds=settings.ollama_timeout_seconds,
-        rules_path=settings.assistant_rules_path,
-        memory_store=AppearanceMemoryStore(
-            path=Path(settings.appearance_memory_path or "runtime/appearance_memory.json"),
-            limit=settings.appearance_memory_limit,
-        ),
-    )
     session_store = SessionStore()
     dataset_store = DatasetStore()
     game_history_store = GameHistoryStore()
@@ -110,9 +75,7 @@ def create_runtime(
     plugin_manager.register(StoragePlugin(bus))
     plugin_manager.register(CameraPlugin(bus, settings=settings))
     plugin_manager.register(MicrophonePlugin(bus, settings=settings))
-    plugin_manager.register(
-        VisionWorkerPlugin(bus, settings=settings, appearance_composer=appearance_composer)
-    )
+    plugin_manager.register(VisionWorkerPlugin(bus, settings=settings))
     plugin_manager.register(SpeechWorkerPlugin(bus, settings=settings))
     plugin_manager.register(VoiceTestPlugin(bus, settings=settings))
     plugin_manager.register(MocaTestPlugin(bus, settings=settings, dataset_store=dataset_store))
@@ -129,22 +92,11 @@ def create_runtime(
     plugin_manager.register(
         AggregatorPlugin(
             bus,
-            appearance_composer=appearance_composer,
             session_store=session_store,
             settings=settings,
             dataset_store=dataset_store,
         )
     )
-
-    if include_ai_plugin:
-        plugin_manager.register(
-            AIAssistantPlugin(
-                bus,
-                enabled=settings.enable_ai_assistant,
-                backend=build_assistant_backend(settings),
-                settings=settings,
-            )
-        )
 
     for plugin in extra_plugins or []:
         plugin_manager.register(plugin)
@@ -154,7 +106,6 @@ def create_runtime(
         bus=bus,
         plugin_manager=plugin_manager,
         stop_event=stop_event,
-        assistant_backend_label=assistant_backend_label,
         session_store=session_store,
         dataset_store=dataset_store,
         game_history_store=game_history_store,

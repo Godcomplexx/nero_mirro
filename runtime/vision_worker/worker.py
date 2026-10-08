@@ -115,8 +115,6 @@ def handle_request(request_payload: dict[str, Any]) -> dict[str, Any]:
         result = capture_preview_frame()
     elif action == "release_camera":
         result = release_camera_action()
-    elif action == "analyze_appearance":
-        result = analyze_appearance()
     elif action == "analyze_image_file":
         payload = request_payload.get("payload") or {}
         result = analyze_image_file(str(payload.get("image_path") or ""))
@@ -232,8 +230,6 @@ def analyze_screening() -> dict[str, Any]:
         if frame is None:
             return {
                 "analysis_type": "screening",
-                "attention_score": None,
-                "gaze_stability": None,
                 "behavioral_markers_status": "unavailable",
                 "face_detected": False,
                 "face_count": 0,
@@ -269,8 +265,6 @@ def analyze_screening() -> dict[str, Any]:
 
         return {
             "analysis_type": "screening",
-            "attention_score": None,
-            "gaze_stability": None,
             "behavioral_markers_status": "unavailable",
             "face_detected": face_detected,
             "face_count": len(face_boxes),
@@ -285,40 +279,6 @@ def analyze_screening() -> dict[str, Any]:
             "source_backend": "vision_worker + rppg",
             **rppg_result,
         }
-    finally:
-        release_active_capture()
-
-
-def analyze_appearance() -> dict[str, Any]:
-    emotion_error = ensure_emotion_model_ready()
-    try:
-        frame_info = capture_frame_with_info()
-        frame = frame_info["frame"]
-        if frame is None:
-            return {
-                "analysis_type": "appearance",
-                "face_detected": False,
-                "face_count": 0,
-                "emotiefflib_available": EMOTIEFFLIB_AVAILABLE and not emotion_error,
-                "confidence": 0.0,
-                "emotion": "",
-                "appearance_description": "",
-                "camera_index": frame_info["camera_index"],
-                "camera_backend": frame_info["backend_name"],
-                "camera_attempts": frame_info["attempts"],
-                "observed": "Кадр с камеры не получен.",
-                "notes": "OpenCV не смог открыть ни одну проверенную камеру.",
-            }
-
-        result = analyze_appearance_frame(frame, emotion_error=emotion_error)
-        result.update(
-            {
-                "camera_index": frame_info["camera_index"],
-                "camera_backend": frame_info["backend_name"],
-                "camera_attempts": frame_info["attempts"],
-            }
-        )
-        return result
     finally:
         release_active_capture()
 

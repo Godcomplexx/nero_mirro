@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from neuro_mirror.plugins.games.catalog import get_game_definition
+
 import asyncio
 
 from neuro_mirror.core.event_bus import EventBus
@@ -49,7 +51,7 @@ def test_gm14_plugin_allows_correction_after_wrong_word() -> None:
         await plugin.start()
         try:
             started = await bus.request(
-                Event(topic=Topics.REQ_GM14_START, source="test")
+                Event(topic=get_game_definition("GM-14").start_request_topic, source="test")
             )
             session = plugin._sessions[started["session_id"]]
             target = session.words[0]
@@ -59,7 +61,7 @@ def test_gm14_plugin_allows_correction_after_wrong_word() -> None:
 
             rejected = await bus.request(
                 Event(
-                    topic=Topics.REQ_GM14_ANSWER,
+                    topic=get_game_definition("GM-14").answer_request_topic,
                     source="test",
                     payload={
                         "session_id": started["session_id"],
@@ -74,7 +76,7 @@ def test_gm14_plugin_allows_correction_after_wrong_word() -> None:
 
             accepted = await bus.request(
                 Event(
-                    topic=Topics.REQ_GM14_ANSWER,
+                    topic=get_game_definition("GM-14").answer_request_topic,
                     source="test",
                     payload={
                         "session_id": started["session_id"],

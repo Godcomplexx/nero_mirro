@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from neuro_mirror.plugins.games.catalog import get_game_definition
+
 import asyncio
 
 from neuro_mirror.core.event_bus import EventBus
@@ -71,7 +73,7 @@ def test_gm07_plugin_returns_first_target_trial_and_accepts_answer() -> None:
         await plugin.start()
         try:
             started = await bus.request(
-                Event(topic=Topics.REQ_GM07_START, source="test")
+                Event(topic=get_game_definition("GM-07").start_request_topic, source="test")
             )
             target = next(
                 item for item in started["stimuli"]
@@ -79,7 +81,7 @@ def test_gm07_plugin_returns_first_target_trial_and_accepts_answer() -> None:
             )
             reply = await bus.request(
                 Event(
-                    topic=Topics.REQ_GM07_ANSWER,
+                    topic=get_game_definition("GM-07").answer_request_topic,
                     source="test",
                     payload={
                         "session_id": started["session_id"],

@@ -38,7 +38,7 @@ class RppgScreeningFlowTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_aggregator_includes_heart_rate_in_screening_report(self) -> None:
         bus = EventBus()
-        plugin = AggregatorPlugin(bus, appearance_composer=object())  # type: ignore[arg-type]
+        plugin = AggregatorPlugin(bus)
         plugin.state = SessionState.MOCA
         plugin._latest_results = {
             "video": {

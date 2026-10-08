@@ -69,15 +69,20 @@ def test_reference_service_settings_are_gone(name):
     assert not hasattr(Settings(), name)
 
 
-@pytest.mark.parametrize(
-    "name", ["detect_weather_request", "detect_currency_request",
-             "should_use_internet_fallback", "should_prefer_internet_answer"]
-)
-def test_reference_service_code_is_removed(name):
-    """Отключённый, но живой код рано или поздно включают обратно."""
-    from neuro_mirror.plugins.ai_assistant import backends
+def test_assistant_module_is_removed():
+    """Ассистент удалён целиком: вход в интерфейсе убрали, а модуль работал
+    вхолостую и загружал языковую модель при каждом запуске.
 
-    assert not hasattr(backends, name)
+    Отключённый, но живой код рано или поздно включают обратно, поэтому
+    проверяется отсутствие самого модуля, а не отдельных его функций.
+    """
+    assert not (SOURCE_ROOT / "plugins" / "ai_assistant").exists()
+    for path in SOURCE_ROOT.rglob("*.py"):
+        if "__pycache__" in path.parts:
+            continue
+        text = path.read_text(encoding="utf-8")
+        assert "ai_assistant" not in text, path.name
+        assert "11434" not in text, f"{path.name}: обращение к Ollama"
 
 
 def test_speech_synthesis_is_local():
@@ -127,15 +132,6 @@ def test_bundled_assets_exist():
     assert list((static / "fonts").glob("*.woff2")), "нет файлов шрифтов"
 
 
-def test_vision_translation_does_not_use_public_services():
-    """Описание пользователя с камеры не должно уходить во внешний переводчик."""
-    backends = (SOURCE_ROOT / "plugins" / "ai_assistant" / "backends.py").read_text(
-        encoding="utf-8"
-    )
-    assert "translate.googleapis.com" not in backends
-    assert "mymemory" not in backends.lower()
-
-
 def test_runtime_actually_starts(tmp_path, monkeypatch):
     """Сборка runtime с настройками по умолчанию.
 
@@ -151,7 +147,7 @@ def test_runtime_actually_starts(tmp_path, monkeypatch):
 
     monkeypatch.chdir(tmp_path)
     handle = create_runtime(
-        Settings.from_env(), stop_event=asyncio.Event(), include_ai_plugin=False
+        Settings.from_env(), stop_event=asyncio.Event()
     )
     assert handle.session_store is not None
     assert handle.dataset_store is not None

@@ -4,8 +4,9 @@
 // MoCA the aggregator stores the composition of the next session in the
 // report (domains.moca_training_plan, built by screening/training_plan.py —
 // rows { domain, score, max_score, shortfall, tasks }). Training is unlocked
-// by the presence of such a report. The games themselves are not on the
-// server yet — screens show them as a stub.
+// by the presence of such a report. The session itself — ten games in order,
+// each with its difficulty level — comes ready from GET /api/training/session;
+// the games are played through js/core/games.js.
 
 import { api } from "./legacy.js";
 

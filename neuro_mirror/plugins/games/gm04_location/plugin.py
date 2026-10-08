@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from neuro_mirror.plugins.games.base import BrowserGamePlugin
-from neuro_mirror.plugins.games.gm04_location.stimuli import GRID_SIZE, MAX_TARGETS, MIN_TARGETS, ROUNDS, STUDY_SECONDS
+from neuro_mirror.plugins.games.gm04_location.stimuli import ROUNDS, STUDY_SECONDS
 from neuro_mirror.screening.gm04_scoring import score_gm04
 
 

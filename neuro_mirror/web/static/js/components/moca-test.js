@@ -5,9 +5,10 @@
 // spoken or the answer is being recorded. Task texts and their order come
 // from the server via mocaController. Styles: css/components/moca.css.
 //
-// The deck's «Повторить инструкцию» / «Приступить» / 2-minute timer need
-// server support the MoCA plugin does not have yet (it speaks, records for a
-// fixed time and moves on by itself), so they are shown as a stub note.
+// «Повторить инструкцию» replays the current task's instruction and
+// «Приступить к выполнению» starts the task; both are commands to the MoCA
+// plugin (moca_repeat_prompt, moca_begin_task). The task time limit comes
+// from the server with the task.
 
 import { mocaController } from "../core/moca-controller.js";
 import { confirmDialog } from "./confirm-dialog.js";

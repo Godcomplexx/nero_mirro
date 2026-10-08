@@ -12,7 +12,6 @@ async def run() -> int:
     runtime = create_runtime(
         settings,
         stop_event=asyncio.Event(),
-        include_ai_plugin=True,
     )
     runtime.plugin_manager.register(ConsoleUIPlugin(runtime.bus))
 

@@ -14,11 +14,6 @@ from neuro_mirror.models.events import Event, Topics
 from neuro_mirror.plugins.aggregator.plugin import AggregatorPlugin, SessionState
 
 
-class _NoopComposer:
-    async def compose(self, payload):  # pragma: no cover - not used by these tests
-        return ""
-
-
 class _StaticDeviceProvider(IDeviceProvider):
     def __init__(self) -> None:
         self.camera = DeviceInfo(device_id="0", kind="camera", label="Camera 0", available=True)
@@ -43,7 +38,7 @@ class ScreeningDeviceFlowTest(unittest.IsolatedAsyncioTestCase):
         """Screening now uses browser WebSocket frames — no PREPARE_SESSION or START_CAPTURE."""
         bus = EventBus()
         events = bus.subscribe(Topics.UI_UPDATE, Topics.PREPARE_SESSION, Topics.START_CAPTURE)
-        aggregator = AggregatorPlugin(bus, appearance_composer=_NoopComposer())
+        aggregator = AggregatorPlugin(bus)
 
         await aggregator.handle_event(
             Event(

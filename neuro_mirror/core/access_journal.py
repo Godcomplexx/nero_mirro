@@ -25,7 +25,6 @@ DEFAULT_PATH = Path("runtime/deidentified/access.jsonl")
 
 # Виды обращений, которые фиксируются.
 VIEW_RESULTS = "results_view"
-VIEW_REPORT = "report_view"
 EXPORT_RESULTS = "results_export"
 
 
@@ -68,23 +67,3 @@ class AccessJournal:
                     handle.write(line + "\n")
         except OSError as exc:
             logger.warning("не удалось записать обращение к результатам: %s", exc)
-
-    def entries(self, *, user_id: str = "") -> list[dict[str, Any]]:
-        """Прочитать журнал; при указании профиля — только его записи."""
-        if not self.path.exists():
-            return []
-        result: list[dict[str, Any]] = []
-        with self.path.open("r", encoding="utf-8") as handle:
-            for line in handle:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    entry = json.loads(line)
-                except ValueError:
-                    # Оборванная строка пропускается: журнал дописывается и
-                    # может быть прерван на середине записи.
-                    continue
-                if not user_id or entry.get("user_id") == user_id:
-                    result.append(entry)
-        return result

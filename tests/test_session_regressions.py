@@ -74,7 +74,7 @@ def test_events_reasons_and_legacy_sessions_are_redacted(tmp_path):
     store = SessionStore(tmp_path / 'sessions.json')
     record = store.start(user_id='u1', scenario='hads', versions={})
     sid = record['session_id']
-    store.add_event(sid, 'test', {'nested': {'email': 'hidden@example.org'}, 'note': 'a@example.org'})
+    store.checkpoint(sid, {'nested': {'email': 'hidden@example.org'}, 'note': 'a@example.org'})
     store.interrupt(sid, 'Contact b@example.org')
     payload = json.loads(store.path.read_text(encoding='utf-8'))
     payload[0]['events'].append({'type': 'legacy', 'details': {'name': 'Person', 'text': 'c@example.org'}})
@@ -116,7 +116,7 @@ def test_resume_uses_current_permissions_and_ignores_late_events(tmp_path):
         store = SessionStore(tmp_path / 'sessions.json')
         bus = EventBus()
         sub = bus.subscribe(Topics.HADS_START)
-        agg = AggregatorPlugin(bus, appearance_composer=Mock(), session_store=store, settings=Settings())
+        agg = AggregatorPlugin(bus, session_store=store, settings=Settings())
         agg._active_user_id = 'u1'
         old = store.start(user_id='u1', scenario='hads', versions={}, permissions={'audio': True})
         sid = old['session_id']
@@ -146,7 +146,7 @@ def test_moca_resume_without_current_audio_consent_keeps_checkpoint(tmp_path):
         sid = record['session_id']
         store.checkpoint(sid, {'next_index': 1})
         store.interrupt(sid, 'stop')
-        agg = AggregatorPlugin(EventBus(), appearance_composer=Mock(), session_store=store)
+        agg = AggregatorPlugin(EventBus(), session_store=store)
         agg._active_user_id = 'u1'
         await agg._resume_session(sid, {'audio_allowed': False})
         assert store.get(sid)['status'] == 'interrupted'
@@ -159,7 +159,7 @@ def test_video_screening_transitions_to_hads_without_audio(tmp_path):
     async def run():
         bus = EventBus()
         sub = bus.subscribe(Topics.HADS_START)
-        agg = AggregatorPlugin(bus, appearance_composer=Mock())
+        agg = AggregatorPlugin(bus)
         agg.state = SessionState.SCREENING
         agg._session_permissions = {'audio': False, 'video': True}
         agg._latest_results['video'] = {'heart_rate_status': 'unavailable'}

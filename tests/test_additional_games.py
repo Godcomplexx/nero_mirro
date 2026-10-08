@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from neuro_mirror.plugins.games.catalog import get_game_definition
+
 import asyncio
 import collections
 
@@ -244,13 +246,13 @@ def test_new_game_plugins_complete() -> None:
     async def scenario() -> None:
         bus = EventBus()
         await _run_plugin(
-            Gm05WordListPlugin(bus), Topics.REQ_GM05_START, Topics.REQ_GM05_ANSWER,
+            Gm05WordListPlugin(bus), get_game_definition("GM-05").start_request_topic, get_game_definition("GM-05").answer_request_topic,
             lambda plugin, reply: {"session_id": reply["session_id"], "selected": reply["study_words"], "timestamp_ms": 1}, 1,
         )
 
         bus = EventBus()
         await _run_plugin(
-            Gm08StopSignalPlugin(bus), Topics.REQ_GM08_START, Topics.REQ_GM08_ANSWER,
+            Gm08StopSignalPlugin(bus), get_game_definition("GM-08").start_request_topic, get_game_definition("GM-08").answer_request_topic,
             lambda plugin, reply: {"session_id": reply["session_id"], "responded": not reply["mirrored"],
                                    "reaction_ms": 300 if not reply["mirrored"] else None, "timestamp_ms": 1}, 40,
         )
@@ -258,7 +260,7 @@ def test_new_game_plugins_complete() -> None:
         bus = EventBus()
         gm12_expected = sum(item[0] == "животные" for item in GM12_ITEMS)
         gm12_result = await _run_plugin(
-            Gm12WordPicturePlugin(bus), Topics.REQ_GM12_START, Topics.REQ_GM12_ANSWER,
+            Gm12WordPicturePlugin(bus), get_game_definition("GM-12").start_request_topic, get_game_definition("GM-12").answer_request_topic,
             lambda plugin, reply: {"session_id": reply["session_id"],
                                    "selected_word": plugin._sessions[reply["session_id"]].order[plugin._sessions[reply["session_id"]].index][1],
                                    "timestamp_ms": 1},
@@ -270,7 +272,7 @@ def test_new_game_plugins_complete() -> None:
 
         bus = EventBus()
         await _run_plugin(
-            Gm23MatrixReasoningPlugin(bus), Topics.REQ_GM23_START, Topics.REQ_GM23_ANSWER,
+            Gm23MatrixReasoningPlugin(bus), get_game_definition("GM-23").start_request_topic, get_game_definition("GM-23").answer_request_topic,
             lambda plugin, reply: {"session_id": reply["session_id"],
                                    "selected_id": plugin._sessions[reply["session_id"]].correct_id, "timestamp_ms": 1}, 10,
         )
@@ -298,6 +300,6 @@ def test_new_game_plugins_complete() -> None:
         bus = EventBus()
         # Число лабиринтов берётся из набора стимулов, а не задаётся числом:
         # при изменении набора ожидание в тесте разошлось бы молча.
-        await _run_plugin(Gm19MazePlugin(bus), Topics.REQ_GM19_START, Topics.REQ_GM19_ANSWER, maze_answer, MAZE_COUNT)
+        await _run_plugin(Gm19MazePlugin(bus), get_game_definition("GM-19").start_request_topic, get_game_definition("GM-19").answer_request_topic, maze_answer, MAZE_COUNT)
 
     asyncio.run(scenario())

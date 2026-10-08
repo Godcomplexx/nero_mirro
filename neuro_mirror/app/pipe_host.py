@@ -188,7 +188,6 @@ class PipeHost:
         self.writer = writer
         self._streams: dict[str, PipeSocket] = {}
         self._stream_tasks: dict[str, asyncio.Task] = {}
-        self._client = None
 
     async def __aenter__(self) -> "PipeHost":
         return self

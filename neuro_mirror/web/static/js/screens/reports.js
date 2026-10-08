@@ -5,8 +5,9 @@
 // GET /api/results with the same metrics and trends as before (moved from
 // app.js: extractResultMetrics, findPreviousMetric, trendBadge, …). Scores
 // stay visible — there is no specialist role yet (user decision 2026-09-23).
-// «Динамика» (per-domain charts over a period), the detailed report and PDF
-// export need server data that does not exist yet, so they are stubs.
+// «Динамика» draws per-domain bars from the same stored reports
+// (domains.moca_domains). The detailed report and the PDF export are not
+// implemented yet; their buttons stay disabled.
 
 import { activeUser, api } from "../core/legacy.js";
 

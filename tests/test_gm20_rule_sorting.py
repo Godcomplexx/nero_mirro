@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from neuro_mirror.plugins.games.catalog import get_game_definition
+
 import asyncio
 
 from neuro_mirror.core.event_bus import EventBus
@@ -65,7 +67,7 @@ def test_gm20_plugin_switches_after_ten_consecutive_correct_answers() -> None:
         plugin._random = _PredictableRandom()  # type: ignore[assignment]
         await plugin.start()
         try:
-            reply = await bus.request(Event(topic=Topics.REQ_GM20_START, source="test"))
+            reply = await bus.request(Event(topic=get_game_definition("GM-20").start_request_topic, source="test"))
             session = plugin._sessions[reply["session_id"]]
             assert session.active_rule == "color"
 
@@ -73,7 +75,7 @@ def test_gm20_plugin_switches_after_ten_consecutive_correct_answers() -> None:
                 selected = session.current_matches[session.active_rule]
                 reply = await bus.request(
                     Event(
-                        topic=Topics.REQ_GM20_ANSWER,
+                        topic=get_game_definition("GM-20").answer_request_topic,
                         source="test",
                         payload={
                             "session_id": session.session_id,

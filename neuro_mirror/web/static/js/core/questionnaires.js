@@ -2,8 +2,9 @@
 //
 // Questionnaire content (questions, answer scales) belongs to the backend,
 // like HADS and MoCA already do — the frontend only renders it. The SAN
-// endpoint does not exist on the server yet; until it does this returns
-// null and screens show a stub instead of hardcoded questions.
+// questionnaire comes from GET /api/questionnaires/san; if the server returns
+// nothing usable this returns null and the screen shows a stub instead of
+// hardcoded questions.
 //
 // Expected contract for GET /api/questionnaires/san:
 //   {

@@ -90,7 +90,7 @@ def test_config_reports_the_voice_actually_used(tmp_path):
     app = create_app()
     app.state.context = SimpleNamespace(
         settings=Settings(),
-        runtime=SimpleNamespace(assistant_backend_label="выключен"),
+        runtime=SimpleNamespace(),
     )
     with TestClient(app) as client:
         config = client.get("/api/config").json()

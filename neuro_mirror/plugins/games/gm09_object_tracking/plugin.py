@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from neuro_mirror.plugins.games.base import BrowserGamePlugin
-from neuro_mirror.plugins.games.gm09_object_tracking.stimuli import MOVEMENT_MS, OBJECT_COUNT, PREVIEW_MS, ROUNDS, STIMULUS_SHAPES, TARGET_COUNT
+from neuro_mirror.plugins.games.gm09_object_tracking.stimuli import MOVEMENT_MS, OBJECT_COUNT, PREVIEW_MS, ROUNDS, STIMULUS_SHAPES
 from neuro_mirror.screening.gm09_scoring import score_gm09
 
 

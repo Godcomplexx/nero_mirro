@@ -21,7 +21,7 @@ from typing import Any
 from fastapi import (
     FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect,
 )
-from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -46,8 +46,6 @@ from neuro_mirror.plugins.games.registry import (
     get_available_game_definition,
     implemented_game_codes,
 )
-from neuro_mirror.plugins.games.contracts import Domain, normalise_game_code
-from neuro_mirror.plugins.games.selector import NoEligibleGameError, select_game
 from neuro_mirror.core.access_journal import (
     EXPORT_RESULTS,
     VIEW_RESULTS,
@@ -70,10 +68,6 @@ _synthesizer = SpeechSynthesizer()
 
 
 # ---- Pydantic request models ----
-
-class AssistantMessageIn(BaseModel):
-    text: str
-
 
 class CameraVisionRequest(BaseModel):
     text: str
@@ -134,12 +128,6 @@ class SanAnswersIn(BaseModel):
     moment: str = "before"
     answers: dict[str, int] = Field(default_factory=dict)
     session_id: str = ""
-
-
-class GameSelectionIn(BaseModel):
-    domain: str
-    session_game_codes: list[str] = Field(default_factory=list)
-    session_stimulus_sets: list[list[str]] = Field(default_factory=list)
 
 
 # ---- Minimal application context ----
@@ -217,7 +205,6 @@ def create_app() -> FastAPI:
         runtime = create_runtime(
             settings,
             stop_event=asyncio.Event(),
-            include_ai_plugin=True,
         )
         web_ui = WebUIPlugin(runtime.bus)
         runtime.plugin_manager.register(web_ui)
@@ -400,42 +387,6 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=409, detail="Не удалось подобрать ни одного задания.")
         return JSONResponse({**session, "profile": profile, "source_session_id": source_session})
 
-    @app.post("/api/games/select")
-    async def select_training_game(payload: GameSelectionIn) -> JSONResponse:
-        active_user = _active_user_or_400()
-        try:
-            domain = Domain(payload.domain.strip().lower())
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail="Неизвестный ведущий домен.") from exc
-
-        stimulus_sets = {
-            (normalise_game_code(item[0]), str(item[1]))
-            for item in payload.session_stimulus_sets
-            if len(item) == 2
-        }
-        try:
-            decision = select_game(
-                domain,
-                session_game_codes=frozenset(
-                    normalise_game_code(code) for code in payload.session_game_codes
-                ),
-                session_stimulus_sets=frozenset(stimulus_sets),
-                history=app.state.context.runtime.game_history_store.for_user(
-                    str(active_user.get("id") or "")
-                ),
-                available_codes=implemented_game_codes(),
-                definitions=all_game_definitions(),
-            )
-        except NoEligibleGameError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-        return JSONResponse(
-            {
-                "game": decision.game.to_public_dict(implemented=True),
-                "stimulus_set": decision.stimulus_set,
-                "reasons": list(decision.reasons),
-            }
-        )
-
     @app.get("/api/games/{game_code}/renderer.js")
     async def game_renderer(game_code: str) -> FileResponse:
         try:
@@ -488,16 +439,13 @@ def create_app() -> FastAPI:
 
     @app.get("/api/config")
     async def get_config() -> JSONResponse:
-        ctx: WebAppContext = app.state.context
         return JSONResponse(
             {
-                "assistant_enabled": ctx.settings.enable_ai_assistant,
                 # Голос берётся у синтезатора, которым программа реально
                 # озвучивает: прежде здесь стояло название голоса облачной
                 # озвучки, удалённой при переходе на работу без сети.
                 "tts_voice": _synthesizer.voice_path.stem,
                 "tts_available": _synthesizer.available,
-                "assistant_backend_label": ctx.runtime.assistant_backend_label,
                 "app_version": APP_VERSION,
                 "scenario_versions": SCENARIO_VERSIONS,
             }
@@ -624,10 +572,9 @@ def create_app() -> FastAPI:
         greeting = f"Здравствуйте, {user['name']}! {_next_step_suggestion(user)}"
         await ctx.state_store.apply_update(
             {
-                "screen": "assistant",
+                "screen": "idle",
                 "active_user": serialized,
                 "message": greeting,
-                "assistant_source": "ассистент",
             },
             source="web.users",
         )
@@ -1043,154 +990,8 @@ def create_app() -> FastAPI:
 
     # ---- Request-reply endpoints (business logic delegated to plugins) ----
 
-    @app.post("/api/assistant/message")
-    async def assistant_message(payload: AssistantMessageIn) -> JSONResponse:
-        ctx: WebAppContext = app.state.context
-        try:
-            result = await ctx.runtime.bus.request(
-                Event(
-                    topic=Topics.REQ_ASSISTANT_MESSAGE,
-                    source="web.assistant",
-                    payload={"text": payload.text.strip(), "source": "web.assistant"},
-                ),
-                timeout=ctx.settings.ollama_timeout_seconds + 10,
-            )
-        except asyncio.TimeoutError:
-            raise HTTPException(status_code=504, detail="Ассистент не ответил вовремя.")
-
-        return JSONResponse(
-            {
-                "accepted": result.get("accepted", True),
-                "command": result.get("command"),
-                "reply": result.get("reply", ""),
-                "backend": result.get("backend", ""),
-            }
-        )
-
-    @app.post("/api/appearance/analyze")
-    async def appearance_analyze(image: UploadFile = File(...)) -> JSONResponse:
-        ctx: WebAppContext = app.state.context
-        _require_consent("video")
-
-        image_bytes = await image.read()
-        if not image_bytes:
-            raise HTTPException(status_code=400, detail="Кадр с камеры не получен. Включите камеру и повторите попытку.")
-        if len(image_bytes) > 8 * 1024 * 1024:
-            raise HTTPException(status_code=400, detail="Кадр слишком большой. Уменьшите разрешение камеры и повторите попытку.")
-
-        from neuro_mirror.screening.session_check import analyze_frame_conditions
-
-        try:
-            frame_check = await asyncio.to_thread(analyze_frame_conditions, image_bytes)
-        except Exception:
-            _log.exception("Ошибка проверки лица перед оценкой внешнего вида")
-            raise HTTPException(
-                status_code=503,
-                detail=(
-                    "Проверка лица не запустилась. Перезапустите приложение и повторите попытку. "
-                    "Если сообщение повторится, видеооценка на этом компьютере недоступна."
-                ),
-            )
-
-        advice = " ".join(str(item).strip() for item in frame_check.get("advice", []) if str(item).strip())
-        if frame_check.get("detector_available") is False:
-            raise HTTPException(
-                status_code=503,
-                detail=advice or "Проверка лица недоступна. Перезапустите приложение и повторите попытку.",
-            )
-        if not frame_check.get("face_detected"):
-            raise HTTPException(
-                status_code=422,
-                detail=advice or "Лицо не найдено. Посмотрите в камеру и повторите оценку.",
-            )
-        if not frame_check.get("brightness_ok") or not frame_check.get("face_close_enough"):
-            raise HTTPException(
-                status_code=422,
-                detail=advice or "Приблизьтесь к камере, добавьте света и повторите оценку.",
-            )
-
-        # Notify UI only after the frame has passed the face check.
-        await ctx.runtime.bus.publish(
-            Event(
-                topic=Topics.UI_UPDATE,
-                source="web",
-                payload={
-                    "screen": "assistant",
-                    "message": "Сейчас оцениваю внешний вид по кадру. Это может занять несколько секунд.",
-                    "assistant_source": "визуальный анализ",
-                },
-            )
-        )
-
-        suffix = Path(image.filename or "frame.jpg").suffix or ".jpg"
-        fd, temp_path = tempfile.mkstemp(prefix="neuro_mirror_frame_", suffix=suffix)
-        os.close(fd)
-        try:
-            with open(temp_path, "wb") as output_file:
-                output_file.write(image_bytes)
-
-            result = await ctx.runtime.bus.request(
-                Event(
-                    topic=Topics.REQ_APPEARANCE_ANALYZE,
-                    source="web.appearance",
-                    payload={"image_path": temp_path},
-                ),
-                timeout=max(ctx.settings.worker_request_timeout_seconds, ctx.settings.ollama_timeout_seconds + 90),
-            )
-        except asyncio.TimeoutError:
-            raise HTTPException(status_code=504, detail="Анализ внешности занял слишком долго.")
-        finally:
-            try:
-                Path(temp_path).unlink(missing_ok=True)
-            except Exception:
-                pass
-
-        if result.get("error"):
-            status_code = 422 if result.get("error_code") == "face_not_detected" else 503
-            raise HTTPException(status_code=status_code, detail=result["error"])
-
-        reply = str(result.get("reply") or "").strip()
-        if not reply or not reply.strip(" .,-–—"):
-            reply = (
-                "Оценка не получена. Убедитесь, что лицо полностью видно, добавьте света "
-                "и нажмите «Оценка вида» ещё раз."
-            )
-        return JSONResponse({"reply": reply, "report": result.get("report")})
-
-    @app.post("/api/camera/vision")
-    async def camera_vision(payload: CameraVisionRequest) -> JSONResponse:
-        ctx: WebAppContext = app.state.context
-        _require_consent("video")
-        if not payload.text.strip():
-            raise HTTPException(status_code=400, detail="text is required")
-        if not payload.image_base64.strip():
-            raise HTTPException(status_code=400, detail="image_base64 is required")
-
-        try:
-            result = await ctx.runtime.bus.request(
-                Event(
-                    topic=Topics.REQ_CAMERA_VISION,
-                    source="web.vision",
-                    payload={
-                        "text": payload.text.strip(),
-                        "image_base64": payload.image_base64.strip(),
-                    },
-                ),
-                timeout=ctx.settings.ollama_timeout_seconds + 15,
-            )
-        except asyncio.TimeoutError:
-            raise HTTPException(status_code=504, detail="Vision-запрос не завершился вовремя.")
-
-        if result.get("error"):
-            raise HTTPException(status_code=500, detail=result["error"])
-
-        return JSONResponse({"reply": result.get("reply", ""), "backend": result.get("backend", "")})
-
     @app.post("/api/speech/transcribe")
-    async def speech_transcribe(
-        audio: UploadFile = File(...),
-        assistant: bool = True,
-    ) -> JSONResponse:
+    async def speech_transcribe(audio: UploadFile = File(...)) -> JSONResponse:
         ctx: WebAppContext = app.state.context
         _require_consent("audio")
         suffix = Path(audio.filename or "voice.webm").suffix or ".webm"
@@ -1228,44 +1029,14 @@ def create_app() -> FastAPI:
                 "message": stt_result.get("message", ""),
             })
 
-        transcript = stt_result.get("transcript", "")
-
-        if not assistant:
-            return JSONResponse(
-                {
-                    "accepted": True,
-                    "transcript": transcript,
-                    "raw_transcript": stt_result.get("raw_transcript", ""),
-                    "stt_model": stt_result.get("model", stt_result.get("stt_model", "")),
-                    "stt_device": stt_result.get("device", stt_result.get("stt_device", "")),
-                }
-            )
-
-        # Step 2: feed transcript to AIAssistantPlugin
-        try:
-            assistant_result = await ctx.runtime.bus.request(
-                Event(
-                    topic=Topics.REQ_ASSISTANT_MESSAGE,
-                    source="web.speech",
-                    payload={"text": transcript, "source": "web.speech"},
-                ),
-                timeout=ctx.settings.ollama_timeout_seconds + 10,
-            )
-        except asyncio.TimeoutError:
-            assistant_result = {"command": None, "reply": "", "backend": "timeout"}
-
         return JSONResponse(
             {
                 "accepted": True,
-                "transcript": transcript,
+                "transcript": stt_result.get("transcript", ""),
                 "raw_transcript": stt_result.get("raw_transcript", ""),
                 "notes": stt_result.get("notes", ""),
-                "stt_device": stt_result.get("stt_device", ""),
-                "stt_model": stt_result.get("stt_model", ""),
-                "stt_compute_type": stt_result.get("stt_compute_type", ""),
-                "command": assistant_result.get("command"),
-                "reply": assistant_result.get("reply", ""),
-                "backend": assistant_result.get("backend", ""),
+                "stt_model": stt_result.get("model", stt_result.get("stt_model", "")),
+                "stt_device": stt_result.get("device", stt_result.get("stt_device", "")),
             }
         )
 

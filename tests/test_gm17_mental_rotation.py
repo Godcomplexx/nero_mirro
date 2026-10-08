@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from neuro_mirror.plugins.games.catalog import get_game_definition
+
 import asyncio
 
 from neuro_mirror.core.event_bus import EventBus
@@ -47,7 +49,7 @@ def test_gm17_plugin_advances_after_one_choice() -> None:
         await plugin.start()
         try:
             started = await bus.request(
-                Event(topic=Topics.REQ_GM17_START, source="test")
+                Event(topic=get_game_definition("GM-17").start_request_topic, source="test")
             )
             session = plugin._sessions[started["session_id"]]
             correct_id = session.correct_choice_id
@@ -55,7 +57,7 @@ def test_gm17_plugin_advances_after_one_choice() -> None:
 
             reply = await bus.request(
                 Event(
-                    topic=Topics.REQ_GM17_ANSWER,
+                    topic=get_game_definition("GM-17").answer_request_topic,
                     source="test",
                     payload={
                         "session_id": started["session_id"],

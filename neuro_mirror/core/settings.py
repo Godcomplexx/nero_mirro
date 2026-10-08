@@ -9,20 +9,10 @@ from pathlib import Path
 
 @dataclass(slots=True)
 class Settings:
-    enable_ai_assistant: bool = True
     auto_start: bool | None = None
     web_host: str = "127.0.0.1"
     web_port: int = 8000
 
-    ai_backend: str = "ollama"
-    ollama_base_url: str = "http://127.0.0.1:11434"
-    ollama_model: str = "gemma4:e2b"
-    ollama_fallback_model: str = ""
-    ollama_vision_model: str = "llava"
-    ollama_timeout_seconds: float = 30.0
-    assistant_rules_path: str = ""
-    appearance_memory_path: str = "runtime/appearance_memory.json"
-    appearance_memory_limit: int = 20
 
     # Global device flag: "auto" detects GPU, "cpu" forces CPU, "cuda" forces GPU
     device: str = "auto"
@@ -36,8 +26,6 @@ class Settings:
     camera_index: int = 0
     rppg_duration_seconds: float = 20.0
     emotion_model_name: str = "enet_b2_7"
-    emotion_engine: str = "onnx"
-    emotion_device: str = "auto"
 
     stt_model_name: str = "v3_rnnt"
     stt_language: str = "ru"
@@ -63,25 +51,10 @@ class Settings:
         base_dir = Path(__file__).resolve().parents[2]
         default_vision_script = base_dir / "runtime" / "vision_worker" / "worker.py"
         default_speech_script = base_dir / "runtime" / "speech_worker" / "worker.py"
-        raw_ai = os.getenv("NEURO_MIRROR_ENABLE_AI_ASSISTANT", "1").strip().lower()
         raw_auto_start = os.getenv("NEURO_MIRROR_AUTO_START", "").strip().lower()
         raw_web_host = os.getenv("NEURO_MIRROR_WEB_HOST", "127.0.0.1").strip()
         raw_web_port = os.getenv("NEURO_MIRROR_WEB_PORT", "8000").strip()
 
-        raw_ai_backend = os.getenv("NEURO_MIRROR_AI_BACKEND", "ollama").strip().lower()
-        raw_ollama_base_url = os.getenv(
-            "NEURO_MIRROR_OLLAMA_BASE_URL", "http://127.0.0.1:11434"
-        ).strip()
-        raw_ollama_model = os.getenv("NEURO_MIRROR_OLLAMA_MODEL", "gemma4:e2b").strip()
-        raw_ollama_fallback_model = os.getenv("NEURO_MIRROR_OLLAMA_FALLBACK_MODEL", "").strip()
-        raw_ollama_vision_model = os.getenv("NEURO_MIRROR_OLLAMA_VISION_MODEL", "llava").strip()
-        raw_ollama_timeout = os.getenv("NEURO_MIRROR_OLLAMA_TIMEOUT_SECONDS", "30").strip()
-        raw_assistant_rules_path = os.getenv("NEURO_MIRROR_ASSISTANT_RULES_PATH", "").strip()
-        raw_appearance_memory_path = os.getenv(
-            "NEURO_MIRROR_APPEARANCE_MEMORY_PATH",
-            str(base_dir / "runtime" / "appearance_memory.json"),
-        ).strip()
-        raw_appearance_memory_limit = os.getenv("NEURO_MIRROR_APPEARANCE_MEMORY_LIMIT", "20").strip()
 
         # Global device: "auto" = detect CUDA at runtime, "cpu" = force CPU, "cuda" = force GPU
         raw_device = os.getenv("NEURO_MIRROR_DEVICE", "auto").strip().lower()
@@ -101,9 +74,6 @@ class Settings:
         raw_camera_index = os.getenv("NEURO_MIRROR_CAMERA_INDEX", "0").strip()
         raw_rppg_duration = os.getenv("NEURO_MIRROR_RPPG_SECONDS", "20").strip()
         raw_emotion_model_name = os.getenv("NEURO_MIRROR_EMOTION_MODEL", "enet_b2_7").strip()
-        raw_emotion_engine = os.getenv("NEURO_MIRROR_EMOTION_ENGINE", "onnx").strip().lower()
-        # Per-component device overrides; fall back to global device
-        raw_emotion_device = os.getenv("NEURO_MIRROR_EMOTION_DEVICE", raw_device).strip().lower()
 
         raw_stt_model = os.getenv(
             "NEURO_MIRROR_STT_MODEL",
@@ -151,19 +121,9 @@ class Settings:
             auto_start = raw_auto_start not in {"0", "false", "no"}
 
         return cls(
-            enable_ai_assistant=raw_ai not in {"0", "false", "no"},
             auto_start=auto_start,
             web_host=raw_web_host,
             web_port=int(raw_web_port),
-            ai_backend=raw_ai_backend,
-            ollama_base_url=raw_ollama_base_url,
-            ollama_model=raw_ollama_model,
-            ollama_fallback_model=raw_ollama_fallback_model,
-            ollama_vision_model=raw_ollama_vision_model,
-            ollama_timeout_seconds=float(raw_ollama_timeout),
-            assistant_rules_path=raw_assistant_rules_path,
-            appearance_memory_path=raw_appearance_memory_path,
-            appearance_memory_limit=max(1, int(raw_appearance_memory_limit)),
             device=raw_device,
             vision_worker_python=raw_vision_worker_python,
             vision_worker_script=raw_vision_worker_script,
@@ -174,8 +134,6 @@ class Settings:
             camera_index=int(raw_camera_index),
             rppg_duration_seconds=float(raw_rppg_duration),
             emotion_model_name=raw_emotion_model_name,
-            emotion_engine=raw_emotion_engine,
-            emotion_device=raw_emotion_device if raw_emotion_device in {"auto", "cpu", "cuda"} else "auto",
             stt_model_name=raw_stt_model,
             stt_language=raw_stt_language,
             stt_device=raw_stt_device if raw_stt_device in {"auto", "cpu", "cuda"} else "auto",

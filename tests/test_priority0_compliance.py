@@ -29,11 +29,6 @@ class _RequestBus:
         return {"transcript": "тест"}
 
 
-class _Composer:
-    async def compose(self, _payload):
-        return "ok"
-
-
 class TempAudioLifecycleTest(unittest.IsolatedAsyncioTestCase):
     async def test_moca_removes_audio_after_success(self) -> None:
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp:
@@ -178,7 +173,6 @@ class AggregatorSessionTest(unittest.IsolatedAsyncioTestCase):
             store = SessionStore(Path(temp_dir) / "sessions.json")
             plugin = AggregatorPlugin(
                 EventBus(),
-                appearance_composer=_Composer(),
                 session_store=store,
                 settings=Settings(),
             )

@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
@@ -697,7 +697,7 @@ class MocaTestPlugin(ProcessorPlugin):
             finally:
                 delete_temp_audio(audio_path)
             raise
-        except Exception as exc:
+        except Exception:
             logger.exception("moca_test: ошибка записи для %s", task.task_id)
             try:
                 recorder.stop()

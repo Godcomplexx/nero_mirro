@@ -9,12 +9,24 @@ from neuro_mirror.core.gpu_scheduler import exclusive_gpu_task
 from neuro_mirror.core.worker_client import WorkerClient
 from neuro_mirror.interfaces.processor import ProcessorPlugin
 from neuro_mirror.models.events import Event, Topics
-from neuro_mirror.plugins.ai_assistant.backends import normalize_user_utterance
 
 
 def _uses_gpu(device: str) -> bool:
     """Return True when the device setting may use GPU (auto or cuda)."""
     return device.strip().lower() in {"auto", "cuda"}
+
+
+def clean_transcript(raw: str) -> str:
+    """Убрать лишние пробелы, не трогая слова.
+
+    Прежде распознанная речь проходила через правила разбора команд
+    ассистента: те стирали начальные «ну», «а», «и», заменяли обороты и
+    меняли регистр. Для ответов теста это искажение: «а кошка всегда
+    пряталась…» засчитывалось как дословное повторение, хотя по правилу
+    методики лишнее слово делает ответ неверным, а «ну» исчезало до подсчёта
+    слов-заполнителей. Ответ оценивается в том виде, в каком произнесён.
+    """
+    return " ".join(str(raw or "").split())
 
 
 class SpeechWorkerPlugin(ProcessorPlugin):
@@ -118,7 +130,7 @@ class SpeechWorkerPlugin(ProcessorPlugin):
             await self._send_reply(request_id, {"accepted": False, "transcript": "", "message": message})
             return
 
-        transcript = normalize_user_utterance(raw_transcript) or raw_transcript
+        transcript = clean_transcript(raw_transcript)
 
         if self._is_low_confidence_transcript(
             raw_transcript,
@@ -223,7 +235,7 @@ class SpeechWorkerPlugin(ProcessorPlugin):
             return
 
         raw_transcript = str(response.result.get("transcript") or "").strip()
-        transcript = normalize_user_utterance(raw_transcript) or raw_transcript
+        transcript = clean_transcript(raw_transcript)
         notes = str(response.result.get("notes") or "").strip()
         load_ms = response.result.get("load_ms")
         transcribe_ms = response.result.get("transcribe_ms")
@@ -280,13 +292,6 @@ class SpeechWorkerPlugin(ProcessorPlugin):
                     "message": self._transcript_message(transcript, load_ms=load_ms, transcribe_ms=transcribe_ms),
                     "assistant_source": "",
                 },
-            )
-        )
-        await self.bus.publish(
-            Event(
-                topic=Topics.VOICE_INTENT,
-                source=self.name,
-                payload={"utterance": transcript, "raw_utterance": raw_transcript},
             )
         )
         await self._publish_status_snapshot()

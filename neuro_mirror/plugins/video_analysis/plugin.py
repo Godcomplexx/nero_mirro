@@ -1,24 +1,19 @@
 from __future__ import annotations
 
 import base64
-import json
 import os
 import tempfile
 from pathlib import Path
 from typing import Any
-from urllib import error, request
 
 import asyncio
 import logging
 
-from neuro_mirror.core.gpu_scheduler import exclusive_gpu_task_sync
 from neuro_mirror.core.settings import Settings
 from neuro_mirror.core.worker_client import WorkerClient
 from neuro_mirror.interfaces.processor import ProcessorPlugin
 from neuro_mirror.models.events import Event, Topics
-from neuro_mirror.plugins.ai_assistant.appearance_response import AppearanceResponseComposer
 from neuro_mirror.screening.video_analyzer import analyze_frames
-from neuro_mirror.utils.text import is_safe_russian_text
 
 logger = logging.getLogger(__name__)
 
@@ -31,11 +26,9 @@ class VisionWorkerPlugin(ProcessorPlugin):
         bus,
         *,
         settings: Settings,
-        appearance_composer: AppearanceResponseComposer | None = None,
     ) -> None:
         super().__init__(bus)
         self.settings = settings
-        self.appearance_composer = appearance_composer
         self.worker = WorkerClient(
             name="vision_worker",
             python_executable=settings.vision_worker_python,
@@ -45,7 +38,7 @@ class VisionWorkerPlugin(ProcessorPlugin):
         self._last_status: dict[str, Any] = {}
 
     def subscribed_topics(self) -> tuple[str, ...]:
-        return (Topics.SENSOR_VIDEO_FRAME, Topics.REQ_APPEARANCE_ANALYZE)
+        return (Topics.SENSOR_VIDEO_FRAME,)
 
     async def on_start(self) -> None:
         return None
@@ -54,116 +47,8 @@ class VisionWorkerPlugin(ProcessorPlugin):
         await self.worker.stop()
 
     async def handle_event(self, event: Event) -> None:
-        if event.topic == Topics.REQ_APPEARANCE_ANALYZE:
-            await self._handle_req_appearance(event)
-            return
-
         if event.topic == Topics.SENSOR_VIDEO_FRAME:
             await self._handle_capture(event.payload)
-
-    # ---- request-reply: appearance analysis for web layer ----
-
-    async def _handle_req_appearance(self, event: Event) -> None:
-        request_id = event.payload.get("_request_id", "")
-        image_path = str(event.payload.get("image_path") or "")
-        if not image_path:
-            await self._send_reply(request_id, {"error": "image_path is empty"})
-            return
-
-        await self._ensure_worker_started()
-        try:
-            response = await self.worker.request("analyze_image_file", {"image_path": image_path})
-        except Exception as exc:
-            await self._send_reply(request_id, {"error": str(exc)})
-            return
-
-        if not response.ok:
-            await self._send_reply(request_id, {"error": response.error_message})
-            return
-
-        result = dict(response.result, source_backend="vision_worker:web")
-        if not result.get("face_detected"):
-            await self._send_reply(
-                request_id,
-                {
-                    "error": (
-                        "Лицо не найдено. Посмотрите прямо в камеру, убедитесь, что лицо полностью видно, "
-                        "добавьте света и повторите оценку."
-                    ),
-                    "error_code": "face_not_detected",
-                },
-            )
-            return
-        # Keep frame_base64 in result so AppearanceResponseComposer can use
-        # its full 3-stage pipeline (Vision EN → translate RU → polish)
-        # instead of the simpler _call_ollama_vision_sync prompt.
-
-        reply_text = ""
-        if self.appearance_composer:
-            reply_text = await self.appearance_composer.compose(result)
-            if not is_safe_russian_text(reply_text):
-                result["appearance_description"] = ""
-                reply_text = self.appearance_composer._build_template(result)
-            if not result.get("appearance_description"):
-                vision_status = str(result.get("vision_status") or "").strip()
-                note = "Детальное vision-описание всего кадра не получено; видимые детали не выдумывались."
-                if vision_status:
-                    note = f"{note} Статус vision: {vision_status}."
-                existing_notes = str(result.get("notes") or "").strip()
-                result["notes"] = f"{existing_notes} {note}".strip()
-            # Remove heavy field before publishing
-            result.pop("frame_base64", None)
-
-        if not reply_text.strip() or not reply_text.strip(" .,-–—"):
-            reply_text = (
-                "Оценка не получена. Проверьте, что лицо полностью видно и Ollama запущена, "
-                "затем нажмите «Оценка вида» ещё раз."
-            )
-
-        report_payload = {
-            "report_type": "appearance",
-            "state": "completed" if result.get("appearance_description") else "limited",
-            "compliment": reply_text,
-            "observed": result.get("observed") or "",
-            "suggestion": (
-                "Если описание не появилось, убедитесь, что лицо полностью видно и Ollama запущена, "
-                "затем повторите оценку."
-            ),
-            "face_detected": result.get("face_detected"),
-            "face_count": result.get("face_count"),
-            "confidence": result.get("confidence"),
-            "emotion": result.get("emotion") or "",
-            "appearance_description": result.get("appearance_description") or "",
-            "appearance_checklist": result.get("appearance_checklist") or {},
-            "appearance_memory_notes": result.get("appearance_memory_notes") or "",
-            "wellness_suggestion": result.get("wellness_suggestion") or "",
-            "vision_status": result.get("vision_status") or "",
-            "emotiefflib_available": result.get("emotiefflib_available"),
-            "notes": result.get("notes") or "",
-            "source_backend": result.get("source_backend") or "vision_worker:web",
-        }
-
-        await self.bus.publish(Event(topic=Topics.REPORT_DATA, source="web.appearance", payload=report_payload))
-        await self.bus.publish(Event(topic=Topics.STORAGE_WRITE, source="web.appearance", payload=report_payload))
-        await self.bus.publish(
-            Event(
-                topic=Topics.UI_UPDATE,
-                source=self.name,
-                payload={
-                    "screen": "summary",
-                    "message": reply_text,
-                    "assistant_source": "визуальный анализ",
-                    "report": report_payload,
-                },
-            )
-        )
-        await self._send_reply(request_id, {"reply": reply_text, "report": report_payload})
-
-    async def _send_reply(self, request_id: str, payload: dict[str, Any]) -> None:
-        payload["_reply_to"] = request_id
-        await self.bus.publish(
-            Event(topic=Topics.RESP_APPEARANCE_ANALYZE, source=self.name, payload=payload)
-        )
 
     # ---- original internal logic (SENSOR_VIDEO_FRAME) ----
 
@@ -201,42 +86,6 @@ class VisionWorkerPlugin(ProcessorPlugin):
             except Exception:
                 pass
 
-        if mode == "appearance_check":
-            if response.ok:
-                result = dict(response.result, source_backend="vision_worker")
-                # Let AppearanceResponseComposer handle the full Vision pipeline
-                # (frame_base64 stays in result for the 3-stage EN→RU→polish flow)
-
-                await self.bus.publish(
-                    Event(
-                        topic=Topics.ANALYSIS_RESULT,
-                        source=self.name,
-                        payload=result,
-                    )
-                )
-                await self._publish_status_snapshot(response.result)
-                return
-
-            await self.bus.publish(
-                Event(
-                    topic=Topics.ANALYSIS_RESULT,
-                    source=self.name,
-                    payload={
-                        "analysis_type": "appearance",
-                        "face_detected": False,
-                        "face_count": 0,
-                        "emotiefflib_available": False,
-                        "confidence": 0.0,
-                        "emotion": "",
-                        "appearance_description": "",
-                        "observed": "",
-                        "notes": f"Vision worker error: {response.error_message}",
-                        "source_backend": "vision_worker",
-                    },
-                )
-            )
-            await self._publish_error_status(response.error_message)
-            return
 
         if response.ok:
             raw = dict(response.result)
@@ -300,32 +149,16 @@ class VisionWorkerPlugin(ProcessorPlugin):
         await self._publish_error_status(response.error_message)
 
     async def _publish_video_failure(self, mode: str, message: str) -> None:
-        analysis_type = "appearance" if mode == "appearance_check" else "screening"
-        payload: dict[str, Any]
-        if analysis_type == "appearance":
-            payload = {
-                "analysis_type": "appearance",
-                "face_detected": False,
-                "face_count": 0,
-                "emotiefflib_available": False,
-                "confidence": 0.0,
-                "emotion": "",
-                "appearance_description": "",
-                "observed": "",
-                "notes": message,
-                "source_backend": "camera",
-            }
-        else:
-            payload = {
-                "analysis_type": "screening",
-                "face_detected": False,
-                "face_count": 0,
-                "face_ratio": 0.0,
-                "video_quality_issues": ["camera_error"],
-                "video_usable": False,
-                "notes": message,
-                "source_backend": "camera",
-            }
+        payload: dict[str, Any] = {
+            "analysis_type": "screening",
+            "face_detected": False,
+            "face_count": 0,
+            "face_ratio": 0.0,
+            "video_quality_issues": ["camera_error"],
+            "video_usable": False,
+            "notes": message,
+            "source_backend": "camera",
+        }
         await self.bus.publish(Event(topic=Topics.ANALYSIS_RESULT, source=self.name, payload=payload))
         await self._publish_error_status(message)
 
@@ -404,48 +237,3 @@ class VisionWorkerPlugin(ProcessorPlugin):
             )
         )
 
-    def _call_ollama_vision_sync(self, image_base64: str) -> str:
-        """Send frame to Ollama Vision model, return text description."""
-        ollama_url = self.settings.ollama_base_url.rstrip("/")
-        model = self.settings.ollama_vision_model or self.settings.ollama_model
-        payload = {
-            "model": model,
-            "prompt": (
-                "Опиши внешность человека на фото на русском, 4-6 предложений.\n"
-                "Обязательно отметь (если видно):\n"
-                "- Общее впечатление и атмосферу (уверенность, лёгкость, спокойствие)\n"
-                "- Лицо и взгляд\n"
-                "- Волосы — стиль, как уложены, как дополняют образ\n"
-                "- Одежда — стиль, цвета, что подчёркивает\n"
-                "- Аксессуары — очки, украшения, часы и т.д.\n"
-                "Тон: тёплый и доброжелательный, как комплимент от подруги.\n"
-                "Не ставь диагнозов. Не упоминай качество фото или камеру."
-            ),
-            "images": [image_base64],
-            "stream": False,
-            "options": {"temperature": 0.35, "num_predict": 300},
-        }
-        body = json.dumps(payload).encode("utf-8")
-        req = request.Request(
-            f"{ollama_url}/api/generate",
-            data=body,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        try:
-            with exclusive_gpu_task_sync("ollama"):
-                with request.urlopen(req, timeout=self.settings.ollama_timeout_seconds) as resp:
-                    raw_body = resp.read().decode("utf-8")
-        except error.HTTPError as exc:
-            error_body = exc.read().decode("utf-8", errors="replace")
-            raise RuntimeError(f"Ollama HTTP {exc.code}: {error_body}") from exc
-        except error.URLError as exc:
-            raise RuntimeError(f"Ollama недоступен: {exc.reason}") from exc
-
-        parsed = json.loads(raw_body)
-        if "error" in parsed:
-            raise RuntimeError(f"Ollama: {parsed['error']}")
-        return str(parsed.get("response", "")).strip()
-
-    # _sanitize_vision_description and _is_safe_russian_text
-    # are now in neuro_mirror.utils.text (shared module)

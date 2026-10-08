@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from neuro_mirror.plugins.games.base import BrowserGamePlugin
-from neuro_mirror.plugins.games.gm01_pair_cards.stimuli import LEVEL_PAIR_COUNTS, STIMULI
+from neuro_mirror.plugins.games.gm01_pair_cards.stimuli import STIMULI
 from neuro_mirror.screening.gm01_scoring import score_gm01
 
 

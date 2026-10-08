@@ -9,7 +9,6 @@ from neuro_mirror.core.dataset_store import DatasetStore
 from neuro_mirror.core.session_store import SessionStore
 from neuro_mirror.core.settings import Settings
 from neuro_mirror.models.events import Event, Topics
-from neuro_mirror.plugins.ai_assistant.appearance_response import AppearanceResponseComposer
 from neuro_mirror.screening.training_plan import explain_plan, plan_session
 from neuro_mirror.version import session_version_manifest
 
@@ -22,7 +21,6 @@ class SessionState(str, Enum):
     SCREENING = "screening"
     MOCA = "moca"
     HADS = "hads"
-    APPEARANCE = "appearance"
     REPORTING = "reporting"
 
 
@@ -35,8 +33,6 @@ IGNORED_UI_ACTIONS = {
     "moca_tts_finished",
     "hads_tts_finished",
     "hads_answer",  # handled by HadsTestPlugin
-    "analyze_appearance",  # handled entirely by the browser via /api/appearance/analyze
-    "camera_vision_query",  # handled entirely by the browser via /api/assistant/camera-vision
 }
 
 
@@ -47,13 +43,11 @@ class AggregatorPlugin(ProcessorPlugin):
         self,
         bus,
         *,
-        appearance_composer: AppearanceResponseComposer,
         session_store: SessionStore | None = None,
         settings: Settings | None = None,
         dataset_store: DatasetStore | None = None,
     ) -> None:
         super().__init__(bus)
-        self.appearance_composer = appearance_composer
         self.dataset_store = dataset_store
         self.state = SessionState.IDLE
         self.history_count = 0
@@ -173,8 +167,6 @@ class AggregatorPlugin(ProcessorPlugin):
             return
 
         if event.topic == Topics.ANALYSIS_RESULT:
-            if self.state == SessionState.APPEARANCE:
-                await self._finish_appearance_analysis(event.payload)
             return
 
         if event.topic == Topics.VOICE_TEST_RESULT:
@@ -337,30 +329,6 @@ class AggregatorPlugin(ProcessorPlugin):
         # Screening now uses browser-side frame capture via /ws/rppg WebSocket.
         # No camera worker capture is triggered here.
 
-    async def _start_appearance_analysis(self) -> None:
-        self.state = SessionState.APPEARANCE
-        self._latest_results.clear()
-        self._pending_capture_mode = "appearance_check"
-
-        await self.bus.publish(
-            Event(
-                topic=Topics.UI_UPDATE,
-                source=self.name,
-                payload={
-                    "screen": "assistant",
-                    "message": "Смотрю в камеру и оцениваю внешний вид.",
-                    "assistant_source": "визуальный анализ",
-                },
-            )
-        )
-        await self.bus.publish(
-            Event(
-                topic=Topics.PREPARE_SESSION,
-                source=self.name,
-                payload={"mode": "appearance_check", "require_microphone": False},
-            )
-        )
-
     async def _handle_devices_resolved(self, payload: dict[str, Any]) -> None:
         mode = str(payload.get("mode") or self._pending_capture_mode)
         if not mode:
@@ -392,47 +360,6 @@ class AggregatorPlugin(ProcessorPlugin):
         if not self._pending_capture_mode:
             self.state = SessionState.IDLE
             self._fail_session("; ".join(map(str, errors)) or "Ошибка проверки устройства.")
-
-    async def _finish_appearance_analysis(self, payload: dict[str, Any]) -> None:
-        self.state = SessionState.REPORTING
-        response_text = await self.appearance_composer.compose(payload)
-        report_payload = {
-            "report_type": "appearance",
-            "state": "completed",
-            "compliment": response_text,
-            "observed": payload.get("observed") or "",
-            "appearance_description": payload.get("appearance_description") or "",
-            "appearance_checklist": payload.get("appearance_checklist") or {},
-            "appearance_memory_notes": payload.get("appearance_memory_notes") or "",
-            "wellness_suggestion": payload.get("wellness_suggestion") or "",
-            "suggestion": "Можно повторить анализ после изменения света или положения камеры.",
-            "face_detected": payload.get("face_detected"),
-            "face_count": payload.get("face_count"),
-            "confidence": payload.get("confidence"),
-            "emotion": payload.get("emotion") or "",
-            "estimated_age": payload.get("estimated_age"),
-            "estimated_gender": payload.get("estimated_gender") or "",
-            "emotiefflib_available": payload.get("emotiefflib_available"),
-            "notes": payload.get("notes") or "",
-            "source_backend": payload.get("source_backend") or "vision_worker",
-        }
-
-        await self.bus.publish(Event(topic=Topics.REPORT_DATA, source=self.name, payload=report_payload))
-        await self.bus.publish(Event(topic=Topics.STORAGE_WRITE, source=self.name, payload=report_payload))
-        await self.bus.publish(
-            Event(
-                topic=Topics.UI_UPDATE,
-                source=self.name,
-                payload={
-                    "screen": "summary",
-                    "message": response_text,
-                    "report": report_payload,
-                    "assistant_source": "визуальный анализ",
-                },
-            )
-        )
-
-        self.state = SessionState.IDLE
 
     async def _maybe_finish_screening(self) -> None:
         """Called when face scan result arrives — show heart rate, then launch HADS."""

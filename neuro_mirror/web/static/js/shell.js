@@ -2,8 +2,8 @@
 //
 // Persistent app shell: sidebar navigation + header + work-area section
 // switcher for the new sidebar-app UI. Loaded as a native ES module (no
-// bundler in this project). Every section is either a migrated screen
-// (js/screens/*) or a stub for functionality the backend doesn't have yet.
+// bundler in this project). Every section is a screen (js/screens/*); a
+// section whose content is not ready yet shows an explanation instead.
 
 import { confirmDialog } from "./components/confirm-dialog.js";
 import { screeningScreen } from "./screens/screening.js";

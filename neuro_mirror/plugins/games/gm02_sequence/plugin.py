@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from neuro_mirror.plugins.games.base import BrowserGamePlugin
-from neuro_mirror.plugins.games.gm02_sequence.stimuli import GRID_SIZE, MAX_ROUNDS
+from neuro_mirror.plugins.games.gm02_sequence.stimuli import GRID_SIZE
 from neuro_mirror.screening.gm02_scoring import score_gm02_attempt
 
 

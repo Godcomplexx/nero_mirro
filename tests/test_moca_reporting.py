@@ -856,7 +856,7 @@ def test_report_carries_the_domain_profile_and_training_plan():
             {"task_id": "abstraction_1", "transcript": "транспорт"},
         ])
         bus = SimpleNamespace(publish=AsyncMock())
-        plugin = AggregatorPlugin(bus, appearance_composer=SimpleNamespace())
+        plugin = AggregatorPlugin(bus)
         plugin.state = SessionState.MOCA
         plugin._latest_results = {"moca": moca}
 

@@ -1,6 +1,5 @@
 """Puzzle layouts and timing for GM-18."""
 
-MINIMUM_SESSION_MS = 60_000
 
 PUZZLES = (
     {"name": "Парк", "image": "park_a.png", "rows": 2, "columns": 3},

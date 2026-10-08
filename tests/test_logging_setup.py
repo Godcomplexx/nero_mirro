@@ -12,6 +12,11 @@ from neuro_mirror.core.access_journal import (
     VIEW_RESULTS,
     AccessJournal,
 )
+
+
+def journal_lines(journal: AccessJournal) -> list[dict]:
+    """Прочитать журнал так, как его читает администратор: построчно."""
+    return [json.loads(line) for line in journal.path.read_text(encoding="utf-8").splitlines() if line]
 from neuro_mirror.core.logging_setup import (
     BACKUP_COUNT,
     MAX_BYTES,
@@ -125,7 +130,7 @@ def test_access_journal_records_who_looked_and_when(tmp_path):
     journal = AccessJournal(tmp_path / "access.jsonl")
     journal.record(action=VIEW_RESULTS, user_id="u0001", details={"count": 3})
     journal.record(action=EXPORT_RESULTS, user_id="u0001")
-    entries = journal.entries()
+    entries = journal_lines(journal)
     assert [e["action"] for e in entries] == [VIEW_RESULTS, EXPORT_RESULTS]
     assert all(e["user_id"] == "u0001" and e["at"] for e in entries)
 
@@ -143,26 +148,9 @@ def test_access_journal_is_append_only(tmp_path):
 def test_access_journal_keeps_no_result_content(tmp_path):
     journal = AccessJournal(tmp_path / "access.jsonl")
     journal.record(action=VIEW_RESULTS, user_id="u0001", details={"count": 2})
-    entry = journal.entries()[0]
+    entry = journal_lines(journal)[0]
     assert set(entry) <= {"at", "action", "user_id", "session_id", "account", "details"}
     assert entry["details"] == {"count": 2}
-
-
-def test_access_journal_survives_a_truncated_line(tmp_path):
-    """Дописывание может оборваться на середине: остальное читается."""
-    path = tmp_path / "access.jsonl"
-    journal = AccessJournal(path)
-    journal.record(action=VIEW_RESULTS, user_id="u0001")
-    with path.open("a", encoding="utf-8") as handle:
-        handle.write('{"at": "оборвал')
-    assert len(journal.entries()) == 1
-
-
-def test_access_journal_filters_by_user(tmp_path):
-    journal = AccessJournal(tmp_path / "access.jsonl")
-    journal.record(action=VIEW_RESULTS, user_id="u0001")
-    journal.record(action=VIEW_RESULTS, user_id="u0002")
-    assert len(journal.entries(user_id="u0002")) == 1
 
 
 def test_write_failure_does_not_stop_the_program(tmp_path):

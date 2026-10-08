@@ -91,27 +91,6 @@ class SessionStore:
         items.sort(key=lambda item: str(item.get("updated_at") or ""), reverse=True)
         return items
 
-    def add_event(
-        self,
-        session_id: str,
-        event_type: str,
-        details: dict[str, Any] | None = None,
-    ) -> dict[str, Any] | None:
-        record = self._find(session_id)
-        if record is None:
-            return None
-        now = _utc_now()
-        record.setdefault("events", []).append(
-            {
-                "timestamp": now,
-                "type": event_type,
-                "details": self._sanitize(details or {}),
-            }
-        )
-        record["updated_at"] = now
-        self._save()
-        return deepcopy(self._find(record["session_id"]))
-
     def checkpoint(
         self,
         session_id: str,

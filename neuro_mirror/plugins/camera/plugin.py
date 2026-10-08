@@ -88,98 +88,34 @@ class CameraPlugin(ProcessorPlugin):
     async def _capture_for_session(self, payload: dict[str, Any]) -> None:
         mode = str(payload.get("mode") or "")
 
-        if mode != "appearance_check":
-            # Stop preview loop and release camera so worker can open it exclusively.
-            # MSMF on Windows fails with -1072875772 if any handle is still open.
-            self._preview_enabled = False
-            await self._release_worker_camera()
-            await asyncio.sleep(1.2)
+        # Stop preview loop and release camera so worker can open it exclusively.
+        # MSMF on Windows fails with -1072875772 if any handle is still open.
+        self._preview_enabled = False
+        await self._release_worker_camera()
+        await asyncio.sleep(1.2)
 
         await self._ensure_worker_started()
 
-        if mode != "appearance_check":
-            logger.info("[camera] starting analyze_screening (rPPG ~20s)")
-            try:
-                response = await self.worker.request(
-                    "analyze_screening",
-                    timeout=max(self.settings.worker_request_timeout_seconds, 150.0),
-                )
-            except Exception as exc:
-                logger.warning("[camera] analyze_screening FAILED: %s", exc)
-                await self._publish_error_status(str(exc))
-                await self.bus.publish(
-                    Event(
-                        topic=Topics.SENSOR_VIDEO_FRAME,
-                        source=self.name,
-                        payload={**payload, "mode": mode, "analysis_result": {}, "error": str(exc)},
-                    )
-                )
-                return
-
-            if not response.ok:
-                logger.warning("[camera] analyze_screening worker error: %s", response.error_message)
-                await self._publish_error_status(response.error_message)
-                await self.bus.publish(
-                    Event(
-                        topic=Topics.SENSOR_VIDEO_FRAME,
-                        source=self.name,
-                        payload={
-                            **payload,
-                            "mode": mode,
-                            "analysis_result": {},
-                            "error": response.error_message,
-                        },
-                    )
-                )
-                return
-
-            result = dict(response.result)
-            logger.info(
-                "[camera] analyze_screening OK: hr_bpm=%s hr_status=%s frames=%s ms=%s",
-                result.get("heart_rate_bpm"),
-                result.get("heart_rate_status"),
-                result.get("screening_frame_count"),
-                result.get("screening_ms"),
-            )
-            await self._publish_status_snapshot(
-                {
-                    **result,
-                    "camera_available": result.get("camera_index") is not None,
-                    "capture_ms": result.get("screening_ms"),
-                    "total_ms": result.get("screening_ms"),
-                }
-            )
-            await self.bus.publish(
-                Event(
-                    topic=Topics.SENSOR_VIDEO_FRAME,
-                    source=self.name,
-                    payload={
-                        **payload,
-                        "mode": mode,
-                        "analysis_result": result,
-                        "camera_available": result.get("camera_index") is not None,
-                        "camera_index": result.get("camera_index"),
-                        "camera_backend": result.get("camera_backend"),
-                        "camera_attempts": result.get("camera_attempts") or [],
-                    },
-                )
-            )
-            return
-
+        logger.info("[camera] starting analyze_screening (rPPG ~20s)")
         try:
-            response = await self.worker.request("capture_preview_frame")
+            response = await self.worker.request(
+                "analyze_screening",
+                timeout=max(self.settings.worker_request_timeout_seconds, 150.0),
+            )
         except Exception as exc:
+            logger.warning("[camera] analyze_screening FAILED: %s", exc)
             await self._publish_error_status(str(exc))
             await self.bus.publish(
                 Event(
                     topic=Topics.SENSOR_VIDEO_FRAME,
                     source=self.name,
-                    payload={**payload, "mode": mode, "image_base64": "", "error": str(exc)},
+                    payload={**payload, "mode": mode, "analysis_result": {}, "error": str(exc)},
                 )
             )
             return
 
         if not response.ok:
+            logger.warning("[camera] analyze_screening worker error: %s", response.error_message)
             await self._publish_error_status(response.error_message)
             await self.bus.publish(
                 Event(
@@ -188,7 +124,7 @@ class CameraPlugin(ProcessorPlugin):
                     payload={
                         **payload,
                         "mode": mode,
-                        "image_base64": "",
+                        "analysis_result": {},
                         "error": response.error_message,
                     },
                 )
@@ -196,7 +132,21 @@ class CameraPlugin(ProcessorPlugin):
             return
 
         result = dict(response.result)
-        await self._publish_status_snapshot(result)
+        logger.info(
+            "[camera] analyze_screening OK: hr_bpm=%s hr_status=%s frames=%s ms=%s",
+            result.get("heart_rate_bpm"),
+            result.get("heart_rate_status"),
+            result.get("screening_frame_count"),
+            result.get("screening_ms"),
+        )
+        await self._publish_status_snapshot(
+            {
+                **result,
+                "camera_available": result.get("camera_index") is not None,
+                "capture_ms": result.get("screening_ms"),
+                "total_ms": result.get("screening_ms"),
+            }
+        )
         await self.bus.publish(
             Event(
                 topic=Topics.SENSOR_VIDEO_FRAME,
@@ -204,20 +154,14 @@ class CameraPlugin(ProcessorPlugin):
                 payload={
                     **payload,
                     "mode": mode,
-                    "image_base64": result.get("image_base64", ""),
-                    "camera_available": result.get("camera_available", False),
+                    "analysis_result": result,
+                    "camera_available": result.get("camera_index") is not None,
                     "camera_index": result.get("camera_index"),
                     "camera_backend": result.get("camera_backend"),
                     "camera_attempts": result.get("camera_attempts") or [],
-                    "capture_ms": result.get("capture_ms"),
-                    "encode_ms": result.get("encode_ms"),
-                    "total_ms": result.get("total_ms"),
                 },
             )
         )
-
-        if not self._preview_enabled:
-            await self._release_worker_camera()
 
     async def _ensure_worker_started(self) -> None:
         try:
@@ -311,15 +255,6 @@ class CameraPlugin(ProcessorPlugin):
                 )
             )
             await asyncio.sleep(self.settings.preview_interval_seconds)
-
-    async def _publish_status_message(self, message: str) -> None:
-        await self.bus.publish(
-            Event(
-                topic=Topics.UI_UPDATE,
-                source=self.name,
-                payload={"message": message, "assistant_source": "", "screen": "idle"},
-            )
-        )
 
     async def _publish_error_status(self, error_message: str) -> None:
         status = {

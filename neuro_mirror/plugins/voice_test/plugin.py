@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import asdict
-from typing import Any
 
 from neuro_mirror.core.settings import Settings
 from neuro_mirror.interfaces.processor import ProcessorPlugin
@@ -113,7 +111,7 @@ class VoiceTestPlugin(ProcessorPlugin):
             finally:
                 delete_temp_audio(audio_path)
             raise
-        except Exception as exc:
+        except Exception:
             logger.exception("voice_test: ошибка записи")
             try:
                 self._recorder.stop()
