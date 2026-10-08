@@ -72,3 +72,36 @@ def test_model_is_loaded_once_and_reused():
     loaded = synth._voice
     synth.synthesize_wav("второй")
     assert synth._voice is loaded
+
+
+def test_config_reports_the_voice_actually_used(tmp_path):
+    """В настройках долго оставалось название голоса облачной озвучки.
+
+    Программа давно озвучивает локальной моделью, а /api/config по-прежнему
+    отдавал «ru-RU-SvetlanaNeural» — голос, которого в поставке нет.
+    """
+    from types import SimpleNamespace
+
+    from fastapi.testclient import TestClient
+
+    from neuro_mirror.core.settings import Settings
+    from neuro_mirror.web.app import create_app
+
+    app = create_app()
+    app.state.context = SimpleNamespace(
+        settings=Settings(),
+        runtime=SimpleNamespace(assistant_backend_label="выключен"),
+    )
+    with TestClient(app) as client:
+        config = client.get("/api/config").json()
+    assert config["tts_voice"] == DEFAULT_VOICE_PATH.stem
+    assert "Neural" not in config["tts_voice"]
+    assert config["tts_available"] is VOICE_PRESENT
+
+
+def test_cloud_voice_settings_are_gone():
+    from neuro_mirror.core.settings import Settings
+
+    settings = Settings()
+    assert not hasattr(settings, "tts_rate")
+    assert not hasattr(settings, "tts_voice")

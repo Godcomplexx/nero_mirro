@@ -492,7 +492,11 @@ def create_app() -> FastAPI:
         return JSONResponse(
             {
                 "assistant_enabled": ctx.settings.enable_ai_assistant,
-                "tts_voice": ctx.settings.tts_voice,
+                # Голос берётся у синтезатора, которым программа реально
+                # озвучивает: прежде здесь стояло название голоса облачной
+                # озвучки, удалённой при переходе на работу без сети.
+                "tts_voice": _synthesizer.voice_path.stem,
+                "tts_available": _synthesizer.available,
                 "assistant_backend_label": ctx.runtime.assistant_backend_label,
                 "app_version": APP_VERSION,
                 "scenario_versions": SCENARIO_VERSIONS,

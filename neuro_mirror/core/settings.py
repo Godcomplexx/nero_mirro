@@ -57,8 +57,6 @@ class Settings:
     # Сколько ждать нажатия «Приступить» перед заданием MoCA. Ноль
     # означает «начинать сразу»: так проверки не простаивают.
     moca_start_grace_seconds: float = 25.0
-    tts_voice: str = "ru-RU-SvetlanaNeural"
-    tts_rate: str = "+15%"
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -145,8 +143,6 @@ class Settings:
             )
         raw_voice_channels = os.getenv("NEURO_MIRROR_VOICE_CHANNELS", "1").strip()
         raw_voice_max_seconds = os.getenv("NEURO_MIRROR_VOICE_MAX_SECONDS", "12").strip()
-        raw_tts_voice = os.getenv("NEURO_MIRROR_TTS_VOICE", "ru-RU-SvetlanaNeural").strip()
-        raw_tts_rate = os.getenv("NEURO_MIRROR_TTS_RATE", "+0%").strip()
 
         auto_start: bool | None
         if raw_auto_start == "":
@@ -196,6 +192,4 @@ class Settings:
             voice_min_speech_duration=float(raw_voice_min_speech_duration),
             save_moca_audio=raw_save_moca_audio not in {"0", "false", "no"},
             moca_start_grace_seconds=max(0.0, float(raw_moca_grace or 25)),
-            tts_voice=raw_tts_voice,
-            tts_rate=raw_tts_rate,
         )
