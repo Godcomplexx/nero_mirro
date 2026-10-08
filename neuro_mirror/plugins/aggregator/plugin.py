@@ -927,6 +927,10 @@ class AggregatorPlugin(ProcessorPlugin):
                 "moca_training_plan": self._build_training_plan(moca.get("domains", [])),
                 "moca_tasks": moca.get("tasks", []),
                 "moca_modules": moca.get("modules", []),
+                # Речевые показатели по всем ответам: темп, паузы, задержка
+                # ответа, лексическое разнообразие, повторы и самоисправления.
+                # Считаются при оценке теста; без переноса сюда терялись.
+                "moca_speech_summary": moca.get("speech_summary", {}),
                 "moca_task_count": moca.get("task_count", 0),
             },
             "summary": {

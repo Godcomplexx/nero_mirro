@@ -137,3 +137,42 @@
 .nm-dyn-bar[data-filled="true"] {
   background: var(--nm-accent, #2563eb);
 }
+
+/* Показатели речи по всем ответам теста. Выводятся отдельным блоком под
+   баллами: это не оценка, а измерения, и смешивать их с баллами нельзя. */
+.nm-speech-panel {
+  margin-top: 1rem;
+  padding-top: 0.875rem;
+  border-top: 0.0625rem solid var(--nm-border);
+}
+
+.nm-speech-title {
+  margin: 0 0 0.625rem;
+  color: var(--nm-text-dim);
+  font-size: var(--nm-font-body);
+  font-weight: 600;
+}
+
+.nm-speech-rows {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: 0.5rem 1.5rem;
+}
+
+.nm-speech-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.75rem;
+}
+
+.nm-speech-label {
+  color: var(--nm-text-dim);
+  font-size: var(--nm-font-body);
+}
+
+.nm-speech-value {
+  color: var(--nm-text);
+  font-size: var(--nm-font-body);
+  white-space: nowrap;
+}

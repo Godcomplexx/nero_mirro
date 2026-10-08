@@ -98,6 +98,56 @@ function resultInterpretations(item) {
   ].filter(Boolean).join(" · ");
 }
 
+// Речевые показатели по всем ответам теста. Считаются ядром при оценке
+// (summarize_speech_metrics) и до отчёта раньше не доходили.
+//
+// Показываются только измеренные значения: пустое поле означает, что измерить
+// было нечем — например, записи не сохранялись, — и подставлять туда ноль
+// нельзя, он неотличим от настоящего нуля.
+const SPEECH_ROWS = [
+  { key: "words_per_minute", label: "Темп речи", unit: "слов/мин" },
+  { key: "average_time_to_first_response_seconds", label: "Задержка ответа", unit: "с" },
+  { key: "pause_count", label: "Пауз в ответах", unit: "" },
+  { key: "total_pause_seconds", label: "Время пауз", unit: "с" },
+  { key: "lexical_diversity", label: "Лексическое разнообразие", unit: "" },
+  { key: "fillers", label: "Слов-заполнителей", unit: "" },
+  { key: "self_corrections", label: "Самоисправлений", unit: "" },
+  { key: "word_repetitions", label: "Повторов слов", unit: "" },
+  { key: "unfinished_utterances", label: "Незаконченных фраз", unit: "" },
+];
+
+function countOf(value) {
+  if (value && typeof value === "object") return value.count;
+  return value;
+}
+
+function speechPanel(item) {
+  const summary = item?.domains?.moca_speech_summary;
+  if (!summary || typeof summary !== "object") return null;
+
+  const rows = [];
+  for (const row of SPEECH_ROWS) {
+    const value = countOf(summary[row.key]);
+    if (value == null) continue;
+    rows.push({ ...row, value: typeof value === "number" ? Math.round(value * 100) / 100 : value });
+  }
+  if (!rows.length) return null;
+
+  const panel = el("div", "nm-speech-panel");
+  panel.append(el("h4", "nm-speech-title", "Показатели речи"));
+  const list = el("div", "nm-speech-rows");
+  for (const row of rows) {
+    const line = el("div", "nm-speech-row");
+    line.append(
+      el("span", "nm-speech-label", row.label),
+      el("strong", "nm-speech-value", row.unit ? `${row.value} ${row.unit}` : String(row.value)),
+    );
+    list.appendChild(line);
+  }
+  panel.appendChild(list);
+  return panel;
+}
+
 function el(tag, className, text) {
   const node = document.createElement(tag);
   if (className) node.className = className;
@@ -129,6 +179,9 @@ function buildResultCard(item, index, testItems) {
     metrics.appendChild(tile);
   }
   card.appendChild(metrics);
+
+  const speech = speechPanel(item);
+  if (speech) card.appendChild(speech);
 
   const note = resultInterpretations(item);
   if (note) card.appendChild(el("p", "nm-report-note", note));
