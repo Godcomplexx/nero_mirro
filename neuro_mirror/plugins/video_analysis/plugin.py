@@ -247,10 +247,10 @@ class VisionWorkerPlugin(ProcessorPlugin):
                 frame_data = base64.b64decode(frame_base64) if frame_base64 else b""
                 video_result = await asyncio.to_thread(analyze_frames, [frame_data] if frame_data else [])
                 logger.info(
-                    "screening video analysis: attention=%s gaze=%s face=%s",
-                    video_result.attention_score,
-                    video_result.gaze_stability,
+                    "screening video analysis: face=%s ratio=%.3f issues=%s",
                     video_result.face_detected,
+                    video_result.face_ratio,
+                    ",".join(video_result.quality_issues) or "-",
                 )
             except Exception as exc:
                 logger.exception("screening video analysis failed, using fallback")
@@ -267,11 +267,13 @@ class VisionWorkerPlugin(ProcessorPlugin):
                     source=self.name,
                     payload={
                         "analysis_type": "screening",
-                        "attention_score": video_result.attention_score,
-                        "gaze_stability": video_result.gaze_stability,
-                        "micro_expression_flags": list(video_result.micro_expression_flags),
                         "face_detected": video_result.face_detected,
                         "face_count": video_result.face_count,
+                        "face_ratio": video_result.face_ratio,
+                        # События низкого качества учитываются при оценке
+                        # достоверности результата — так требует задание.
+                        "video_quality_issues": list(video_result.quality_issues),
+                        "video_usable": video_result.usable,
                         "notes": video_result.notes or raw.get("notes") or "",
                         "source_backend": "vision_worker + screening_analyzer",
                     },
@@ -285,12 +287,11 @@ class VisionWorkerPlugin(ProcessorPlugin):
                 source=self.name,
                 payload={
                     "analysis_type": "screening",
-                    "attention_score": None,
-                    "gaze_stability": None,
-                    "behavioral_markers_status": "unavailable",
-                    "micro_expression_flags": [],
                     "face_detected": False,
                     "face_count": 0,
+                    "face_ratio": 0.0,
+                    "video_quality_issues": ["worker_error"],
+                    "video_usable": False,
                     "notes": f"Vision worker error: {response.error_message}",
                     "source_backend": "vision_worker",
                 },
@@ -317,11 +318,11 @@ class VisionWorkerPlugin(ProcessorPlugin):
         else:
             payload = {
                 "analysis_type": "screening",
-                "attention_score": None,
-                "gaze_stability": None,
-                "behavioral_markers_status": "unavailable",
                 "face_detected": False,
                 "face_count": 0,
+                "face_ratio": 0.0,
+                "video_quality_issues": ["camera_error"],
+                "video_usable": False,
                 "notes": message,
                 "source_backend": "camera",
             }

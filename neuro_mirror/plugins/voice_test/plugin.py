@@ -47,7 +47,6 @@ class VoiceTestPlugin(ProcessorPlugin):
                     topic=Topics.VOICE_TEST_RESULT,
                     source=self.name,
                     payload={
-                        "speech_score": None,
                         "reaction_ms": None,
                         "notes": "Не удалось записать аудио для голосового теста.",
                     },
@@ -61,9 +60,9 @@ class VoiceTestPlugin(ProcessorPlugin):
             transcript = str(event.payload.get("transcript") or "")
             result = await asyncio.to_thread(analyze_audio, audio_path, transcript)
             logger.info(
-                "voice_test: анализ завершён — speech_score=%s, reaction_ms=%s",
-                result.speech_score,
+                "voice_test: анализ завершён — задержка=%s мс, темп=%s слов/мин",
                 result.reaction_ms,
+                result.speech_rate_wpm,
             )
 
             await self.bus.publish(
@@ -71,12 +70,10 @@ class VoiceTestPlugin(ProcessorPlugin):
                     topic=Topics.VOICE_TEST_RESULT,
                     source=self.name,
                     payload={
-                        "speech_score": result.speech_score,
                         "speech_rate_wpm": result.speech_rate_wpm,
                         "pause_ratio": result.pause_ratio,
                         "reaction_ms": result.reaction_ms,
-                        "pitch_variability": result.pitch_variability,
-                        "biomarker_flags": list(result.biomarker_flags),
+                        "acoustics": dict(result.acoustics),
                         "transcript": result.transcript,
                         "notes": result.notes,
                     },
@@ -89,7 +86,6 @@ class VoiceTestPlugin(ProcessorPlugin):
                     topic=Topics.VOICE_TEST_RESULT,
                     source=self.name,
                     payload={
-                        "speech_score": None,
                         "reaction_ms": None,
                         "notes": f"Ошибка аудио-анализа: {exc}",
                     },

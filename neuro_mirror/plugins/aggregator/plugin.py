@@ -840,8 +840,10 @@ class AggregatorPlugin(ProcessorPlugin):
                 "state": "needs_review",
                 "session_conditions": dict(self._session_conditions),
                 "domains": {
-                    "attention": video.get("attention_score"),
-                    "gaze": video.get("gaze_stability"),
+                    # События низкого качества видео: по ним видно, насколько
+                    # измерению можно верить.
+                    "video_quality_issues": video.get("video_quality_issues", []),
+                    "video_usable": video.get("video_usable"),
                     "heart_rate_bpm": video.get("heart_rate_bpm"),
                     "heart_rate_status": video.get("heart_rate_status"),
                     "heart_rate_algorithm": video.get("heart_rate_algorithm"),
@@ -911,8 +913,8 @@ class AggregatorPlugin(ProcessorPlugin):
             "state": "needs_review",
             "session_conditions": dict(self._session_conditions),
             "domains": {
-                "attention": video.get("attention_score"),
-                "gaze": video.get("gaze_stability"),
+                "video_quality_issues": video.get("video_quality_issues", []),
+                "video_usable": video.get("video_usable"),
                 "heart_rate_bpm": video.get("heart_rate_bpm"),
                 "heart_rate_status": video.get("heart_rate_status"),
                 "heart_rate_algorithm": video.get("heart_rate_algorithm"),

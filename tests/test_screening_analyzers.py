@@ -96,15 +96,13 @@ def test_the_measured_acoustics_are_kept_for_the_report(tmp_path):
     assert result.acoustics.get("pause_count") >= 1
 
 
-# ── Речь: что остаётся пустым ─────────────────────────────────────────────────
+# ── Речь: чего в результате нет ───────────────────────────────────────────────
 
-def test_the_clinical_score_is_not_invented(tmp_path):
-    """Для сводной оценки речи нужна утверждённая методика."""
+def test_no_invented_clinical_score_is_reported(tmp_path):
+    """Сводной оценки речи нет: такое поле осталось бы от заглушки."""
     result = analyze_audio(a_recording(tmp_path, lead_silence=0.2, speech=2.5), PHRASE)
-    assert result.speech_score is None
-    assert result.pitch_variability is None
-    assert result.biomarker_flags == []
-    assert "методика не утверждена" in result.notes
+    for absent in ("speech_score", "pitch_variability", "biomarker_flags"):
+        assert not hasattr(result, absent), absent
 
 
 # ── Речь: отказы ──────────────────────────────────────────────────────────────
@@ -140,14 +138,18 @@ def test_the_last_frame_is_the_one_measured():
 
 
 def test_no_frames_is_reported_and_not_passed_off_as_no_face():
+    from neuro_mirror.screening.video_analyzer import QUALITY_NO_FRAMES
+
     result = analyze_frames([])
     assert result.face_detected is False
-    assert "кадры не получены" in result.notes.lower()
+    assert result.quality_issues == [QUALITY_NO_FRAMES]
+    assert result.usable is False
 
 
 def test_empty_frames_are_skipped():
-    result = analyze_frames([b"", b""])
-    assert "кадры не получены" in result.notes.lower()
+    from neuro_mirror.screening.video_analyzer import QUALITY_NO_FRAMES
+
+    assert analyze_frames([b"", b""]).quality_issues == [QUALITY_NO_FRAMES]
 
 
 def test_a_broken_frame_does_not_break_the_screening():
@@ -156,11 +158,27 @@ def test_a_broken_frame_does_not_break_the_screening():
     assert result.notes
 
 
-# ── Видео: что остаётся пустым ────────────────────────────────────────────────
+# ── Видео: события низкого качества ───────────────────────────────────────────
 
-def test_attention_and_gaze_are_not_invented():
+def test_a_missing_face_is_recorded_as_a_quality_event():
+    """Задание требует фиксировать низкое качество и учитывать его."""
+    from neuro_mirror.screening.video_analyzer import QUALITY_NO_FACE
+
     result = analyze_frames([a_frame()])
-    assert result.attention_score is None
-    assert result.gaze_stability is None
-    assert result.micro_expression_flags == []
-    assert "методика не утверждена" in result.notes
+    assert result.quality_issues == [QUALITY_NO_FACE]
+    assert result.usable is False
+    assert result.notes
+
+
+def test_quality_events_have_a_human_readable_description():
+    from neuro_mirror.screening.video_analyzer import QUALITY_LABELS, describe_quality
+
+    assert describe_quality(["no_face"]) == QUALITY_LABELS["no_face"]
+    assert describe_quality([]) == ""
+
+
+def test_no_invented_attention_or_gaze_is_reported():
+    """Такие поля остались бы от заглушки; задание их не требует."""
+    result = analyze_frames([a_frame()])
+    for absent in ("attention_score", "gaze_stability", "micro_expression_flags"):
+        assert not hasattr(result, absent), absent

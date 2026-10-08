@@ -221,13 +221,27 @@ class AggregatorSessionTest(unittest.IsolatedAsyncioTestCase):
 
 
 class HonestUnavailableMetricsTest(unittest.TestCase):
-    def test_stub_analyzers_do_not_return_fabricated_numbers(self) -> None:
+    def test_a_failed_measurement_is_reported_and_not_guessed(self) -> None:
+        """Непригодный кадр и нечитаемая запись не дают чисел."""
         video = analyze_frames([b"not-a-real-frame"])
         audio = analyze_audio("placeholder.wav")
-        self.assertIsNone(video.attention_score)
-        self.assertIsNone(video.gaze_stability)
-        self.assertIsNone(audio.speech_score)
+
+        self.assertFalse(video.face_detected)
+        self.assertTrue(video.quality_issues, "событие низкого качества не записано")
+        self.assertFalse(video.usable)
+
         self.assertIsNone(audio.reaction_ms)
+        self.assertIsNone(audio.pause_ratio)
+        self.assertTrue(audio.notes)
+
+    def test_no_clinical_scores_are_produced_without_a_method(self) -> None:
+        """Оценок, для которых нет утверждённой методики, в результате нет."""
+        video = analyze_frames([b"not-a-real-frame"])
+        audio = analyze_audio("placeholder.wav")
+        for absent in ("attention_score", "gaze_stability", "micro_expression_flags"):
+            self.assertFalse(hasattr(video, absent), absent)
+        for absent in ("speech_score", "pitch_variability", "biomarker_flags"):
+            self.assertFalse(hasattr(audio, absent), absent)
 
 
 if __name__ == "__main__":

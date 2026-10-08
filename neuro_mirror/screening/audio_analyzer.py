@@ -1,14 +1,12 @@
 """Показатели речи для скрининга.
 
-Часть показателей измеряется по самой записи и считается здесь: задержка
-ответа, доля пауз, темп речи. Это обычные измерения сигнала, а не клиническая
-оценка.
+Техническое задание требует расчёта временных и акустических характеристик
+речи. Здесь считаются задержка ответа, доля пауз и темп речи — измерения
+сигнала, а не клиническая оценка.
 
-Чего здесь нет и не выдумывается: сводная оценка речи, изменчивость высоты
-голоса и перечень биомаркерных признаков. Для них нужна утверждённая
-методика; подставить вместо неё собственную формулу нельзя — числа уйдут
-специалисту и будут выглядеть измерением. Поля остаются пустыми, а причина
-записывается в примечание.
+Сводной оценки речи, изменчивости высоты голоса и перечня биомаркерных
+признаков здесь нет: такие поля оставались от прежней заглушки, техническое
+задание их не требует, а алгоритма для них не существует.
 """
 from __future__ import annotations
 
@@ -29,24 +27,14 @@ MIN_DURATION_FOR_RATE_SECONDS = 2.0
 class AudioAnalysisResult:
     """Result of audio analysis for screening."""
 
-    speech_score: Optional[float] = None
     speech_rate_wpm: Optional[float] = None
     pause_ratio: Optional[float] = None
     reaction_ms: Optional[int] = None
-    pitch_variability: Optional[float] = None
-    biomarker_flags: list[str] = field(default_factory=list)
     transcript: str = ""               # ASR transcript (if available)
     notes: str = ""
     # Измеренные показатели записи целиком: длительность, паузы, речевые
     # отрезки. Пригодятся отчёту специалиста и разбору неисправности.
     acoustics: dict[str, Any] = field(default_factory=dict)
-
-
-# Что именно не рассчитывается и почему — одной строкой для отчёта.
-MISSING_NOTE = (
-    "Сводная оценка речи, изменчивость высоты голоса и биомаркерные признаки "
-    "не рассчитываются: методика не утверждена."
-)
 
 
 def analyze_audio(audio_path: str, transcript: str = "") -> AudioAnalysisResult:
@@ -94,5 +82,4 @@ def analyze_audio(audio_path: str, transcript: str = "") -> AudioAnalysisResult:
         reaction_ms=reaction_ms,
         transcript=transcript,
         acoustics=acoustics,
-        notes=MISSING_NOTE,
     )
