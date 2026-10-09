@@ -16,6 +16,7 @@
 """
 from __future__ import annotations
 
+from fractions import Fraction
 from typing import Any, Iterable
 
 DEFAULT_SESSION_SIZE = 10
@@ -41,6 +42,7 @@ def plan_session(
     session_size: int = DEFAULT_SESSION_SIZE,
     min_per_domain: int = DEFAULT_MIN_PER_DOMAIN,
     max_per_domain: int | None = None,
+    course_totals: dict[str, int] | None = None,
 ) -> dict[str, int]:
     """Состав занятия: сколько заданий отдать каждому домену.
 
@@ -48,6 +50,12 @@ def plan_session(
     отношением недобора к уже выданному. Так сильнее просевший домен получает
     больше, но по мере насыщения уступает очередь остальным, и ни один не
     забирает всё занятие. Сумма всегда равна ``session_size``.
+
+    При равных отношениях задание получает домен, у которого заданий меньше,
+    затем домен, реже встречавшийся в курсе (``course_totals`` — сколько
+    заданий домена было в прошлых занятиях), затем первый по порядку
+    доменов. Без второго правила при полном балле тройки всегда доставались
+    бы памяти и вниманию.
     """
     shortfall = domain_shortfall(profile)
     if not shortfall:
@@ -71,12 +79,13 @@ def plan_session(
         )
 
     plan = {domain: min_per_domain for domain in domains}
+    course_totals = course_totals or {}
     # При полностью пройденном скрининге веса равны: поддерживающий режим.
     total_shortfall = sum(shortfall.values())
     weights = (
-        {domain: float(value) for domain, value in shortfall.items()}
+        dict(shortfall)
         if total_shortfall
-        else {domain: 1.0 for domain in domains}
+        else {domain: 1 for domain in domains}
     )
 
     for _ in range(session_size - guaranteed):
@@ -84,13 +93,14 @@ def plan_session(
         if not available:
             break
         # При равных отношениях очередь у домена, получившего меньше заданий, —
-        # иначе остаток целиком доставался бы первому домену списка.
+        # иначе остаток целиком доставался бы первому домену списка. Отношения
+        # сравниваются точно, без округления.
         best = max(
             available,
             key=lambda d: (
-                weights[d] / (plan[d] + 1),
+                Fraction(weights[d], plan[d] + 1),
                 -plan[d],
-                shortfall[d],
+                -course_totals.get(d, 0),
                 -domains.index(d),
             ),
         )

@@ -19,6 +19,8 @@ def score_gm14_words(
         "u01_first_attempt_word_accuracy": (
             first_try_words / len(words) if words else None
         ),
+        "u01_first_attempt_words": first_try_words,
+        "u01_words_total": len(words),
         "l03_letter_position_accuracy": (
             correct_first_positions / total_letters if total_letters else None
         ),

@@ -39,41 +39,6 @@ class GameHistoryStore:
         )
         self._save()
 
-    def record_outcome(
-        self,
-        *,
-        session_id: str,
-        game_code: str,
-        metrics: dict[str, Any],
-        completion_status: str,
-        technical_validity: str,
-    ) -> None:
-        """Дописать исход к уже записанному предъявлению.
-
-        Без исхода история отвечает только на вопрос «что показывали», а
-        подстройка сложности требует знать, как это прошло.
-        """
-        definition = get_game_definition(game_code)
-        for item in reversed(self._items):
-            if (
-                item.get("session_id") == session_id
-                and item.get("game_code") == definition.code
-            ):
-                item["metrics"] = dict(metrics)
-                item["completion_status"] = completion_status
-                item["technical_validity"] = technical_validity
-                self._save()
-                return
-
-    def passes_for_game(self, user_id: str, game_code: str) -> list[dict[str, Any]]:
-        """Прохождения одной игры этим человеком — основа подстройки уровня."""
-        definition = get_game_definition(game_code)
-        return [
-            dict(item)
-            for item in self._items
-            if item.get("user_id") == user_id and item.get("game_code") == definition.code
-        ]
-
     def for_user(self, user_id: str) -> tuple[Presentation, ...]:
         result: list[Presentation] = []
         for item in self._items:

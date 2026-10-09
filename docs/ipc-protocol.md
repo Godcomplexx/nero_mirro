@@ -219,7 +219,9 @@ const session = await core.request("GET", "/api/training/session");
 | `/api/users/{id}/consents` | POST | Согласия |
 | `/api/actions/{action}` | POST | Запуск сценариев |
 | `/api/session/check-voice`, `/api/session/check-face` | POST | Проверка условий сессии |
-| `/api/training/session` | GET | **Готовое занятие: игры по порядку** |
+| `/api/training/session` | GET | **Текущее занятие курса: игры по порядку** |
+| `/api/training/session/pause`, `/resume`, `/finish` | POST | Пауза и завершение занятия |
+| `/api/training/course` | GET | Курс целиком: занятия, исходы, уровни форм |
 | `/api/games/catalog` | GET | Каталог игр для свободного выбора |
 | `/api/games/{code}/renderer.js` | GET | Модуль отрисовки игры |
 | `/api/games/{code}/start`, `/api/games/{code}/answer` | POST | Ход игры |

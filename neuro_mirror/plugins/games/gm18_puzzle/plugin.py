@@ -41,6 +41,8 @@ class PuzzleSession:
     initial_board: list[int] = field(default_factory=list)
     move_count: int = 0
     minimum_move_count: int = 0
+    # Фрагмент → попал ли он на место первым же перемещением.
+    first_moves: dict[int, bool] = field(default_factory=dict)
     round_events: list[dict[str, Any]] = field(default_factory=list)
 
 
@@ -85,6 +87,7 @@ class Gm18PuzzlePlugin(BrowserGamePlugin):
         session.board = board
         session.initial_board = list(board)
         session.move_count = 0
+        session.first_moves = {}
         session.minimum_move_count = minimum_swaps(board)
         session.round_started_at_ms = time.time() * 1000
         return self._payload(session)
@@ -101,8 +104,11 @@ class Gm18PuzzlePlugin(BrowserGamePlugin):
         if first == second or not (0 <= first < len(session.board)) or not (0 <= second < len(session.board)):
             return {"ok": False, "message": "Некорректный ход."}
 
-        session.board[first], session.board[second] = session.board[second], session.board[first]
+        moved_to_second, moved_to_first = session.board[first], session.board[second]
+        session.board[first], session.board[second] = moved_to_first, moved_to_second
         session.move_count += 1
+        session.first_moves.setdefault(moved_to_second, moved_to_second == second)
+        session.first_moves.setdefault(moved_to_first, moved_to_first == first)
         solved = session.board == list(range(len(session.board)))
         if not solved:
             return self._payload(session)
@@ -116,6 +122,8 @@ class Gm18PuzzlePlugin(BrowserGamePlugin):
                 "placements": list(session.initial_board),
                 "moves": session.move_count,
                 "minimum_moves": session.minimum_move_count,
+                "first_attempt_pieces": sum(session.first_moves.values()),
+                "moved_pieces": len(session.first_moves),
                 "duration_ms": max(0.0, now_ms - session.round_started_at_ms),
                 "correct": True,
             }
@@ -129,7 +137,7 @@ class Gm18PuzzlePlugin(BrowserGamePlugin):
                 "ok": True,
                 "finished": True,
                 "events": events,
-                "metrics": score_gm18(events, elapsed_ms),
+                "metrics": score_gm18(events, elapsed_ms, required_puzzles=len(session.puzzles)),
             }
         return self._prepare_round(session)
 

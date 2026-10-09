@@ -95,14 +95,18 @@ def test_perfect_result_still_gives_a_full_session():
 
 # ── Ручка ─────────────────────────────────────────────────────────────────────
 
-def _client_with(tmp_path, stored_items):
-    """Приложение с подставленным хранилищем и выбранным пользователем."""
+def _client_with(tmp_path, stored_items, *, game_replies=None):
+    """Приложение с подставленным хранилищем и выбранным пользователем.
+
+    ``game_replies`` — ответы игр на запуск по теме запроса; остальные
+    запросы получают сохранённые результаты.
+    """
     from types import SimpleNamespace
-    from unittest.mock import AsyncMock
 
     from fastapi.testclient import TestClient
 
     from neuro_mirror.core.user_profiles import UserProfileStore
+    from neuro_mirror.plugins.games.course_store import TrainingCourseStore
     from neuro_mirror.web.app import create_app
 
     users = UserProfileStore(tmp_path)
@@ -110,20 +114,33 @@ def _client_with(tmp_path, stored_items):
                              audio_data_consent=True, video_data_consent=True)
     users.select_user(user["id"])
 
-    bus = SimpleNamespace(request=AsyncMock(return_value={"items": stored_items}))
-    history = SimpleNamespace(
-        for_user=lambda _user_id: (),
-        passes_for_game=lambda _user_id, _code: [],
-    )
+    sent = []
+
+    async def request(event, timeout=None):
+        sent.append(event)
+        if game_replies is not None and event.topic.startswith("req.game."):
+            return dict(game_replies(event))
+        return {"items": stored_items}
+
+    bus = SimpleNamespace(request=request)
+    history = SimpleNamespace(for_user=lambda _user_id: ())
     app = create_app()
     app.state.context = SimpleNamespace(
         user_store=users,
-        runtime=SimpleNamespace(bus=bus, game_history_store=history),
+        runtime=SimpleNamespace(
+            bus=bus,
+            game_history_store=history,
+            training_course_store=TrainingCourseStore(tmp_path / "courses.json"),
+        ),
     )
-    return TestClient(app)
+    client = TestClient(app)
+    client.sent = sent
+    client.store = app.state.context.runtime.training_course_store
+    client.user_id = user["id"]
+    return client
 
 
-def _stored_report(domains, *, session_id="s-1", stored_at="2026-09-29T10:00:00"):
+def _stored_report(domains, *, session_id="s-1", stored_at="2026-09-29T10:00:00+00:00"):
     return {
         "session_id": session_id,
         "stored_at": stored_at,
@@ -141,15 +158,52 @@ def test_endpoint_returns_a_ready_session(tmp_path):
         range(1, body["session_size"] + 1)
     )
     assert body["source_session_id"] == "s-1"
+    assert body["course"]["session_number"] == 1
+    assert body["course"]["sessions_total"] == 12
+    assert body["course"]["stage"]["id"] == "calibration"
     client.close()
 
 
-def test_endpoint_uses_the_most_recent_result(tmp_path):
-    old = _stored_report(profile(5, 5, 3, 2), session_id="old", stored_at="2026-09-01T10:00:00")
-    new = _stored_report(profile(0, 0, 0, 0), session_id="new", stored_at="2026-09-29T10:00:00")
+def test_endpoint_returns_the_saved_plan_until_the_session_ends(tmp_path):
+    """Перезагрузка страницы не собирает новое занятие."""
+    client = _client_with(tmp_path, [_stored_report(profile(3, 1, 0, 1))])
+    first = client.get("/api/training/session").json()
+    again = client.get("/api/training/session").json()
+    assert again["games"] == first["games"]
+    assert again["course"]["session_number"] == 1
+    client.close()
+
+
+def test_the_next_session_comes_after_the_previous_ends(tmp_path):
+    client = _client_with(tmp_path, [_stored_report(profile(3, 1, 0, 1))])
+    client.get("/api/training/session")
+    finished = client.post("/api/training/session/finish", json={}).json()
+    assert finished["finished"] is True
+    body = client.get("/api/training/session").json()
+    assert body["course"]["session_number"] == 2
+    assert body["course"]["completed_sessions"] == 1
+    client.close()
+
+
+def test_endpoint_uses_the_most_recent_result_to_start_a_course(tmp_path):
+    old = _stored_report(profile(5, 5, 3, 2), session_id="old", stored_at="2026-09-01T10:00:00+00:00")
+    new = _stored_report(profile(0, 0, 0, 0), session_id="new", stored_at="2026-09-29T10:00:00+00:00")
     client = _client_with(tmp_path, [old, new])
     body = client.get("/api/training/session").json()
     assert body["source_session_id"] == "new"
+    client.close()
+
+
+def test_a_test_taken_during_the_course_does_not_change_it(tmp_path):
+    """Недобор фиксируется по входному скринингу на весь курс."""
+    items = [_stored_report(profile(3, 1, 0, 1), session_id="entry")]
+    client = _client_with(tmp_path, items)
+    client.get("/api/training/session")
+    client.post("/api/training/session/finish", json={})
+    items.append(_stored_report(profile(5, 5, 3, 2), session_id="later",
+                                stored_at="2026-10-05T10:00:00+00:00"))
+    body = client.get("/api/training/session").json()
+    assert body["source_session_id"] == "entry"
     client.close()
 
 
@@ -159,4 +213,75 @@ def test_endpoint_explains_that_the_test_comes_first(tmp_path):
     response = client.get("/api/training/session")
     assert response.status_code == 409
     assert "когнитивный тест" in response.json()["detail"]
+    client.close()
+
+
+def test_a_finished_course_asks_for_the_exit_screening(tmp_path):
+    client = _client_with(tmp_path, [_stored_report(profile(3, 1, 0, 1))])
+    for _ in range(12):
+        client.get("/api/training/session")
+        client.post("/api/training/session/finish", json={})
+    response = client.get("/api/training/session")
+    assert response.status_code == 409
+    assert "выходной скрининг" in response.json()["detail"]
+    client.close()
+
+
+def _started_game(event):
+    return {"ok": True, "session_id": "game-1", "finished": False}
+
+
+def test_a_course_task_starts_with_the_level_and_set_of_the_plan(tmp_path):
+    """Уровень и набор берутся из сохранённого плана, а не из запроса."""
+    client = _client_with(tmp_path, [_stored_report(profile(3, 1, 0, 1))], game_replies=_started_game)
+    game = client.get("/api/training/session").json()["games"][0]
+    response = client.post(
+        f"/api/games/{game['game_code']}/start",
+        json={"course_session": 1, "course_position": 1, "difficulty_level": 3},
+    )
+    assert response.status_code == 200
+    sent = client.sent[-1].payload
+    assert sent["difficulty_level"] == game["difficulty_level"]
+    assert sent["stimulus_set"] == game["stimulus_set"]
+    assert sent["randomization_seed"] == game["randomization_seed"]
+    assert "course_position" not in sent
+    item = client.store.open_session(client.user_id)["games"][0]
+    assert item["status"] == "started"
+    assert item["game_session_id"] == "game-1"
+    client.close()
+
+
+def test_a_task_of_another_form_is_refused(tmp_path):
+    client = _client_with(tmp_path, [_stored_report(profile(3, 1, 0, 1))], game_replies=_started_game)
+    games = client.get("/api/training/session").json()["games"]
+    response = client.post(
+        f"/api/games/{games[1]['game_code']}/start",
+        json={"course_session": 1, "course_position": 1},
+    )
+    assert response.status_code == 409
+    client.close()
+
+
+def test_ending_the_session_from_the_pause_abandons_the_task(tmp_path):
+    client = _client_with(tmp_path, [_stored_report(profile(3, 1, 0, 1))], game_replies=_started_game)
+    game = client.get("/api/training/session").json()["games"][0]
+    client.post(f"/api/games/{game['game_code']}/start",
+                json={"course_session": 1, "course_position": 1})
+    client.post("/api/training/session/pause", json={"position": 1})
+    body = client.post("/api/training/session/finish", json={}).json()
+    assert body["status"] == "incomplete"
+    assert body["done"] == 0
+    course = client.get("/api/training/course").json()
+    session = course["sessions"][0]
+    assert session["games"][0]["status"] == "abandoned"
+    assert session["pauses"][0]["ended_by"] == "завершение занятия"
+    client.close()
+
+
+def test_a_free_game_is_not_bound_to_the_course(tmp_path):
+    client = _client_with(tmp_path, [_stored_report(profile(3, 1, 0, 1))], game_replies=_started_game)
+    client.get("/api/training/session")
+    client.post("/api/games/GM-17/start", json={})
+    session = client.store.open_session(client.user_id)
+    assert all(item["status"] == "pending" for item in session["games"])
     client.close()

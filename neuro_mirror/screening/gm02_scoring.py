@@ -38,3 +38,18 @@ def score_gm02_attempt(
         "u06_complete": len(clicked_cells) == len(expected),
         "u06_technically_valid": technically_valid,
     }
+
+
+def score_gm02_series(round_events: list[dict[str, Any]]) -> dict[str, Any]:
+    """M08 за всё прохождение — доля полностью верных серий.
+
+    Оценка одной попытки говорит только о последней серии: при ошибке на
+    десятой серии она дала бы ноль, хотя девять серий из десяти верны.
+    """
+    correct = sum(1 for item in round_events if item.get("correct"))
+    total = len(round_events)
+    return {
+        "m08_series_accuracy": correct / total if total else 0.0,
+        "m08_correct_series": correct,
+        "m08_series_total": total,
+    }

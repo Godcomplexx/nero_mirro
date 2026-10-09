@@ -6,10 +6,8 @@
 """
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
-
 from neuro_mirror.plugins.games.registry import implemented_game_codes
-from neuro_mirror.screening.difficulty_policy import MIN_DAYS_AT_LEVEL, MIN_LEVEL, has_levels
+from neuro_mirror.screening.difficulty_policy import MIN_LEVEL, Success, has_levels
 from neuro_mirror.screening.moca_scoring import VOICE_MOCA_MAX_SCORE, score_moca_tasks
 from neuro_mirror.screening.san_survey import (
     MOMENT_AFTER,
@@ -19,10 +17,9 @@ from neuro_mirror.screening.san_survey import (
     questionnaire,
     score_san,
 )
+from neuro_mirror.screening.training_course import CoursePass, form_states
 from neuro_mirror.screening.training_plan import plan_session
 from neuro_mirror.screening.training_session import build_training_session
-
-NOW = datetime(2026, 10, 7, 12, 0, tzinfo=UTC)
 
 # Ответы человека на задания скрининга: часть верно, часть нет.
 MOCA_ANSWERS = [
@@ -40,34 +37,24 @@ MOCA_ANSWERS = [
 ]
 
 
-def session_for(passes=None):
+def session_for(session_number: int = 1, passes: list[CoursePass] = ()):
+    """Занятие курса с данным номером после указанных прохождений."""
     result = score_moca_tasks(MOCA_ANSWERS)
+    states, _ = form_states(passes, session_number)
     return result, build_training_session(
         result["domains"],
+        session_number=session_number,
+        states=states,
         available_codes=implemented_game_codes(),
-        passes_for_game=passes,
     )
 
 
-def a_pass(level: int, ago: float, rate: float) -> dict:
-    """Одно прохождение игры с указанным исходом."""
-    return {
-        "difficulty_level": level,
-        "presented_at": (NOW - timedelta(days=ago)).isoformat(),
-        "completion_status": "completed",
-        "technical_validity": "valid",
-        "metrics": {
-            "u01_correct_action_rate": rate,
-            "u08_completion_rate": rate,
-            "m08_series_accuracy": rate,
-            "m07_target_recognition_rate": rate,
-            "a06_tracking_accuracy": rate,
-            "a07_found_difference_rate": rate,
-            "u01_first_attempt_word_accuracy": rate,
-            "e01_valid_move_count": 10,
-            "e05_moves_above_minimum": round(10 * (1 - rate)),
-        },
-    }
+ADAPTIVE_CODES = sorted(code for code in implemented_game_codes() if has_levels(code))
+
+
+def every_form(sessions, result: Success) -> list[CoursePass]:
+    """Каждая адаптивная форма пройдена в каждом из занятий с одним исходом."""
+    return [CoursePass(number, code, result) for number in sessions for code in ADAPTIVE_CODES]
 
 
 # ── Опросник до занятия ───────────────────────────────────────────────────────
@@ -153,34 +140,31 @@ def test_domains_do_not_come_in_blocks():
 
 # ── Подстройка сложности ──────────────────────────────────────────────────────
 
+def levels(session: dict) -> list[int]:
+    return [game["difficulty_level"] for game in session["games"] if game["adaptation"] == "adaptive"]
+
+
 def test_the_course_starts_at_the_first_level():
     _, session = session_for()
-    assert all(game["difficulty_level"] == MIN_LEVEL for game in session["games"])
+    assert levels(session)
+    assert set(levels(session)) == {MIN_LEVEL}
 
 
-def test_the_level_holds_through_the_first_days():
-    """Первые дни занятие идёт на первом уровне, даже когда всё даётся легко."""
-    easy_today = lambda _code: [a_pass(1, 0.5, 1.0), a_pass(1, 0.1, 1.0)]
-    _, session = session_for(easy_today)
-    assert all(game["difficulty_level"] == MIN_LEVEL for game in session["games"])
+def test_the_level_holds_through_the_first_five_sessions():
+    """Калибровка и освоение идут на первом уровне, даже когда всё легко."""
+    _, session = session_for(5, every_form(range(1, 5), Success(10, 10)))
+    assert set(levels(session)) == {MIN_LEVEL}
 
 
-def test_a_game_that_stays_easy_is_offered_harder_later():
-    easy_before = lambda _code: [
-        a_pass(1, MIN_DAYS_AT_LEVEL + 2, 1.0), a_pass(1, 0.1, 1.0)
-    ]
-    _, session = session_for(easy_before)
-    for game in session["games"]:
-        expected = MIN_LEVEL + 1 if has_levels(game["game_code"]) else MIN_LEVEL
-        assert game["difficulty_level"] == expected, game["game_code"]
+def test_a_form_mastered_in_sessions_three_to_five_goes_up_in_the_sixth():
+    _, session = session_for(6, every_form(range(3, 6), Success(10, 10)))
+    assert set(levels(session)) == {MIN_LEVEL + 1}
 
 
-def test_a_game_that_turns_out_too_hard_is_offered_easier():
-    struggling = lambda _code: [a_pass(2, 1, 0.1), a_pass(2, 0.1, 0.1)]
-    _, session = session_for(struggling)
-    levelled = [g for g in session["games"] if has_levels(g["game_code"])]
-    assert levelled, "в занятии нет ни одной игры с уровнями"
-    assert all(game["difficulty_level"] == MIN_LEVEL for game in levelled)
+def test_a_form_that_turns_out_too_hard_is_offered_easier():
+    passes = every_form(range(3, 6), Success(10, 10)) + every_form((6, 7), Success(1, 10))
+    _, session = session_for(8, passes)
+    assert set(levels(session)) == {MIN_LEVEL}
 
 
 def test_every_task_carries_what_is_needed_to_run_it():
@@ -190,7 +174,10 @@ def test_every_task_carries_what_is_needed_to_run_it():
         assert game["game_code"] and game["title"]
         assert game["stimulus_set"]
         assert game["domain"] and game["domain_code"]
-        assert MIN_LEVEL <= game["difficulty_level"] <= 3
+        if game["adaptation"] == "adaptive":
+            assert MIN_LEVEL <= game["difficulty_level"] <= 3
+        else:
+            assert game["difficulty_level"] is None
 
 
 # ── Путь целиком ──────────────────────────────────────────────────────────────

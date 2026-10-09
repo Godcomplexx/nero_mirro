@@ -7,6 +7,8 @@ def score_gm09(events: list[dict], *, expected_rounds: int) -> dict[str, float |
     hits = sum(len(set(item.get("targets") or ()) & set(item.get("selected") or ())) for item in events)
     return {
         "a06_tracking_accuracy": hits / total_targets if total_targets else 0.0,
+        "a06_tracked_targets": hits,
+        "a06_targets_total": total_targets,
         "u03_correct_rounds": sum(bool(item.get("correct")) for item in events),
         "u07_error_count": total_targets - hits,
         "u06_complete": len(events) >= max(1, expected_rounds),

@@ -10,6 +10,8 @@ def score_gm06(events: list[dict], *, expected_rounds: int) -> dict[str, float |
     successful = [len(item.get("expected_sequence") or ()) for item in events if item.get("correct")]
     return {
         "m08_series_accuracy": sum(bool(item.get("correct")) for item in events) / len(events) if events else 0.0,
+        "m08_correct_series": sum(bool(item.get("correct")) for item in events),
+        "m08_series_total": len(events),
         "m01_max_sequence_length": max(successful, default=0),
         "m02_position_accuracy": correct_positions / expected if expected else 0.0,
         "m03_order_errors": order_errors,

@@ -1,47 +1,23 @@
-"""Подстройка уровня сложности под результаты занятий."""
+"""Переход уровня формы по «Методике подбора и оценки тренировочного курса» v2."""
 from __future__ import annotations
-
-from datetime import UTC, datetime, timedelta
 
 import pytest
 
 from neuro_mirror.plugins.games.catalog import GAME_CATALOG
+from neuro_mirror.screening import gm02_scoring, gm18_scoring, gm22_scoring
 from neuro_mirror.screening.difficulty_policy import (
-    EASY_RATE,
-    HARD_RATE,
+    FLAG_CEILING,
+    FLAG_HARD,
     MAX_LEVEL,
-    MIN_DAYS_AT_LEVEL,
     MIN_LEVEL,
-    classify,
+    FormState,
+    Success,
+    apply_pass,
+    assign_level,
+    counted_success,
     has_levels,
-    next_level,
-    success_rate,
+    success,
 )
-
-NOW = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
-
-
-def days_ago(count: float) -> str:
-    return (NOW - timedelta(days=count)).isoformat()
-
-
-def a_pass(
-    *,
-    level: int = 1,
-    ago: float = 0.0,
-    rate: float = 0.9,
-    metric: str = "u01_correct_action_rate",
-    completion: str = "completed",
-    validity: str = "valid",
-) -> dict:
-    return {
-        "difficulty_level": level,
-        "presented_at": days_ago(ago),
-        "completion_status": completion,
-        "technical_validity": validity,
-        "metrics": {metric: rate},
-    }
-
 
 # ── Соответствие матрице игр ──────────────────────────────────────────────────
 
@@ -57,154 +33,174 @@ def test_levels_follow_the_game_matrix():
     assert covered == MATRIX_GAMES_WITH_LEVELS
 
 
-def test_a_game_without_levels_always_stays_at_the_first():
-    assert next_level("GM-13", [a_pass(rate=1.0, ago=10)], now=NOW) == MIN_LEVEL
+def test_every_form_with_levels_has_levels_in_the_catalog():
+    by_code = {game.code: game for game in GAME_CATALOG}
+    for code in MATRIX_GAMES_WITH_LEVELS:
+        assert len(by_code[code].difficulty_levels) == 3, code
 
 
-# ── Как оценивается прохождение ───────────────────────────────────────────────
+# ── Успешность: числитель и знаменатель ───────────────────────────────────────
 
-def test_an_easy_pass_is_the_one_done_almost_without_errors():
-    assert classify("GM-07", a_pass(rate=EASY_RATE)) == "easy"
-
-
-def test_a_suitable_pass_is_neither_raised_nor_lowered():
-    assert classify("GM-07", a_pass(rate=(EASY_RATE + HARD_RATE) / 2)) == "suitable"
-
-
-def test_a_hard_pass_is_the_one_with_few_correct_actions():
-    assert classify("GM-07", a_pass(rate=HARD_RATE - 0.01)) == "hard"
+def test_the_threshold_is_checked_exactly():
+    """85 из 100 — ровно порог, 84 из 100 — ниже."""
+    assert Success(85, 100).at_least(85)
+    assert not Success(84, 100).at_least(85)
+    assert Success(17, 20).at_least(85)
+    assert Success(1, 2).at_least(50)
+    assert not Success(49, 100).at_least(50)
 
 
-def test_an_unfinished_pass_counts_as_too_hard():
-    assert classify("GM-07", a_pass(rate=1.0, completion="incomplete")) == "hard"
+def test_a_form_without_levels_has_no_success():
+    assert success("GM-05", {"m07_target_recognition_rate": 1.0}) is None
 
 
-def test_a_technically_invalid_pass_is_not_judged_at_all():
-    """Сорванная запись говорит об оборудовании, а не о способностях человека."""
-    assert classify("GM-07", a_pass(rate=0.1, validity="invalid")) == "unknown"
+def test_success_is_taken_from_counts_not_from_a_share():
+    """Доля без числителя и знаменателя не годится для точной проверки."""
+    assert success("GM-03", {"u01_correct_action_rate": 0.9}) is None
+    assert success("GM-03", {"u01_correct_actions": 9, "u01_actions_total": 10}) == Success(9, 10)
 
 
-def test_the_tower_is_measured_by_closeness_to_the_shortest_solution():
-    """Готовой доли верных действий у башни нет."""
-    perfect = {"e01_valid_move_count": 7, "e05_moves_above_minimum": 0}
-    clumsy = {"e01_valid_move_count": 20, "e05_moves_above_minimum": 13}
-    assert success_rate("GM-22", perfect) == 1.0
-    assert success_rate("GM-22", clumsy) < HARD_RATE
+def test_broken_counts_are_not_a_success():
+    assert success("GM-03", {"u01_correct_actions": 11, "u01_actions_total": 10}) is None
+    assert success("GM-03", {"u01_correct_actions": 0, "u01_actions_total": 0}) is None
 
 
-def test_a_missing_metric_leaves_the_level_alone():
-    """Неизвестный результат не повод ни повышать, ни понижать."""
-    assert classify("GM-07", {"metrics": {}}) == "unknown"
+def test_puzzle_counts_pieces_placed_on_the_first_move():
+    """GM-18: U01 — фрагменты, установленные верно с первой попытки."""
+    metrics = gm18_scoring.score_gm18(
+        [{"moves": 5, "minimum_moves": 4, "first_attempt_pieces": 4, "moved_pieces": 6}],
+        30_000,
+        required_puzzles=1,
+    )
+    assert success("GM-18", metrics) == Success(4, 6)
+    assert metrics["u06_complete"] is True
+    assert metrics["u06_technically_valid"] is True
 
 
-# ── Переход на следующий уровень ──────────────────────────────────────────────
-
-def test_the_course_starts_at_the_first_level():
-    assert next_level("GM-07", [], now=NOW) == MIN_LEVEL
-
-
-def test_the_level_holds_for_the_first_days_even_when_everything_is_easy():
-    """Первые дни занятие идёт на первом уровне: так задан курс."""
-    recent = [a_pass(ago=0.5, rate=1.0), a_pass(ago=0.1, rate=1.0)]
-    assert next_level("GM-07", recent, now=NOW) == MIN_LEVEL
+def test_tower_counts_towers_built_into_the_target():
+    """GM-22: U03 — доля башен, собранных в целевую конфигурацию."""
+    events = [{"legal_move": True, "level_complete": True, "minimum_moves": 7}]
+    metrics = gm22_scoring.score_gm22(events, 40_000, required_levels=1)
+    assert success("GM-22", metrics) == Success(1, 1)
 
 
-def test_the_level_rises_when_the_game_stays_easy_after_those_days():
-    passes = [a_pass(ago=MIN_DAYS_AT_LEVEL + 1, rate=1.0), a_pass(ago=0.1, rate=1.0)]
-    assert next_level("GM-07", passes, now=NOW) == MIN_LEVEL + 1
+def test_sequence_counts_every_series_not_only_the_last():
+    """GM-02: девять верных серий из десяти — не ноль из-за последней ошибки."""
+    rounds = [{"correct": True}] * 9 + [{"correct": False}]
+    metrics = gm02_scoring.score_gm02_series(rounds)
+    assert success("GM-02", metrics) == Success(9, 10)
 
 
-def test_a_single_good_result_does_not_raise_the_level():
-    """Разовый успех может объясняться удачным днём."""
-    passes = [a_pass(ago=5, rate=0.5), a_pass(ago=0.1, rate=1.0)]
-    assert next_level("GM-07", passes, now=NOW) == MIN_LEVEL
+# ── Какое прохождение учитывается ─────────────────────────────────────────────
 
-
-def test_the_level_never_goes_above_the_highest_one():
-    passes = [a_pass(level=MAX_LEVEL, ago=5, rate=1.0), a_pass(level=MAX_LEVEL, ago=0.1, rate=1.0)]
-    assert next_level("GM-07", passes, now=NOW) == MAX_LEVEL
-
-
-# ── Возврат на предыдущий уровень ─────────────────────────────────────────────
-
-def test_the_level_drops_when_the_game_turns_out_too_hard():
-    """Адаптация, умеющая только усложнять, оставит человека на непосильном."""
-    passes = [a_pass(level=2, ago=1, rate=0.1), a_pass(level=2, ago=0.1, rate=0.1)]
-    assert next_level("GM-07", passes, now=NOW) == 1
-
-
-def test_lowering_does_not_wait_for_the_holding_period():
-    passes = [a_pass(level=2, ago=0.2, rate=0.05), a_pass(level=2, ago=0.1, rate=0.05)]
-    assert next_level("GM-07", passes, now=NOW) == 1
-
-
-def test_the_level_never_drops_below_the_first_one():
-    passes = [a_pass(level=1, ago=1, rate=0.0), a_pass(level=1, ago=0.1, rate=0.0)]
-    assert next_level("GM-07", passes, now=NOW) == MIN_LEVEL
-
-
-def test_one_bad_result_does_not_lower_the_level():
-    passes = [a_pass(level=2, ago=1, rate=0.9), a_pass(level=2, ago=0.1, rate=0.1)]
-    assert next_level("GM-07", passes, now=NOW) == 2
-
-
-# ── Состав занятия ────────────────────────────────────────────────────────────
-
-def test_every_game_of_a_session_carries_its_level():
-    from neuro_mirror.plugins.games.registry import implemented_game_codes
-    from neuro_mirror.screening.training_session import build_training_session
-
-    profile = [
-        {"domain": "Память", "score": 3, "max_score": 5},
-        {"domain": "Внимание", "score": 1, "max_score": 5},
-        {"domain": "Речь", "score": 0, "max_score": 3},
-        {"domain": "Абстракция", "score": 1, "max_score": 2},
-    ]
-    session = build_training_session(profile, available_codes=implemented_game_codes())
-    assert session["games"]
-    assert all(game["difficulty_level"] == MIN_LEVEL for game in session["games"])
-
-
-def test_a_session_raises_the_level_of_the_games_that_became_easy():
-    from neuro_mirror.plugins.games.registry import implemented_game_codes
-    from neuro_mirror.screening.training_session import build_training_session
-
-    # У игр показатель успеха разный, поэтому заглушка отдаёт их все: иначе
-    # часть игр получила бы «неизвестно» и осталась бы на первом уровне.
-    every_metric = {
-        "u01_correct_action_rate": 1.0,
-        "u08_completion_rate": 1.0,
-        "m08_series_accuracy": 1.0,
-        "m07_target_recognition_rate": 1.0,
-        "a06_tracking_accuracy": 1.0,
-        "a07_found_difference_rate": 1.0,
-        "u01_first_attempt_word_accuracy": 1.0,
-        "e01_valid_move_count": 7,
-        "e05_moves_above_minimum": 0,
+def outcome(correct: int, total: int, *, completion="completed", validity="valid") -> dict:
+    return {
+        "completion_status": completion,
+        "technical_validity": validity,
+        "metrics": {"u01_correct_actions": correct, "u01_actions_total": total},
     }
 
-    def passes(_code: str) -> list[dict]:
-        one = {
-            "difficulty_level": MIN_LEVEL,
-            "presented_at": days_ago(MIN_DAYS_AT_LEVEL + 2),
-            "completion_status": "completed",
-            "technical_validity": "valid",
-            "metrics": every_metric,
-        }
-        later = dict(one, presented_at=days_ago(0.1))
-        return [one, later]
 
-    profile = [
-        {"domain": "Память", "score": 3, "max_score": 5},
-        {"domain": "Внимание", "score": 1, "max_score": 5},
-        {"domain": "Речь", "score": 0, "max_score": 3},
-        {"domain": "Абстракция", "score": 1, "max_score": 2},
-    ]
-    session = build_training_session(
-        profile,
-        available_codes=implemented_game_codes(),
-        passes_for_game=passes,
-    )
-    for game in session["games"]:
-        expected = MIN_LEVEL + 1 if has_levels(game["game_code"]) else MIN_LEVEL
-        assert game["difficulty_level"] == expected, game["game_code"]
+def test_a_finished_pass_is_counted():
+    assert counted_success("GM-17", outcome(9, 10)) == Success(9, 10)
+
+
+def test_a_pass_ended_by_time_or_attempts_is_counted():
+    assert counted_success("GM-17", outcome(3, 10, completion="incomplete")) == Success(3, 10)
+
+
+def test_a_technically_invalid_pass_is_not_counted():
+    assert counted_success("GM-17", outcome(9, 10, validity="invalid")) is None
+
+
+def test_a_pass_without_completeness_indicators_is_not_counted():
+    assert counted_success("GM-17", outcome(9, 10, completion="unknown")) is None
+    assert counted_success("GM-17", outcome(9, 10, validity="unknown")) is None
+
+
+# ── Правило перехода ──────────────────────────────────────────────────────────
+
+def test_one_pass_at_85_percent_raises_the_level():
+    assert apply_pass(FormState(level=1), Success(17, 20)).level == 2
+
+
+def test_a_pass_in_the_target_corridor_keeps_the_level():
+    state = apply_pass(FormState(level=2), Success(7, 10))
+    assert state.level == 2
+    assert state.below_half_streak == 0
+
+
+def test_one_pass_below_half_does_not_lower_the_level():
+    state = apply_pass(FormState(level=2), Success(2, 10))
+    assert state.level == 2
+    assert state.below_half_streak == 1
+
+
+def test_two_passes_below_half_in_a_row_lower_the_level():
+    state = apply_pass(FormState(level=2), Success(2, 10))
+    state = apply_pass(state, Success(4, 10))
+    assert state.level == 1
+    assert state.below_half_streak == 0, "счётчик сбрасывается при смене уровня"
+
+
+def test_a_pass_in_between_breaks_the_series():
+    state = apply_pass(FormState(level=2), Success(2, 10))
+    state = apply_pass(state, Success(6, 10))
+    state = apply_pass(state, Success(2, 10))
+    assert state.level == 2
+
+
+def test_two_failures_at_the_first_level_mark_the_form_hard():
+    state = apply_pass(FormState(level=MIN_LEVEL), Success(1, 10))
+    state = apply_pass(state, Success(1, 10))
+    assert state.level == MIN_LEVEL
+    assert FLAG_HARD in state.flags
+
+
+def test_success_at_the_top_level_marks_the_ceiling():
+    state = apply_pass(FormState(level=MAX_LEVEL), Success(10, 10))
+    assert state.level == MAX_LEVEL
+    assert FLAG_CEILING in state.flags
+
+
+def test_the_level_changes_by_at_most_one_step():
+    assert apply_pass(FormState(level=1), Success(10, 10)).level == 2
+
+
+@pytest.mark.parametrize("level", [1, 2, 3])
+def test_the_level_stays_within_the_matrix(level):
+    for result in (Success(10, 10), Success(0, 10)):
+        state = FormState(level=level)
+        for _ in range(4):
+            state = apply_pass(state, result)
+            assert MIN_LEVEL <= state.level <= MAX_LEVEL
+
+
+# ── Присвоение уровня перед 6-м занятием ──────────────────────────────────────
+
+def test_a_steady_form_gets_the_second_level():
+    assert assign_level([Success(9, 10), Success(9, 10), Success(8, 10)]).level == 2
+
+
+def test_a_form_that_dropped_at_the_end_stays_at_the_first_level():
+    """Последнее прохождение ниже 0,70: результат к концу освоения падает."""
+    results = [Success(10, 10), Success(10, 10), Success(6, 10)]
+    total = Success(26, 30)
+    assert total.at_least(85)
+    assert assign_level(results).level == 1
+
+
+def test_the_summary_is_correct_over_all_rather_than_an_average_of_shares():
+    """Сводная успешность — сумма верных на сумму всех."""
+    # Средняя доля (1,0 + 0,7) / 2 = 0,85, а сводная 8/11 ≈ 0,73.
+    assert assign_level([Success(1, 1), Success(7, 10)]).level == 1
+
+
+def test_a_form_failing_through_mastering_is_marked_hard():
+    state = assign_level([Success(2, 10), Success(3, 10), Success(4, 10)])
+    assert state.level == 1
+    assert FLAG_HARD in state.flags
+
+
+def test_a_form_not_shown_in_mastering_starts_at_the_first_level():
+    assert assign_level([]) == FormState()

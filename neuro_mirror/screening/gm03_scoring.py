@@ -14,6 +14,8 @@ def score_gm03(events: list[dict], *, expected_rooms: int) -> dict[str, float | 
         distances.append(math.dist(expected, selected))
     return {
         "u01_correct_action_rate": correct / total if total else 0.0,
+        "u01_correct_actions": correct,
+        "u01_actions_total": total,
         "m04_mean_spatial_error": sum(distances) / total if total else 0.0,
         "u07_error_count": total - correct,
         "u06_complete": total >= max(1, expected_rooms),

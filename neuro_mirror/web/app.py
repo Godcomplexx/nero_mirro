@@ -56,6 +56,17 @@ from neuro_mirror.screening.san_survey import (
     questionnaire as san_questionnaire,
     score_san,
 )
+from neuro_mirror.plugins.games.course_store import (
+    ITEM_ABANDONED,
+    ITEM_DONE,
+    CourseError,
+)
+from neuro_mirror.screening.difficulty_policy import describe
+from neuro_mirror.screening.training_course import (
+    COURSE_SESSIONS,
+    form_states,
+    stage_for,
+)
 from neuro_mirror.screening.training_session import build_training_session
 from neuro_mirror.plugins.ui.web_plugin import WebUIPlugin, WebUIStateStore
 from neuro_mirror.plugins.user_progress.plugin import UserProgressPlugin
@@ -120,6 +131,15 @@ class ClientLogIn(BaseModel):
 
 class SessionFrameIn(BaseModel):
     image_base64: str
+
+
+class TrainingFinishIn(BaseModel):
+    reason: str = ""
+
+
+class TrainingPauseIn(BaseModel):
+    # Номер задания занятия, на котором нажата пауза; пусто — между заданиями.
+    position: int | None = None
 
 
 class SanAnswersIn(BaseModel):
@@ -288,13 +308,13 @@ def create_app() -> FastAPI:
         ctx: WebAppContext = app.state.context
         return JSONResponse(await ctx.state_store.get_snapshot())
 
-    async def _game_request(topic: str, source: str, payload: dict[str, Any] | None = None) -> JSONResponse:
+    async def _game_reply(topic: str, source: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         ctx: WebAppContext = app.state.context
         reply = await ctx.runtime.bus.request(Event(topic=topic, source=source, payload=payload or {}))
         if not reply.get("ok"):
             raise HTTPException(status_code=400, detail=reply.get("message", "Ошибка игры."))
         reply.pop("_reply_to", None)
-        return JSONResponse(reply)
+        return reply
 
     @app.get("/api/games/catalog")
     async def game_catalog() -> JSONResponse:
@@ -337,17 +357,9 @@ def create_app() -> FastAPI:
         )
         return JSONResponse(result)
 
-    @app.get("/api/training/session")
-    async def training_session() -> JSONResponse:
-        """Готовое занятие по последнему результату MoCA.
-
-        Интерфейс получает упорядоченный список игр и просто проигрывает его:
-        расчёт плана, перевод доменов в коды игр и защита от повторов остаются
-        в ядре.
-        """
+    async def _latest_moca(user_id: str) -> tuple[list[dict[str, Any]], str, str]:
+        """Профиль доменов из последнего результата MoCA: профиль, сессия, время."""
         ctx: WebAppContext = app.state.context
-        active = _active_user_or_400()
-        user_id = str(active.get("id") or "")
         try:
             reply = await ctx.runtime.bus.request(
                 Event(
@@ -362,30 +374,189 @@ def create_app() -> FastAPI:
 
         items = list(reply.get("items") or [])
         items.sort(key=lambda item: str(item.get("stored_at") or ""), reverse=True)
-        profile: list[dict[str, Any]] = []
-        source_session = ""
         for item in items:
             candidate = ((item.get("domains") or {}).get("moca_domains")) or []
             if candidate:
-                profile = list(candidate)
-                source_session = str(item.get("session_id") or "")
-                break
-        if not profile:
-            raise HTTPException(
-                status_code=409,
-                detail="Сначала пройдите когнитивный тест: занятие подбирается по его результату.",
-            )
+                return list(candidate), str(item.get("session_id") or ""), str(item.get("stored_at") or "")
+        return [], "", ""
 
-        history_store = ctx.runtime.game_history_store
-        session = build_training_session(
-            profile,
-            history=history_store.for_user(user_id),
-            available_codes=implemented_game_codes(),
-            passes_for_game=lambda code: history_store.passes_for_game(user_id, code),
+    def _moment(value: Any) -> datetime | None:
+        try:
+            moment = datetime.fromisoformat(str(value))
+        except (TypeError, ValueError):
+            return None
+        return moment if moment.tzinfo else moment.replace(tzinfo=UTC)
+
+    def _course_payload(course: dict[str, Any], session: dict[str, Any]) -> dict[str, Any]:
+        store = app.state.context.runtime.training_course_store
+        number = int(session["number"])
+        return {
+            "course": {
+                "course_id": course["course_id"],
+                "session_number": number,
+                "sessions_total": COURSE_SESSIONS,
+                "completed_sessions": len(store.closed_sessions(course)),
+                "stage": stage_for(number).to_dict(),
+            },
+            "status": session["status"],
+            "plan": session["plan"],
+            "games": session["games"],
+            "session_size": len(session["games"]),
+            "skipped": session["skipped"],
+            "level_changes": session["level_changes"],
+            "profile": course["entry"]["profile"],
+            "source_session_id": course["entry"]["session_id"],
+        }
+
+    def _next_course_session(course: dict[str, Any], user_id: str) -> dict[str, Any]:
+        """Собрать следующее занятие курса по его прохождениям."""
+        ctx: WebAppContext = app.state.context
+        store = ctx.runtime.training_course_store
+        number = len(course["sessions"]) + 1
+        states, log = form_states(store.passes(course), number)
+        shown = (ITEM_DONE, ITEM_ABANDONED)
+        course_sessions = tuple(
+            tuple(item["game_code"] for item in previous["games"] if item.get("status") in shown)
+            for previous in course["sessions"]
         )
-        if not session["games"]:
+        domain_totals: dict[str, int] = {}
+        for previous in course["sessions"]:
+            for domain, count in (previous.get("plan") or {}).items():
+                domain_totals[domain] = domain_totals.get(domain, 0) + int(count)
+        session = build_training_session(
+            course["entry"]["profile"],
+            session_number=number,
+            user_id=user_id,
+            history=ctx.runtime.game_history_store.for_user(user_id),
+            course_sessions=course_sessions,
+            domain_totals=domain_totals,
+            states=states,
+            available_codes=implemented_game_codes(),
+        )
+        return {
+            "number": number,
+            "stage": stage_for(number).id,
+            **session,
+            "level_changes": [entry for entry in log if entry["before_session"] == number],
+        }
+
+    @app.get("/api/training/session")
+    async def training_session() -> JSONResponse:
+        """Текущее занятие курса — сохранённое или собранное заново.
+
+        План занятия сохраняется при сборке: пока занятие не завершено, ответ
+        один и тот же, и перезагрузка страницы не собирает новое занятие.
+        Курс строится по входному скринингу и его результат не пересчитывает:
+        новый курс начинается только после выходного скрининга — когнитивного
+        теста, пройденного после 12-го занятия.
+        """
+        ctx: WebAppContext = app.state.context
+        active = _active_user_or_400()
+        user_id = str(active.get("id") or "")
+        store = ctx.runtime.training_course_store
+
+        course = store.latest_course(user_id)
+        session = store.open_session(user_id)
+        if course is not None and session is not None:
+            return JSONResponse(_course_payload(course, session))
+
+        if course is None or store.is_finished(course):
+            profile, entry_session, entry_at = await _latest_moca(user_id)
+            if not profile:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Сначала пройдите когнитивный тест: занятие подбирается по его результату.",
+                )
+            if course is not None:
+                finished_at = _moment(course.get("finished_at"))
+                tested_at = _moment(entry_at)
+                if finished_at is None or tested_at is None or tested_at <= finished_at:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=(
+                            f"Курс из {COURSE_SESSIONS} занятий пройден. Следующий шаг — "
+                            "выходной скрининг: пройдите когнитивный тест ещё раз, и по "
+                            "его результату начнётся новый курс."
+                        ),
+                    )
+            course = store.create_course(user_id=user_id, entry_session_id=entry_session, profile=profile)
+
+        planned = _next_course_session(course, user_id)
+        if not planned["games"]:
             raise HTTPException(status_code=409, detail="Не удалось подобрать ни одного задания.")
-        return JSONResponse({**session, "profile": profile, "source_session_id": source_session})
+        session = store.add_session(course, planned)
+        return JSONResponse(_course_payload(course, session))
+
+    @app.post("/api/training/session/finish")
+    async def finish_training_session(payload: TrainingFinishIn | None = None) -> JSONResponse:
+        """Завершить занятие — по окончании всех заданий или досрочно.
+
+        Начатое и не законченное задание получает статус «прервано»: нулём
+        оно не считается и уровень формы не меняет.
+        """
+        ctx: WebAppContext = app.state.context
+        active = _active_user_or_400()
+        reason = (payload.reason if payload else "").strip() or "пользователь завершил занятие"
+        session = ctx.runtime.training_course_store.finish_session(str(active.get("id") or ""), reason=reason)
+        if session is None:
+            return JSONResponse({"finished": False})
+        done = sum(1 for item in session["games"] if item["status"] == ITEM_DONE)
+        return JSONResponse({
+            "finished": True,
+            "session_number": session["number"],
+            "status": session["status"],
+            "done": done,
+            "total": len(session["games"]),
+        })
+
+    @app.post("/api/training/session/pause")
+    async def pause_training_session(payload: TrainingPauseIn | None = None) -> JSONResponse:
+        """Отметить паузу в журнале занятия: где нажата и когда."""
+        ctx: WebAppContext = app.state.context
+        active = _active_user_or_400()
+        try:
+            record = ctx.runtime.training_course_store.pause(
+                str(active.get("id") or ""), position=payload.position if payload else None
+            )
+        except CourseError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return JSONResponse(record)
+
+    @app.post("/api/training/session/resume")
+    async def resume_training_session() -> JSONResponse:
+        ctx: WebAppContext = app.state.context
+        active = _active_user_or_400()
+        record = ctx.runtime.training_course_store.resume(str(active.get("id") or ""))
+        return JSONResponse(record or {})
+
+    @app.get("/api/training/course")
+    async def training_course() -> JSONResponse:
+        """Курс целиком: занятия, исходы заданий, уровни форм и их переходы.
+
+        Это данные для отчёта специалиста о занятии и о курсе.
+        """
+        ctx: WebAppContext = app.state.context
+        active = _active_user_or_400()
+        user_id = str(active.get("id") or "")
+        store = ctx.runtime.training_course_store
+        course = store.latest_course(user_id)
+        if course is None:
+            raise HTTPException(status_code=404, detail="Курс тренировок ещё не начат.")
+        next_number = min(len(store.closed_sessions(course)) + 1, COURSE_SESSIONS)
+        states, log = form_states(store.passes(course), next_number)
+        access_journal.record(
+            action=VIEW_RESULTS,
+            user_id=user_id,
+            details={"kind": "training_course", "sessions": len(course["sessions"])},
+        )
+        return JSONResponse({
+            **course,
+            "sessions_total": COURSE_SESSIONS,
+            "completed_sessions": len(store.closed_sessions(course)),
+            "finished": store.is_finished(course),
+            "levels": {code: describe(state) for code, state in sorted(states.items())},
+            "level_changes": log,
+        })
 
     @app.get("/api/games/{game_code}/renderer.js")
     async def game_renderer(game_code: str) -> FileResponse:
@@ -414,14 +585,42 @@ def create_app() -> FastAPI:
         if definition.code not in implemented_game_codes():
             raise HTTPException(status_code=501, detail="Игра присутствует в каталоге, но ещё не реализована.")
         active_user = _active_user_or_400()
-        return await _game_request(
+        user_id = str(active_user.get("id") or "")
+        store = app.state.context.runtime.training_course_store
+        body = dict(payload or {})
+        course_session = body.pop("course_session", None)
+        course_position = body.pop("course_position", None)
+        in_course = course_session is not None and course_position is not None
+        if in_course:
+            # Задание курса: уровень, стимульный набор и зерно берутся из
+            # сохранённого плана занятия, а не из запроса интерфейса.
+            try:
+                item = store.begin_item(
+                    user_id=user_id,
+                    session_number=int(course_session),
+                    position=int(course_position),
+                    game_code=definition.code,
+                )
+            except (CourseError, TypeError, ValueError) as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
+            body.update(
+                difficulty_level=item["difficulty_level"],
+                stimulus_set=item["stimulus_set"],
+                randomization_seed=item["randomization_seed"],
+            )
+        reply = await _game_reply(
             definition.start_request_topic,
             f"web.game.{definition.topic_prefix}",
-            {
-                **(payload or {}),
-                "user_id": str(active_user.get("id") or ""),
-            },
+            {**body, "user_id": user_id},
         )
+        if in_course and reply.get("session_id"):
+            store.attach_game_session(
+                user_id=user_id,
+                session_number=int(course_session),
+                position=int(course_position),
+                game_session_id=str(reply["session_id"]),
+            )
+        return JSONResponse(reply)
 
     @app.post("/api/games/{game_code}/answer")
     async def generic_game_answer(game_code: str, payload: dict[str, Any]) -> JSONResponse:
@@ -431,11 +630,11 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         if definition.code not in implemented_game_codes():
             raise HTTPException(status_code=501, detail="Игра присутствует в каталоге, но ещё не реализована.")
-        return await _game_request(
+        return JSONResponse(await _game_reply(
             definition.answer_request_topic,
             f"web.game.{definition.topic_prefix}",
             payload,
-        )
+        ))
 
     @app.get("/api/config")
     async def get_config() -> JSONResponse:

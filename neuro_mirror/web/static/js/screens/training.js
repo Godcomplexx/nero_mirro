@@ -1,22 +1,34 @@
 // neuro_mirror/web/static/js/screens/training.js
 //
-// «Тренировка» (deck slide 10). The core composes the session from the last
-// cognitive test (js/core/training.js) and owns every game (js/core/games.js);
-// this screen shows the composition, then plays the games one after another
-// in the order given, inside the work area. «Выбрать игру самому» opens the
-// core's catalog by domain and plays a single game outside the session.
+// «Тренировка» (deck slide 10). The core keeps the course of twelve sessions
+// and composes each session (js/core/training.js); it owns every game
+// (js/core/games.js). This screen shows the composition, then plays the games
+// one after another in the order given, inside the work area. «Выбрать игру
+// самому» opens the core's catalog by domain and plays a single game outside
+// the course: such a game does not change the levels of the course.
+//
+// A task ends only by itself (done, time or attempts are over): there is no
+// skipping. «Пауза» hides the task; from the pause the user continues — the
+// task starts over, an interrupted trial is not scored — or ends the session.
 //
 // Progress is kept in module state, so leaving the section and coming back
 // returns to the same task of the session; it is also kept for the browser
 // session (sessionStorage), so a page reload returns to the same place: the
 // game list, the same game and the same step of it (instruction, practice or
-// the game itself — a game interrupted by the reload starts over).
+// the game itself — a game interrupted by the reload starts over). The core
+// keeps the plan itself, so even without that place the session continues
+// from its first unfinished task.
 
-import { loadTrainingPlan, loadTrainingSession } from "../core/training.js";
+import {
+  finishTrainingSession,
+  loadTrainingPlan,
+  loadTrainingSession,
+  noteResume,
+  notePause,
+} from "../core/training.js";
 import { loadCatalog, mountGame } from "../core/games.js";
 import { activeUser } from "../core/legacy.js";
 import { createDomainTag } from "../components/domain-tag.js";
-import { confirmDialog } from "../components/confirm-dialog.js";
 import { notify } from "../components/notify.js";
 
 // loading → locked | overview | legacy | failed;  overview → playing → done
@@ -27,6 +39,9 @@ const model = {
   index: 0,
   completed: 0,
   currentFinished: false,
+  // The task on screen could not be opened: the session may go past it
+  currentUnavailable: false,
+  paused: false,
   message: "",
   legacy: null,
   // Free choice of one game
@@ -43,10 +58,12 @@ const RESTORABLE = new Set(["overview", "catalog", "free", "playing", "done"]);
 function savePlace() {
   try {
     if (!RESTORABLE.has(model.phase)) return;
-    const { phase, userId, session, index, completed, stopped, freeDomain, freeGame, stage } = model;
+    const { phase, userId, session, index, completed, stopped, paused, currentFinished, freeDomain, freeGame, stage } = model;
     window.sessionStorage.setItem(
       PLACE_KEY,
-      JSON.stringify({ phase, userId, session, index, completed, stopped, freeDomain, freeGame, stage }),
+      JSON.stringify({
+        phase, userId, session, index, completed, stopped, paused, currentFinished, freeDomain, freeGame, stage,
+      }),
     );
   } catch (_) {
     // storage unavailable — a reload simply starts from the overview
@@ -71,7 +88,6 @@ function setStage(stage) {
 let host = null;
 let body = null;
 let removeGame = null;
-let nextButton = null;
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -102,6 +118,21 @@ function tasksWord(n) {
 }
 
 const games = () => (model.session && model.session.games) || [];
+const courseInfo = () => (model.session && model.session.course) || null;
+
+// Where the saved session continues: the first task without an outcome
+function firstOpenTask() {
+  const index = games().findIndex((game) => !["done", "abandoned", "not_presented"].includes(game.status));
+  return index < 0 ? games().length : index;
+}
+
+const doneCount = () => games().filter((game) => game.status === "done").length;
+
+function sessionTitle() {
+  const info = courseInfo();
+  if (!info) return "";
+  return `Занятие ${info.session_number} из ${info.sessions_total} · ${info.stage.title}`;
+}
 
 // ---- Loading the session ---------------------------------------------------
 
@@ -111,8 +142,10 @@ async function load() {
   const result = await loadTrainingSession();
   if (result.status === "ready") {
     model.session = result.session;
-    model.index = 0;
-    model.completed = 0;
+    model.index = firstOpenTask();
+    model.completed = doneCount();
+    model.paused = false;
+    model.currentFinished = false;
     model.phase = "overview";
   } else if (result.status === "locked") {
     model.message = result.message;
@@ -134,68 +167,69 @@ async function load() {
 function dropGame() {
   if (removeGame) removeGame();
   removeGame = null;
-  nextButton = null;
 }
 
 function startSession() {
   model.stopped = false;
-  model.index = 0;
-  model.completed = 0;
+  model.paused = false;
+  model.index = firstOpenTask();
+  model.completed = doneCount();
+  model.currentFinished = false;
+  model.currentUnavailable = false;
   model.stage = "intro";
-  model.phase = "playing";
+  model.phase = model.index >= games().length ? "done" : "playing";
   render();
+  if (model.phase === "done") endSession(false);
 }
 
+// The core closes the session; its count of finished tasks is the one shown
+async function endSession(stopped) {
+  model.stopped = stopped;
+  const reply = await finishTrainingSession(stopped ? "пользователь завершил занятие" : "");
+  if (reply && reply.finished) model.completed = reply.done;
+  if (model.phase === "done") render();
+}
+
+// «Следующее задание» exists only once the task has ended (or could not open)
 function advance() {
   if (model.currentFinished) model.completed += 1;
   dropGame();
+  model.currentFinished = false;
+  model.currentUnavailable = false;
   if (model.index + 1 >= games().length) {
     model.phase = "done";
-  } else {
-    model.index += 1;
-    model.stage = "intro";
+    render();
+    endSession(false);
+    return;
   }
+  model.index += 1;
+  model.stage = "intro";
   render();
 }
 
-async function nextOrSkip() {
-  if (!model.currentFinished) {
-    const confirmed = await confirmDialog({
-      title: "Задание ещё не завершено",
-      message: "Перейти к следующему заданию? Текущее останется невыполненным.",
-      confirmLabel: "Перейти",
-      cancelLabel: "Остаться",
-    });
-    if (!confirmed) return;
-  }
-  advance();
+// The pause hides the task: the field is removed, its timers stop with it
+function pauseSession() {
+  if (model.paused) return;
+  dropGame();
+  model.paused = true;
+  notePause(model.currentFinished ? null : (games()[model.index] || {}).position ?? null);
+  render();
 }
 
-async function stopSession() {
-  const confirmed = await confirmDialog({
-    title: "Прервать занятие?",
-    message: "Оставшиеся задания не будут выполнены.",
-    confirmLabel: "Прервать",
-    cancelLabel: "Продолжить занятие",
-  });
-  if (!confirmed) return;
+function resumeSession() {
+  model.paused = false;
+  noteResume();
+  render();
+}
+
+function endFromPause() {
   if (model.currentFinished) model.completed += 1;
+  model.currentFinished = false;
+  model.paused = false;
   dropGame();
-  model.stopped = true;
   model.phase = "done";
   render();
-}
-
-function syncNextButton() {
-  if (!nextButton) return;
-  const last = model.index + 1 >= games().length;
-  if (model.currentFinished) {
-    nextButton.textContent = last ? "Завершить занятие" : "Следующее задание";
-    nextButton.className = "nm-btn nm-btn-primary";
-  } else {
-    nextButton.textContent = "Пропустить задание";
-    nextButton.className = "nm-btn nm-btn-secondary";
-  }
+  endSession(true);
 }
 
 // ---- Views --------------------------------------------------------------------
@@ -236,11 +270,15 @@ function buildOverview() {
   const session = model.session;
   const grid = el("div", "nm-training-grid");
 
+  const started = doneCount() > 0 || model.index > 0;
   const course = el("section", "nm-panel");
   course.append(
-    el("h2", "nm-panel-title", "Начать тренировку"),
+    el("h2", "nm-panel-title", started ? "Продолжить тренировку" : "Начать тренировку"),
+    el("p", "nm-training-total", sessionTitle()),
     el("p", "nm-panel-text nm-optional-text", "Занятие подобрано по результатам вашего когнитивного теста."),
-    el("p", "nm-training-total", `${games().length} ${tasksWord(games().length)} в занятии`),
+    el("p", "nm-training-total", started
+      ? `Выполнено ${doneCount()} из ${games().length} ${tasksWord(games().length)}`
+      : `${games().length} ${tasksWord(games().length)} в занятии`),
     el("h3", "nm-training-subtitle", "Состав занятия"),
     planList(Object.entries(session.plan || {}).filter(([, count]) => Number(count) > 0)),
   );
@@ -249,7 +287,7 @@ function buildOverview() {
     course.appendChild(el("p", "nm-help-bar nm-training-skipped", `${skipped.domain}: ${skipped.reason}`));
   }
   course.append(
-    button("Начать тренировку", "primary nm-btn-block", startSession),
+    button(started ? "Продолжить занятие" : "Начать тренировку", "primary nm-btn-block", startSession),
     button("Выбрать игру самому", "secondary nm-btn-block nm-training-free", openCatalog),
   );
 
@@ -311,14 +349,14 @@ function gameResultText(stage) {
 // field. The game writes its result line a moment later (after it receives
 // the same answer), so the line is filled in when it appears.
 // actions: [{ label, primary, onClick }]
-function showFinish(stage, isCurrent, actions) {
+function showFinish(stage, isCurrent, actions, headingText = "Задание выполнено") {
   if (!isCurrent() || stage.querySelector(".nm-game-finish")) return;
   const panel = el("div", "nm-game-finish");
   panel.setAttribute("role", "status");
   const icon = el("div", "nm-game-finish-icon");
   icon.innerHTML =
     '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-  const heading = el("h3", null, "Задание выполнено");
+  const heading = el("h3", null, headingText);
   heading.tabIndex = -1;
   const result = el("p", "nm-game-finish-result");
   result.hidden = true;
@@ -342,12 +380,12 @@ function showFinish(stage, isCurrent, actions) {
 
 // Puts a game on `stage`; `isCurrent()` tells whether that stage is still the
 // one on screen when an answer from the core arrives.
-function playOn(stage, game, isCurrent, { onFinished, onClose }) {
+function playOn(stage, game, isCurrent, { onFinished, onClose, onUnavailable, startOptions = null }) {
   mountGame(game.game_code, stage, {
     fallbackTitle: game.title,
-    // Уровень приходит в составе занятия: его назначило ядро по прошлым
-    // прохождениям, здесь он только передаётся дальше.
-    difficultyLevel: game.difficulty_level ?? null,
+    // Задание курса называет себя номером занятия и задания; уровень и
+    // стимульный набор ядро берёт из сохранённого плана.
+    startOptions,
     introStage: model.stage,
     onIntroStage(step) {
       if (isCurrent()) setStage(step);
@@ -370,6 +408,7 @@ function playOn(stage, game, isCurrent, { onFinished, onClose }) {
       if (!isCurrent()) return;
       notify(`Задание «${game.title}» не открылось. ${error.message || error}`);
       stage.replaceChildren(el("p", "nm-panel-text", "Это задание сейчас недоступно."));
+      if (onUnavailable) onUnavailable();
     });
 }
 
@@ -503,7 +542,28 @@ function buildFree() {
   return wrap;
 }
 
+function buildPause() {
+  const panel = el("section", "nm-panel nm-training-locked");
+  const title = el("h2", "nm-panel-title", "Пауза");
+  title.tabIndex = -1;
+  panel.append(
+    title,
+    el("p", "nm-panel-text", model.currentFinished
+      ? "Отдохните, сколько нужно. Выполненные задания сохранены."
+      : "Задание остановлено. Если продолжить, оно начнётся заново. Выполненные задания сохранены."),
+  );
+  const row = el("div", "nm-btn-row");
+  row.append(
+    button("Продолжить", "primary", resumeSession),
+    button("Завершить занятие", "secondary", endFromPause),
+  );
+  panel.appendChild(row);
+  setTimeout(() => title.isConnected && title.focus(), 0);
+  return panel;
+}
+
 function buildPlaying() {
+  if (model.paused) return buildPause();
   const game = games()[model.index];
   const total = games().length;
   const wrap = el("div", "nm-training-play");
@@ -526,28 +586,36 @@ function buildPlaying() {
   const stage = el("div", "nm-game-host");
 
   const actions = el("div", "nm-btn-row nm-training-play-actions");
-  nextButton = button("", "secondary", nextOrSkip);
-  actions.append(button("Прервать занятие", "secondary", stopSession), nextButton);
+  actions.append(button("Пауза", "secondary", pauseSession));
 
   wrap.append(head, stage, actions);
 
-  model.currentFinished = false;
-  syncNextButton();
   const index = model.index;
-  const current = () => model.phase === "playing" && model.index === index && stage.isConnected;
-  playOn(stage, game, current, {
-    onFinished() {
-      model.currentFinished = true;
-      syncNextButton();
-      const last = model.index + 1 >= games().length;
-      showFinish(stage, current, [
-        { label: last ? "Завершить занятие" : "Следующее задание", primary: true, onClick: advance },
-      ]);
-    },
-    // The game's own «close» button is hidden in a session; if a game still
-    // calls it, that means "done with this one"
-    onClose: nextOrSkip,
-  });
+  const current = () => model.phase === "playing" && !model.paused && model.index === index && stage.isConnected;
+  const last = model.index + 1 >= games().length;
+  const nextAction = [{ label: last ? "Завершить занятие" : "Следующее задание", primary: true, onClick: advance }];
+  if (model.currentFinished || model.currentUnavailable) {
+    // Back from the pause after the task had ended: its end screen again
+    setTimeout(() => showFinish(stage, current, nextAction, model.currentFinished ? "Задание выполнено" : "Задание недоступно"), 0);
+  } else {
+    playOn(stage, game, current, {
+      startOptions: courseInfo() ? { course_session: courseInfo().session_number, course_position: game.position } : null,
+      onFinished() {
+        model.currentFinished = true;
+        savePlace();
+        showFinish(stage, current, nextAction);
+      },
+      // A task that does not open is a technical problem, not the user's
+      // choice: the session goes on, the core marks it as not presented
+      onUnavailable() {
+        model.currentUnavailable = true;
+        showFinish(stage, current, nextAction, "Задание недоступно");
+      },
+      // The game's own «close» button is hidden in a session; if a game still
+      // calls it, the session pauses
+      onClose: pauseSession,
+    });
+  }
 
   setTimeout(() => title.isConnected && title.focus(), 0);
   return wrap;
@@ -558,11 +626,15 @@ function buildDone() {
   const card = el("section", "nm-panel nm-result");
   const title = el("h2", "nm-panel-title", model.stopped ? "Занятие остановлено" : "Занятие завершено");
   title.tabIndex = -1;
-  card.append(title, el("p", "nm-panel-text", `Выполнено ${model.completed} из ${total} ${tasksWord(total)}.`));
+  card.append(title);
+  if (sessionTitle()) card.appendChild(el("p", "nm-training-total", sessionTitle()));
+  card.appendChild(el("p", "nm-panel-text", `Выполнено ${model.completed} из ${total} ${tasksWord(total)}.`));
+  const info = courseInfo();
+  const lastOfCourse = info && info.session_number >= info.sessions_total;
   const row = el("div", "nm-btn-row");
   row.append(
     button("В меню", "primary", () => window.nmOpenSection && window.nmOpenSection("home")),
-    button("Новое занятие", "secondary", load),
+    button(lastOfCourse ? "Что дальше" : "Следующее занятие", "secondary", load),
   );
   card.appendChild(row);
   setTimeout(() => title.isConnected && title.focus(), 0);
@@ -591,7 +663,7 @@ function render() {
 
 // After a page reload: back to the place saved for this profile
 async function restore(place) {
-  Object.assign(model, place, { currentFinished: false });
+  Object.assign(model, place, { currentUnavailable: false });
   if (place.phase === "catalog" || place.phase === "free") {
     try {
       model.catalog = (await loadCatalog()).filter((item) => item.implemented);

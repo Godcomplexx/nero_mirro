@@ -8,7 +8,9 @@ from neuro_mirror.core.session_store import SessionStore
 from neuro_mirror.interfaces.processor import ProcessorPlugin
 from neuro_mirror.models.events import Event, Topics
 from neuro_mirror.plugins.games.catalog import get_game_definition
+from neuro_mirror.plugins.games.course_store import TrainingCourseStore
 from neuro_mirror.plugins.games.history import GameHistoryStore
+from neuro_mirror.screening.difficulty_policy import counted_success, success
 from neuro_mirror.version import session_version_manifest
 
 
@@ -23,10 +25,12 @@ class GameSessionCoordinator(ProcessorPlugin):
         *,
         session_store: SessionStore,
         history_store: GameHistoryStore,
+        course_store: TrainingCourseStore | None = None,
     ) -> None:
         super().__init__(bus)
         self.session_store = session_store
         self.history_store = history_store
+        self.course_store = course_store
         self._session_ids: dict[str, str] = {}
 
     def subscribed_topics(self) -> tuple[str, ...]:
@@ -105,14 +109,19 @@ class GameSessionCoordinator(ProcessorPlugin):
             "session_started_at": session.get("started_at"),
             "versions": deepcopy(session.get("versions") or {}),
         }
-        # Исход дописывается к предъявлению: на нём строится подстройка уровня.
-        self.history_store.record_outcome(
-            session_id=persistent_session_id,
-            game_code=definition.code,
-            metrics=dict(payload.get("metrics") or {}),
-            completion_status=str(payload.get("completion_status") or "unknown"),
-            technical_validity=str(payload.get("technical_validity") or "unknown"),
-        )
+        # Исход задания курса дописывается к плану занятия: на нём строится
+        # уровень формы в следующих занятиях.
+        if self.course_store is not None:
+            metrics = dict(payload.get("metrics") or {})
+            counted = counted_success(definition.code, payload)
+            self.course_store.record_outcome(
+                game_session_id=game_session_id,
+                completion_status=str(payload.get("completion_status") or "unknown"),
+                technical_validity=str(payload.get("technical_validity") or "unknown"),
+                success=counted or success(definition.code, metrics),
+                counted=counted is not None,
+                metrics=metrics,
+            )
         completed = self.session_store.complete(persistent_session_id, result) or {}
         result["session_status"] = completed.get("status", "completed")
         result["session_finished_at"] = completed.get("finished_at")
