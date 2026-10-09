@@ -17,7 +17,7 @@ from neuro_mirror.screening.san_survey import (
     questionnaire,
     score_san,
 )
-from neuro_mirror.screening.training_course import CoursePass, form_states
+from neuro_mirror.screening.training_course import CoursePass, apply_levels, course_slots, form_states
 from neuro_mirror.screening.training_plan import plan_session
 from neuro_mirror.screening.training_session import build_training_session
 
@@ -38,15 +38,17 @@ MOCA_ANSWERS = [
 
 
 def session_for(session_number: int = 1, passes: list[CoursePass] = ()):
-    """Занятие курса с данным номером после указанных прохождений."""
+    """Занятие курса с данным номером после указанных прохождений.
+
+    Состав курса один на все 12 занятий; уровни ставятся при открытии
+    занятия по прохождениям до него.
+    """
     result = score_moca_tasks(MOCA_ANSWERS)
+    composition = build_training_session(result["domains"], available_codes=implemented_game_codes())
+    slot = course_slots(composition["games"], "u1")[session_number - 1]
     states, _ = form_states(passes, session_number)
-    return result, build_training_session(
-        result["domains"],
-        session_number=session_number,
-        states=states,
-        available_codes=implemented_game_codes(),
-    )
+    apply_levels(slot["games"], states)
+    return result, {**composition, "games": slot["games"]}
 
 
 ADAPTIVE_CODES = sorted(code for code in implemented_game_codes() if has_levels(code))

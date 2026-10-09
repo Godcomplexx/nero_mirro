@@ -20,9 +20,13 @@ async function detailOf(response) {
   return "";
 }
 
-// The session of the course the core keeps for the user:
+// The session of the course the core keeps for the user. The course is
+// formed at once: twelve slots with the same tasks; only levels and stimulus
+// sets differ between sessions.
 // GET /api/training/session → { course: { session_number, sessions_total,
-// completed_sessions, stage: { id, title } }, status,
+// completed_sessions, stage: { id, title },
+// slots: [{ number, stage, status: planned | in_progress | completed | incomplete }] },
+// status,
 // games: [{ position, domain, domain_code, game_code, title, stimulus_set,
 // difficulty_level, adaptation, flags, reasons,
 // status: pending | started | done | abandoned | not_presented }],

@@ -1,4 +1,4 @@
-"""Курс тренировок: 12 занятий, этапы, наборы, уровни форм по занятиям.
+"""Курс тренировок: 12 занятий с одними заданиями, этапы, наборы, уровни форм.
 
 По «Методике подбора и оценки тренировочного курса» v2, разделы 4.3–6.5.
 """
@@ -13,6 +13,7 @@ from neuro_mirror.plugins.games.course_store import (
     ITEM_NOT_PRESENTED,
     SESSION_COMPLETED,
     SESSION_INCOMPLETE,
+    SESSION_PLANNED,
     CourseError,
     TrainingCourseStore,
 )
@@ -21,6 +22,8 @@ from neuro_mirror.screening.difficulty_policy import FLAG_HARD, FormState, Succe
 from neuro_mirror.screening.training_course import (
     COURSE_SESSIONS,
     CoursePass,
+    apply_levels,
+    course_slots,
     form_states,
     randomization_seed,
     stage_for,
@@ -177,97 +180,98 @@ def test_forms_without_levels_are_not_adapted():
     assert "GM-05" not in states
 
 
-# ── Сборка занятия курса ──────────────────────────────────────────────────────
+# ── Состав курса ──────────────────────────────────────────────────────────────
 
-def session(number: int = 1, **kwargs) -> dict:
-    return build_training_session(
-        PROFILE,
-        session_number=number,
-        user_id="u1",
-        available_codes=implemented_game_codes(),
-        **kwargs,
-    )
+def composition() -> dict:
+    return build_training_session(PROFILE, available_codes=implemented_game_codes())
 
 
-def test_the_first_session_starts_with_a_simple_click_task():
+def test_the_course_starts_with_a_simple_click_task():
     """Голос, перетаскивание и ведение курсора первыми не ставятся (5.2)."""
-    first = get_game_definition(session(1)["games"][0]["game_code"])
+    first = get_game_definition(composition()["games"][0]["game_code"])
     assert first.response_type.value == "click"
     assert [m.value for m in first.modalities] == ["visual"]
 
 
-def test_calibration_shows_set_one_and_the_first_level():
-    for game in session(1)["games"]:
-        assert game["stimulus_set_number"] == 1
-        assert game["difficulty_level"] in (1, None)
-
-
-def test_a_form_without_levels_has_no_level_and_is_marked():
-    games = session(1)["games"]
-    for game in games:
-        if game["adaptation"] == "fixed_config":
-            assert game["difficulty_level"] is None
-        else:
-            assert game["difficulty_level"] == 1
-
-
-def test_the_session_uses_the_levels_of_the_course():
-    states = {code: FormState(level=2) for code in implemented_game_codes()}
-    games = session(7, states=states)["games"]
-    adaptive = [game for game in games if game["adaptation"] == "adaptive"]
-    assert adaptive
-    assert all(game["difficulty_level"] == 2 for game in adaptive)
-
-
 def test_forms_with_levels_go_first_within_a_domain():
     """Формы без уровней берутся, только когда домену не хватает адаптивных."""
-    memory = [game for game in session(1)["games"] if game["domain"] == "Память"]
+    memory = [game for game in composition()["games"] if game["domain"] == "Память"]
     assert all(game["adaptation"] == "adaptive" for game in memory)
 
 
-def test_the_second_session_prefers_forms_not_shown_in_the_first():
-    first = session(1)
-    first_codes = tuple(game["game_code"] for game in first["games"])
-    second = session(2, course_sessions=(first_codes,), domain_totals=first["plan"])
-    fresh = [game for game in second["games"] if game["game_code"] not in first_codes]
-    assert len(fresh) >= 4
+def test_twelve_slots_hold_the_same_tasks():
+    """Курс формируется сразу: во всех 12 занятиях одни и те же задания."""
+    games = composition()["games"]
+    slots = course_slots(games, "u1")
+    assert len(slots) == COURSE_SESSIONS
+    expected = [game["game_code"] for game in games]
+    for slot in slots:
+        assert [item["game_code"] for item in slot["games"]] == expected
 
 
-def test_with_no_shortfall_the_extra_tasks_rotate_between_domains():
-    """Без недобора тройки не достаются всегда памяти и вниманию (4.2)."""
-    full = [dict(item, score=item["max_score"]) for item in PROFILE]
-    first = build_training_session(full, session_number=1, available_codes=implemented_game_codes())
-    second = build_training_session(
-        full, session_number=2, available_codes=implemented_game_codes(),
-        domain_totals=first["plan"],
-    )
-    assert first["plan"] != second["plan"]
+def test_slots_differ_only_by_stimulus_set_and_seed():
+    slots = course_slots(composition()["games"], "u1")
+    assert [slot["games"][0]["stimulus_set_number"] for slot in slots] == [
+        stimulus_set_number(n) for n in range(1, COURSE_SESSIONS + 1)
+    ]
+    assert slots[0]["games"][0]["randomization_seed"] != slots[1]["games"][0]["randomization_seed"]
+
+
+def test_levels_are_set_per_form_when_a_session_opens():
+    items = course_slots(composition()["games"], "u1")[6]["games"]
+    apply_levels(items, {item["game_code"]: FormState(level=3) for item in items})
+    for item in items:
+        if item["adaptation"] == "adaptive":
+            assert item["difficulty_level"] == 3
+        else:
+            assert item["difficulty_level"] is None
 
 
 # ── Хранение курса ────────────────────────────────────────────────────────────
 
-def stored_session(store: TrainingCourseStore, number: int = 1) -> tuple[dict, dict]:
-    course = store.latest_course("u1") or store.create_course(
-        user_id="u1", entry_session_id="moca-1", profile=PROFILE
+def new_course(store: TrainingCourseStore) -> dict:
+    return store.create_course(
+        user_id="u1", entry_session_id="moca-1", profile=PROFILE, composition=composition()
     )
-    planned = {"number": number, "stage": stage_for(number).id, **session(number), "level_changes": []}
-    return course, store.add_session(course, planned)
+
+
+def open_next(store: TrainingCourseStore, course: dict) -> dict:
+    slot = store.next_slot(course)
+    states, log = form_states(store.passes(course), slot["number"])
+    return store.open_slot(course, slot, states=states, level_changes=log)
+
+
+def stored_session(store: TrainingCourseStore, number: int = 1) -> tuple[dict, dict]:
+    course = store.latest_course("u1") or new_course(store)
+    while True:
+        record = open_next(store, course)
+        if record["number"] == number:
+            return course, record
+        store.finish_session("u1", reason="тест")
 
 
 def finish_item(store: TrainingCourseStore, record: dict, position: int, result: Success | None) -> None:
     item = record["games"][position - 1]
     store.begin_item(user_id="u1", session_number=record["number"], position=position, game_code=item["game_code"])
+    session_id = f"g{record['number']}-{position}"
     store.attach_game_session(
-        user_id="u1", session_number=record["number"], position=position, game_session_id=f"g{position}"
+        user_id="u1", session_number=record["number"], position=position, game_session_id=session_id
     )
     store.record_outcome(
-        game_session_id=f"g{position}",
+        game_session_id=session_id,
         completion_status="completed",
         technical_validity="valid",
         success=result,
         counted=result is not None,
         metrics={},
     )
+
+
+def test_the_course_is_created_with_twelve_planned_slots(tmp_path):
+    store = TrainingCourseStore(tmp_path / "courses.json")
+    course = new_course(store)
+    assert [slot["status"] for slot in course["sessions"]] == [SESSION_PLANNED] * COURSE_SESSIONS
+    assert store.open_session("u1") is None
 
 
 def test_the_session_plan_survives_a_restart(tmp_path):
@@ -337,6 +341,22 @@ def test_abandoned_tasks_do_not_reach_the_levels(tmp_path):
     assert codes == [record["games"][0]["game_code"]]
 
 
+def test_correct_passes_raise_the_level_of_the_same_task_later(tmp_path):
+    """Задания те же, сложность каждого растёт по правильности его прохождений."""
+    store = TrainingCourseStore(tmp_path / "courses.json")
+    course = new_course(store)
+    for _ in range(5):
+        record = open_next(store, course)
+        for position in range(1, len(record["games"]) + 1):
+            finish_item(store, record, position, GOOD if record["number"] >= 3 else OK)
+    sixth = open_next(store, course)
+    assert sixth["number"] == 6
+    for item in sixth["games"]:
+        expected = 2 if item["adaptation"] == "adaptive" else None
+        assert item["difficulty_level"] == expected, item["game_code"]
+    assert sixth["level_changes"]
+
+
 def test_the_pause_is_journaled(tmp_path):
     store = TrainingCourseStore(tmp_path / "courses.json")
     _, record = stored_session(store)
@@ -351,8 +371,26 @@ def test_the_pause_is_journaled(tmp_path):
 
 def test_twelve_closed_sessions_finish_the_course(tmp_path):
     store = TrainingCourseStore(tmp_path / "courses.json")
-    for number in range(1, COURSE_SESSIONS + 1):
-        course, _ = stored_session(store, number)
+    course = new_course(store)
+    for _ in range(COURSE_SESSIONS):
+        open_next(store, course)
         store.finish_session("u1", reason="тест")
     assert store.is_finished(course)
+    assert store.next_slot(course) is None
     assert course["finished_at"]
+
+
+def test_a_course_of_the_first_version_is_not_continued(tmp_path):
+    """Курс без 12 слотов не продолжается — вместо него открывается новый."""
+    import json
+
+    path = tmp_path / "courses.json"
+    path.write_text(json.dumps([{
+        "course_id": "old", "user_id": "u1", "entry": {"session_id": "m", "profile": PROFILE},
+        "sessions": [{"number": 1, "status": "in_progress", "games": []}],
+    }]), encoding="utf-8")
+    store = TrainingCourseStore(path)
+    assert store.latest_course("u1") is None
+    assert store.open_session("u1") is None
+    new_course(store)
+    assert store.latest_course("u1")["course_id"] != "old"

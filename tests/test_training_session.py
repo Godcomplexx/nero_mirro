@@ -75,7 +75,8 @@ def test_every_game_matches_the_domain_it_was_picked_for():
 def test_each_game_carries_what_the_interface_needs_to_run_it():
     session = build(profile(3, 3, 2, 1))
     for game in session["games"]:
-        assert game["game_code"] and game["title"] and game["stimulus_set"]
+        assert game["game_code"] and game["title"]
+        assert game["adaptation"] in ("adaptive", "fixed_config")
         assert game["position"] >= 1
 
 
@@ -179,9 +180,23 @@ def test_the_next_session_comes_after_the_previous_ends(tmp_path):
     client.get("/api/training/session")
     finished = client.post("/api/training/session/finish", json={}).json()
     assert finished["finished"] is True
-    body = client.get("/api/training/session").json()
-    assert body["course"]["session_number"] == 2
-    assert body["course"]["completed_sessions"] == 1
+    first = client.get("/api/training/session").json()
+    assert first["course"]["session_number"] == 2
+    assert first["course"]["completed_sessions"] == 1
+    client.close()
+
+
+def test_every_session_of_the_course_has_the_same_tasks(tmp_path):
+    """Курс формируется сразу на 12 слотов с одними и теми же заданиями."""
+    client = _client_with(tmp_path, [_stored_report(profile(3, 1, 0, 1))])
+    first = client.get("/api/training/session").json()
+    assert len(first["course"]["slots"]) == 12
+    codes = [game["game_code"] for game in first["games"]]
+    for _ in range(11):
+        client.post("/api/training/session/finish", json={})
+        body = client.get("/api/training/session").json()
+        assert [game["game_code"] for game in body["games"]] == codes
+        assert body["plan"] == first["plan"]
     client.close()
 
 

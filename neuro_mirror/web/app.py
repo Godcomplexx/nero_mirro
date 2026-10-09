@@ -56,11 +56,7 @@ from neuro_mirror.screening.san_survey import (
     questionnaire as san_questionnaire,
     score_san,
 )
-from neuro_mirror.plugins.games.course_store import (
-    ITEM_ABANDONED,
-    ITEM_DONE,
-    CourseError,
-)
+from neuro_mirror.plugins.games.course_store import ITEM_DONE, CourseError
 from neuro_mirror.screening.difficulty_policy import describe
 from neuro_mirror.screening.training_course import (
     COURSE_SESSIONS,
@@ -397,58 +393,33 @@ def create_app() -> FastAPI:
                 "sessions_total": COURSE_SESSIONS,
                 "completed_sessions": len(store.closed_sessions(course)),
                 "stage": stage_for(number).to_dict(),
+                # Все 12 слотов курса: номер, этап и состояние каждого.
+                "slots": [
+                    {"number": item["number"], "stage": item["stage"], "status": item["status"]}
+                    for item in course["sessions"]
+                ],
             },
             "status": session["status"],
-            "plan": session["plan"],
+            "plan": course["plan"],
             "games": session["games"],
             "session_size": len(session["games"]),
-            "skipped": session["skipped"],
+            "skipped": course["skipped"],
             "level_changes": session["level_changes"],
             "profile": course["entry"]["profile"],
             "source_session_id": course["entry"]["session_id"],
         }
 
-    def _next_course_session(course: dict[str, Any], user_id: str) -> dict[str, Any]:
-        """Собрать следующее занятие курса по его прохождениям."""
-        ctx: WebAppContext = app.state.context
-        store = ctx.runtime.training_course_store
-        number = len(course["sessions"]) + 1
-        states, log = form_states(store.passes(course), number)
-        shown = (ITEM_DONE, ITEM_ABANDONED)
-        course_sessions = tuple(
-            tuple(item["game_code"] for item in previous["games"] if item.get("status") in shown)
-            for previous in course["sessions"]
-        )
-        domain_totals: dict[str, int] = {}
-        for previous in course["sessions"]:
-            for domain, count in (previous.get("plan") or {}).items():
-                domain_totals[domain] = domain_totals.get(domain, 0) + int(count)
-        session = build_training_session(
-            course["entry"]["profile"],
-            session_number=number,
-            user_id=user_id,
-            history=ctx.runtime.game_history_store.for_user(user_id),
-            course_sessions=course_sessions,
-            domain_totals=domain_totals,
-            states=states,
-            available_codes=implemented_game_codes(),
-        )
-        return {
-            "number": number,
-            "stage": stage_for(number).id,
-            **session,
-            "level_changes": [entry for entry in log if entry["before_session"] == number],
-        }
-
     @app.get("/api/training/session")
     async def training_session() -> JSONResponse:
-        """Текущее занятие курса — сохранённое или собранное заново.
+        """Текущее занятие курса.
 
-        План занятия сохраняется при сборке: пока занятие не завершено, ответ
-        один и тот же, и перезагрузка страницы не собирает новое занятие.
-        Курс строится по входному скринингу и его результат не пересчитывает:
-        новый курс начинается только после выходного скрининга — когнитивного
-        теста, пройденного после 12-го занятия.
+        Курс формируется сразу на 12 занятий: состав и задания выбираются один
+        раз по входному скринингу и во всех занятиях одинаковы. Когда занятие
+        открывается, в него проставляются уровни форм по правильности
+        предыдущих прохождений; дальше план не меняется, и перезагрузка
+        страницы возвращает то же занятие. Новый курс начинается только после
+        выходного скрининга — когнитивного теста, пройденного после 12-го
+        занятия.
         """
         ctx: WebAppContext = app.state.context
         active = _active_user_or_400()
@@ -479,12 +450,29 @@ def create_app() -> FastAPI:
                             "его результату начнётся новый курс."
                         ),
                     )
-            course = store.create_course(user_id=user_id, entry_session_id=entry_session, profile=profile)
+            composition = build_training_session(
+                profile,
+                history=ctx.runtime.game_history_store.for_user(user_id),
+                available_codes=implemented_game_codes(),
+            )
+            if not composition["games"]:
+                raise HTTPException(status_code=409, detail="Не удалось подобрать ни одного задания.")
+            course = store.create_course(
+                user_id=user_id,
+                entry_session_id=entry_session,
+                profile=profile,
+                composition=composition,
+            )
 
-        planned = _next_course_session(course, user_id)
-        if not planned["games"]:
-            raise HTTPException(status_code=409, detail="Не удалось подобрать ни одного задания.")
-        session = store.add_session(course, planned)
+        slot = store.next_slot(course)
+        number = int(slot["number"])
+        states, log = form_states(store.passes(course), number)
+        session = store.open_slot(
+            course,
+            slot,
+            states=states,
+            level_changes=[entry for entry in log if entry["before_session"] == number],
+        )
         return JSONResponse(_course_payload(course, session))
 
     @app.post("/api/training/session/finish")

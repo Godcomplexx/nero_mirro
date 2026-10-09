@@ -1,9 +1,11 @@
-"""Хранение курса тренировок: занятия, их планы и исходы заданий.
+"""Хранение курса тренировок: 12 занятий, их планы и исходы заданий.
 
-План занятия сохраняется при сборке и дальше не пересобирается: перезагрузка
-страницы или возврат к прерванному занятию берут сохранённый план («Методика
-подбора и оценки тренировочного курса» v2, раздел 4.4). Исход каждого задания
-дописывается к его строке плана.
+Курс создаётся сразу целиком: 12 слотов с одними и теми же заданиями. Слот
+ждёт в статусе ``planned``; когда занятие открывается, в него проставляются
+уровни форм по итогам предыдущих занятий, и дальше план не пересобирается:
+перезагрузка страницы или возврат к прерванному занятию берут сохранённый
+план («Методика подбора и оценки тренировочного курса» v2, раздел 4.4). Исход
+каждого задания дописывается к его строке плана.
 
 Статусы задания:
 
@@ -23,9 +25,15 @@ from pathlib import Path
 from typing import Any
 
 from neuro_mirror.plugins.games.catalog import get_game_definition
-from neuro_mirror.screening.difficulty_policy import Success
-from neuro_mirror.screening.training_course import COURSE_SESSIONS, CoursePass
+from neuro_mirror.screening.difficulty_policy import FormState, Success
+from neuro_mirror.screening.training_course import (
+    COURSE_SESSIONS,
+    CoursePass,
+    apply_levels,
+    course_slots,
+)
 
+SESSION_PLANNED = "planned"
 SESSION_IN_PROGRESS = "in_progress"
 SESSION_COMPLETED = "completed"
 SESSION_INCOMPLETE = "incomplete"
@@ -53,7 +61,13 @@ class TrainingCourseStore:
     # ---- Чтение ----
 
     def latest_course(self, user_id: str) -> dict[str, Any] | None:
-        courses = [item for item in self._courses if item.get("user_id") == user_id]
+        # Курс без общего состава («plan») записан первой версией, где формы
+        # подбирались заново к каждому занятию. Он остаётся в файле, но не
+        # продолжается: вместо него открывается курс из 12 слотов.
+        courses = [
+            item for item in self._courses
+            if item.get("user_id") == user_id and "plan" in item
+        ]
         return courses[-1] if courses else None
 
     def open_session(self, user_id: str) -> dict[str, Any] | None:
@@ -67,7 +81,14 @@ class TrainingCourseStore:
 
     @staticmethod
     def closed_sessions(course: dict[str, Any]) -> list[dict[str, Any]]:
-        return [item for item in course["sessions"] if item.get("status") != SESSION_IN_PROGRESS]
+        return [
+            item for item in course["sessions"]
+            if item.get("status") in (SESSION_COMPLETED, SESSION_INCOMPLETE)
+        ]
+
+    @staticmethod
+    def next_slot(course: dict[str, Any]) -> dict[str, Any] | None:
+        return next((item for item in course["sessions"] if item.get("status") == SESSION_PLANNED), None)
 
     @staticmethod
     def is_finished(course: dict[str, Any]) -> bool:
@@ -93,34 +114,59 @@ class TrainingCourseStore:
 
     # ---- Изменения ----
 
-    def create_course(self, *, user_id: str, entry_session_id: str, profile: list[dict[str, Any]]) -> dict[str, Any]:
-        """Новый курс. Недобор фиксируется по входному скринингу на весь курс."""
+    def create_course(
+        self,
+        *,
+        user_id: str,
+        entry_session_id: str,
+        profile: list[dict[str, Any]],
+        composition: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Новый курс сразу на 12 занятий.
+
+        Недобор фиксируется по входному скринингу на весь курс, а с ним и
+        состав: ``composition`` — план по доменам и задания по порядку.
+        """
+        sessions = []
+        for slot in course_slots(composition["games"], user_id):
+            for item in slot["games"]:
+                item.update(status=ITEM_PENDING, attempts=0, game_session_id=None)
+            sessions.append({
+                **slot,
+                "status": SESSION_PLANNED,
+                "opened_at": None,
+                "finished_at": None,
+                "end_reason": None,
+                "level_changes": [],
+                "pauses": [],
+            })
         course = {
             "course_id": uuid.uuid4().hex,
             "user_id": user_id,
             "created_at": _now(),
             "finished_at": None,
             "entry": {"session_id": entry_session_id, "profile": list(profile)},
-            "sessions": [],
+            "plan": dict(composition["plan"]),
+            "skipped": list(composition.get("skipped") or []),
+            "sessions": sessions,
         }
         self._courses.append(course)
         self._save()
         return course
 
-    def add_session(self, course: dict[str, Any], session: dict[str, Any]) -> dict[str, Any]:
-        record = {
-            **session,
-            "status": SESSION_IN_PROGRESS,
-            "created_at": _now(),
-            "finished_at": None,
-            "end_reason": None,
-            "pauses": [],
-        }
-        for item in record["games"]:
-            item.update(status=ITEM_PENDING, attempts=0, game_session_id=None)
-        course["sessions"].append(record)
+    def open_slot(
+        self,
+        course: dict[str, Any],
+        slot: dict[str, Any],
+        *,
+        states: dict[str, FormState],
+        level_changes: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Открыть занятие: проставить уровни форм и зафиксировать план."""
+        apply_levels(slot["games"], states)
+        slot.update(status=SESSION_IN_PROGRESS, opened_at=_now(), level_changes=list(level_changes))
         self._save()
-        return record
+        return slot
 
     def begin_item(
         self,

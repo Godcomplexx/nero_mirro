@@ -22,32 +22,31 @@ from neuro_mirror.screening.training_course import form_states
 ROTATION = get_game_definition("GM-17")
 
 
-def course_with_rotation(store: TrainingCourseStore, number: int) -> dict:
-    course = store.latest_course("u1") or store.create_course(
-        user_id="u1", entry_session_id="moca-1", profile=[]
+def course_with_rotation(store: TrainingCourseStore) -> dict:
+    """Курс из одного задания — «Поверни фигуру» — во всех 12 занятиях."""
+    return store.create_course(
+        user_id="u1",
+        entry_session_id="moca-1",
+        profile=[],
+        composition={
+            "plan": {"Абстракция": 1},
+            "games": [{
+                "position": 1,
+                "domain": "Абстракция",
+                "domain_code": "abstraction",
+                "game_code": "GM-17",
+                "title": ROTATION.title,
+                "adaptation": "adaptive",
+                "reasons": [],
+            }],
+        },
     )
-    store.add_session(course, {
-        "number": number,
-        "stage": "mastering",
-        "plan": {"Абстракция": 1},
-        "skipped": [],
-        "level_changes": [],
-        "games": [{
-            "position": 1,
-            "domain": "Абстракция",
-            "domain_code": "abstraction",
-            "game_code": "GM-17",
-            "title": ROTATION.title,
-            "stimulus_set": ROTATION.stimulus_sets[1],
-            "stimulus_set_number": 2,
-            "randomization_seed": 1,
-            "difficulty_level": 1,
-            "adaptation": "adaptive",
-            "flags": [],
-            "reasons": [],
-        }],
-    })
-    return course
+
+
+def open_next(store: TrainingCourseStore, course: dict) -> dict:
+    slot = store.next_slot(course)
+    states, log = form_states(store.passes(course), slot["number"])
+    return store.open_slot(course, slot, states=states, level_changes=log)
 
 
 async def play_rotation(bus: EventBus, plugin: Gm17MentalRotationPlugin, store: TrainingCourseStore, number: int) -> None:
@@ -92,20 +91,22 @@ def test_a_finished_game_reaches_the_course_and_raises_the_level(tmp_path) -> No
         await plugin.start()
         await coordinator.start()
         try:
-            for number in (3, 4, 5):
-                course = course_with_rotation(store, number)
+            course = course_with_rotation(store)
+            for number in range(1, 6):
+                session = open_next(store, course)
+                assert session["games"][0]["difficulty_level"] == 1
                 await play_rotation(bus, plugin, store, number)
                 await asyncio.wait_for(stored.queue.get(), timeout=2)
 
-                session = course["sessions"][-1]
                 item = session["games"][0]
                 assert item["status"] == ITEM_DONE
                 assert item["counted"] is True
                 assert Success(**item["success"]).at_least(85)
                 assert session["status"] == "completed", "единственное задание выполнено"
 
-            states, _ = form_states(store.passes(course), 6)
-            assert states["GM-17"].level == 2
+            sixth = open_next(store, course)
+            assert sixth["games"][0]["game_code"] == "GM-17"
+            assert sixth["games"][0]["difficulty_level"] == 2
         finally:
             await coordinator.stop()
             await plugin.stop()

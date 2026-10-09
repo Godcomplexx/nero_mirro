@@ -42,7 +42,6 @@ def plan_session(
     session_size: int = DEFAULT_SESSION_SIZE,
     min_per_domain: int = DEFAULT_MIN_PER_DOMAIN,
     max_per_domain: int | None = None,
-    course_totals: dict[str, int] | None = None,
 ) -> dict[str, int]:
     """Состав занятия: сколько заданий отдать каждому домену.
 
@@ -52,10 +51,7 @@ def plan_session(
     забирает всё занятие. Сумма всегда равна ``session_size``.
 
     При равных отношениях задание получает домен, у которого заданий меньше,
-    затем домен, реже встречавшийся в курсе (``course_totals`` — сколько
-    заданий домена было в прошлых занятиях), затем первый по порядку
-    доменов. Без второго правила при полном балле тройки всегда доставались
-    бы памяти и вниманию.
+    затем первый по порядку доменов. Состав считается один раз на весь курс.
     """
     shortfall = domain_shortfall(profile)
     if not shortfall:
@@ -79,7 +75,6 @@ def plan_session(
         )
 
     plan = {domain: min_per_domain for domain in domains}
-    course_totals = course_totals or {}
     # При полностью пройденном скрининге веса равны: поддерживающий режим.
     total_shortfall = sum(shortfall.values())
     weights = (
@@ -100,7 +95,7 @@ def plan_session(
             key=lambda d: (
                 Fraction(weights[d], plan[d] + 1),
                 -plan[d],
-                -course_totals.get(d, 0),
+                shortfall[d],
                 -domains.index(d),
             ),
         )
