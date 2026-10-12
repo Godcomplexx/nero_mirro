@@ -36,12 +36,22 @@ def select_game(
     history: tuple[Presentation, ...] = (),
     available_codes: frozenset[str] | None = None,
     definitions: tuple[GameDefinition, ...] = GAME_CATALOG,
+    previous: GameDefinition | None = None,
+    adaptive_codes: frozenset[str] = frozenset(),
 ) -> SelectionDecision:
     """Select without repeating a form; preferences are compared lexicographically.
 
     The matrix does not define numeric weights, so none are invented here.
     Mechanic alternation, modality alternation and prior exposure are ordered,
     observable conditions with a stable game-code tie breaker.
+
+    ``previous`` is the form placed just before in the same session: mechanics
+    and modalities alternate against it, and against the last presentation in
+    history only at the start of a session.
+
+    ``adaptive_codes`` — формы с уровнями сложности. Они идут первыми: формы
+    без уровней берутся, когда домену не хватает адаптивных (методика,
+    раздел 5.2).
     """
     candidates = [item for item in definitions if item.primary_domain == primary_domain]
     if available_codes is not None:
@@ -52,7 +62,7 @@ def select_game(
             f"Нет неповторяющейся формы для ведущего домена {primary_domain.value}"
         )
 
-    last = history[-1] if history else None
+    last = previous if previous is not None else (history[-1] if history else None)
     counts = {item.code: 0 for item in candidates}
     latest: dict[str, float] = {item.code: float("-inf") for item in candidates}
     for entry in history:
@@ -64,6 +74,7 @@ def select_game(
         repeats_mechanic = bool(last and set(item.mechanics) & set(last.mechanics))
         repeats_modality = bool(last and set(item.modalities) & set(last.modalities))
         return (
+            bool(adaptive_codes) and item.code not in adaptive_codes,
             repeats_mechanic,
             repeats_modality,
             counts[item.code],
@@ -90,6 +101,8 @@ def select_game(
         stimulus_candidates = list(selected.stimulus_sets)
     stimulus_set = stimulus_candidates[0] if stimulus_candidates else ""
     reasons = ["ведущий домен совпадает", "форма не повторяется в занятии"]
+    if selected.code in adaptive_codes:
+        reasons.append("у формы есть уровни сложности")
     if last and not set(selected.mechanics) & set(last.mechanics):
         reasons.append("механика чередуется")
     if last and not set(selected.modalities) & set(last.modalities):

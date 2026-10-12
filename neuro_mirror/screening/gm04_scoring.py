@@ -9,6 +9,8 @@ def score_gm04(events: list[dict], *, expected_rounds: int) -> dict[str, float |
     false_hits = sum(len(set(item.get("selected") or ()) - set(item.get("targets") or ())) for item in events)
     return {
         "m07_target_recognition_rate": hits / targets if targets else 0.0,
+        "m07_recognized_targets": hits,
+        "m07_targets_total": targets,
         "g08_false_alarm_rate": false_hits / selected if selected else 0.0,
         "m04_spatial_error_count": sum(int(item.get("spatial_errors") or 0) for item in events),
         "u03_correct_rounds": sum(bool(item.get("correct")) for item in events),

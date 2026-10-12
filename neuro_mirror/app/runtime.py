@@ -22,6 +22,7 @@ from neuro_mirror.plugins.moca_test.plugin import MocaTestPlugin
 from neuro_mirror.plugins.hads_test.plugin import HadsTestPlugin
 from neuro_mirror.plugins.games.registry import iter_game_plugins
 from neuro_mirror.plugins.games.coordinator import GameSessionCoordinator
+from neuro_mirror.plugins.games.course_store import TrainingCourseStore
 from neuro_mirror.plugins.games.history import GameHistoryStore
 
 
@@ -34,6 +35,7 @@ class RuntimeHandle:
     session_store: SessionStore
     dataset_store: DatasetStore
     game_history_store: GameHistoryStore
+    training_course_store: TrainingCourseStore
 
     async def start(self) -> None:
         await self.plugin_manager.start_all()
@@ -70,6 +72,7 @@ def create_runtime(
     session_store = SessionStore()
     dataset_store = DatasetStore()
     game_history_store = GameHistoryStore()
+    training_course_store = TrainingCourseStore()
 
     plugin_manager.register(DeviceManager(bus, settings=settings))
     plugin_manager.register(StoragePlugin(bus))
@@ -87,6 +90,7 @@ def create_runtime(
             bus,
             session_store=session_store,
             history_store=game_history_store,
+            course_store=training_course_store,
         )
     )
     plugin_manager.register(
@@ -109,4 +113,5 @@ def create_runtime(
         session_store=session_store,
         dataset_store=dataset_store,
         game_history_store=game_history_store,
+        training_course_store=training_course_store,
     )

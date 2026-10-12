@@ -8,7 +8,7 @@ from typing import Any
 
 from neuro_mirror.plugins.games.base import BrowserGamePlugin
 from neuro_mirror.plugins.games.gm02_sequence.stimuli import GRID_SIZE
-from neuro_mirror.screening.gm02_scoring import score_gm02_attempt
+from neuro_mirror.screening.gm02_scoring import score_gm02_attempt, score_gm02_series
 
 
 @dataclass(slots=True)
@@ -97,6 +97,7 @@ class Gm02SequencePlugin(BrowserGamePlugin):
         )
 
         if not correct:
+            metrics.update(score_gm02_series(session.round_events))
             self._sessions.pop(session_id, None)
             return {
                 "ok": True,
@@ -109,6 +110,7 @@ class Gm02SequencePlugin(BrowserGamePlugin):
         session.successful_rounds += 1
         if session.successful_rounds >= session.max_rounds:
             metrics["m01_max_sequence_length"] = session.successful_rounds
+            metrics.update(score_gm02_series(session.round_events))
             self._sessions.pop(session_id, None)
             return {
                 "ok": True,

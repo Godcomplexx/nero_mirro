@@ -16,6 +16,8 @@ def score_gm17_trials(
     ]
     return {
         "u01_correct_action_rate": correct_count / len(trials) if trials else None,
+        "u01_correct_actions": correct_count,
+        "u01_actions_total": len(trials),
         "g03_median_reaction_ms": statistics.median(correct_times) if correct_times else None,
         "u07_error_count": len(trials) - correct_count,
         "u06_complete": len(trials) == expected_trial_count,

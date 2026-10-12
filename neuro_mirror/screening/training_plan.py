@@ -16,6 +16,7 @@
 """
 from __future__ import annotations
 
+from fractions import Fraction
 from typing import Any, Iterable
 
 DEFAULT_SESSION_SIZE = 10
@@ -48,6 +49,9 @@ def plan_session(
     отношением недобора к уже выданному. Так сильнее просевший домен получает
     больше, но по мере насыщения уступает очередь остальным, и ни один не
     забирает всё занятие. Сумма всегда равна ``session_size``.
+
+    При равных отношениях задание получает домен, у которого заданий меньше,
+    затем первый по порядку доменов. Состав считается один раз на весь курс.
     """
     shortfall = domain_shortfall(profile)
     if not shortfall:
@@ -74,9 +78,9 @@ def plan_session(
     # При полностью пройденном скрининге веса равны: поддерживающий режим.
     total_shortfall = sum(shortfall.values())
     weights = (
-        {domain: float(value) for domain, value in shortfall.items()}
+        dict(shortfall)
         if total_shortfall
-        else {domain: 1.0 for domain in domains}
+        else {domain: 1 for domain in domains}
     )
 
     for _ in range(session_size - guaranteed):
@@ -84,11 +88,12 @@ def plan_session(
         if not available:
             break
         # При равных отношениях очередь у домена, получившего меньше заданий, —
-        # иначе остаток целиком доставался бы первому домену списка.
+        # иначе остаток целиком доставался бы первому домену списка. Отношения
+        # сравниваются точно, без округления.
         best = max(
             available,
             key=lambda d: (
-                weights[d] / (plan[d] + 1),
+                Fraction(weights[d], plan[d] + 1),
                 -plan[d],
                 shortfall[d],
                 -domains.index(d),

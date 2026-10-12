@@ -153,6 +153,14 @@
   font-weight: 600;
 }
 
+/* Пометка методологии: показатели исследовательские, не для клинических выводов */
+.nm-speech-note {
+  margin: -0.25rem 0 0.75rem;
+  color: var(--nm-text-dim);
+  font-size: var(--nm-font-caption);
+  font-style: italic;
+}
+
 .nm-speech-rows {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));

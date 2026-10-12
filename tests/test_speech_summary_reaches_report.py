@@ -75,3 +75,5 @@ def test_the_report_screen_shows_the_summary():
     text = screen.read_text(encoding="utf-8")
     assert "moca_speech_summary" in text
     assert "Показатели речи" in text
+    # Методология скрининга 2.0: речевые показатели — исследовательские.
+    assert "Исследовательский показатель, не для клинической интерпретации" in text

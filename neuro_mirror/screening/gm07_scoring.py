@@ -54,6 +54,8 @@ def score_gm07_trials(
             sum(1 for trial in trials if trial.get("correct") is True) / len(trials)
             if trials else None
         ),
+        "u01_correct_actions": sum(1 for trial in trials if trial.get("correct") is True),
+        "u01_actions_total": len(trials),
         "u06_complete": len(trials) == expected_trial_count,
         "u06_technically_valid": all(
             math.isfinite(float(trial.get("reaction_ms", -1)))

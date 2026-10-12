@@ -1,10 +1,15 @@
-"""Готовое тренировочное занятие: от профиля MoCA до списка конкретных игр.
+"""Состав курса тренировок: от профиля MoCA до списка конкретных игр.
 
-Сборка занятия целиком лежит в ядре, а не в интерфейсе. Интерфейс получает
+Состав собирается один раз, при открытии курса, и дальше не меняется: все 12
+занятий проходят одни и те же задания в одном порядке. Меняются только
+уровень каждой формы — по правильности её прохождений — и стимульный набор
+по этапу курса (``training_course``).
+
+Сборка целиком лежит в ядре, а не в интерфейсе. Интерфейс получает
 упорядоченный список игр и просто проигрывает его: правило подбора, перевод
 доменов в коды игр и защита от повторов остаются в одном месте.
 
-Домены занятия идут вперемежку, а не блоками: четыре игры на внимание подряд
+Домены идут вперемежку, а не блоками: четыре игры на внимание подряд
 утомляют и сводят на нет чередование механик, которое обеспечивает подбор.
 """
 from __future__ import annotations
@@ -12,13 +17,13 @@ from __future__ import annotations
 from typing import Any, Iterable
 
 from neuro_mirror.plugins.games.catalog import GAME_CATALOG
-from neuro_mirror.plugins.games.contracts import Domain, GameDefinition
+from neuro_mirror.plugins.games.contracts import Domain, GameDefinition, Modality, ResponseType
 from neuro_mirror.plugins.games.selector import (
     NoEligibleGameError,
     Presentation,
     select_game,
 )
-from neuro_mirror.screening.difficulty_policy import MIN_LEVEL, next_level
+from neuro_mirror.screening.difficulty_policy import adaptation, has_levels
 from neuro_mirror.screening.moca_scoring import MOCA_MODULES
 from neuro_mirror.screening.training_plan import DEFAULT_SESSION_SIZE, plan_session
 
@@ -53,6 +58,36 @@ def order_domains(plan: dict[str, int]) -> list[str]:
     return order
 
 
+def _is_simple_start(definition: GameDefinition) -> bool:
+    """Форма, с которой можно начинать занятие (методика, раздел 5.2, п. 4).
+
+    Клик и только зрительная подача: голосовой ответ, перетаскивание и
+    ведение курсора первыми не ставятся.
+    """
+    return (
+        definition.response_type == ResponseType.CLICK
+        and set(definition.modalities) == {Modality.VISUAL}
+    )
+
+
+def _start_with_simple_form(
+    games: list[dict[str, Any]],
+    definitions: dict[str, GameDefinition],
+) -> None:
+    """Поставить первой простую форму, не ставя рядом два задания домена."""
+    if not games or _is_simple_start(definitions[games[0]["game_code"]]):
+        return
+    for index in range(1, len(games)):
+        if not _is_simple_start(definitions[games[index]["game_code"]]):
+            continue
+        candidate = games[:]
+        candidate[0], candidate[index] = candidate[index], candidate[0]
+        domains = [game["domain"] for game in candidate]
+        if all(left != right for left, right in zip(domains, domains[1:])):
+            games[:] = candidate
+            return
+
+
 def build_training_session(
     profile: Iterable[dict[str, Any]],
     *,
@@ -60,20 +95,21 @@ def build_training_session(
     available_codes: frozenset[str] | None = None,
     definitions: tuple[GameDefinition, ...] = GAME_CATALOG,
     session_size: int = DEFAULT_SESSION_SIZE,
-    passes_for_game=None,
 ) -> dict[str, Any]:
-    """Собрать занятие: план по доменам плюс конкретные игры по порядку."""
+    """Собрать состав курса: план по доменам плюс конкретные игры по порядку."""
     profile = list(profile)
     if not profile:
         return {"plan": {}, "games": [], "session_size": 0, "skipped": []}
 
+    by_code = {item.code: item for item in definitions}
+    adaptive_codes = frozenset(code for code in by_code if has_levels(code))
     plan = plan_session(profile, session_size=session_size)
     games: list[dict[str, Any]] = []
     skipped: list[dict[str, str]] = []
     used_codes: set[str] = set()
-    used_sets: set[tuple[str, str]] = set()
+    previous: GameDefinition | None = None
 
-    for position, domain_label in enumerate(order_domains(plan), start=1):
+    for domain_label in order_domains(plan):
         code = DOMAIN_CODES.get(domain_label)
         if code is None:
             skipped.append({"domain": domain_label, "reason": "неизвестный домен"})
@@ -82,33 +118,32 @@ def build_training_session(
             decision = select_game(
                 Domain(code),
                 session_game_codes=frozenset(used_codes),
-                session_stimulus_sets=frozenset(used_sets),
                 history=history,
                 available_codes=available_codes,
                 definitions=definitions,
+                previous=previous,
+                adaptive_codes=adaptive_codes,
             )
         except NoEligibleGameError as exc:
-            # Занятие не срывается из-за исчерпания форм одного домена:
+            # Курс не срывается из-за исчерпания форм одного домена:
             # остальные игры остаются, а пропуск виден в ответе.
             skipped.append({"domain": domain_label, "reason": str(exc)})
             continue
-        used_codes.add(decision.game.code)
-        used_sets.add((decision.game.code, decision.stimulus_set))
-        # Уровень берётся из прошлых прохождений этой игры: пока она даётся
-        # с трудом, занятие остаётся на прежнем уровне.
-        level = MIN_LEVEL
-        if passes_for_game is not None:
-            level = next_level(decision.game.code, passes_for_game(decision.game.code))
+        game = decision.game
+        used_codes.add(game.code)
+        previous = game
         games.append({
-            "position": position,
             "domain": domain_label,
             "domain_code": code,
-            "game_code": decision.game.code,
-            "title": decision.game.title,
-            "stimulus_set": decision.stimulus_set,
-            "difficulty_level": level,
+            "game_code": game.code,
+            "title": game.title,
+            "adaptation": adaptation(game.code),
             "reasons": list(decision.reasons),
         })
+
+    _start_with_simple_form(games, by_code)
+    for position, game in enumerate(games, start=1):
+        game["position"] = position
 
     return {
         "plan": plan,
