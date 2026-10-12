@@ -82,7 +82,9 @@ def test_the_user_does_not_see_the_hads_score_or_interpretation():
 
 
 def test_the_user_sees_the_limitation_of_the_result():
-    assert user_view(HADS_REPORT)["summary"]["limitations"].startswith("Результат может быть ограничен")
+    quality = user_view(HADS_REPORT)["quality"]
+    assert quality["limited"] is True
+    assert "фоновый шум" in quality["text"]
 
 
 def test_the_user_sees_the_moca_score_and_domains_but_not_speech_markers():
@@ -121,7 +123,7 @@ def test_the_specialist_sees_moca_tasks_markers_and_data_quality():
     assert [task["task_id"] for task in moca["tasks"]] == ["delayed_recall", "abstraction_1"]
     assert moca["speech_markers"]["note"] == SPEECH_RESEARCH_NOTE
     assert moca["speech_markers"]["values"]["words_per_minute"] == 96.4
-    assert moca["quality"]["unrecognized_answers"] == 1
+    assert moca["quality"]["unrecognized"]["count"] == 1
 
 
 def test_the_specialist_sees_the_event_journal():

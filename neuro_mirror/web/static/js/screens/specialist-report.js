@@ -116,14 +116,25 @@ function speechMarkers(markers) {
   return panel;
 }
 
-function qualityLines(quality) {
-  const wrap = el("div");
-  const issues = (quality.video_quality_issues || []).map((issue) => (typeof issue === "string" ? issue : issue.code || JSON.stringify(issue)));
-  wrap.append(
-    line("Ограничения", quality.limitations || "не отмечены"),
-    line("Ответов без распознанной речи", quality.unrecognized_answers),
-    line("События низкого качества видео", issues.length ? issues.join(", ") : "нет"),
-  );
+// ТЗ: an explicit limit of interpretation when the data quality is low;
+// methodology 6.1: unrecognized answers and the «низкая достоверность» mark
+function qualityBlock(quality) {
+  if (!quality) return null;
+  const wrap = el("div", quality.limited ? "nm-spec-quality nm-spec-quality-limited" : "nm-spec-quality");
+  wrap.appendChild(line("Ограничение интерпретации", quality.limited ? "да" : "нет"));
+  if ((quality.low_confidence_domains || []).length) {
+    wrap.appendChild(line("Низкая достоверность", quality.low_confidence_domains.join(", ")));
+  }
+  const unrecognized = quality.unrecognized;
+  if (unrecognized) {
+    const byDomain = Object.entries(unrecognized.by_domain || {}).map(([domain, count]) => `${domain} — ${count}`).join(", ");
+    wrap.appendChild(line("Нераспознанные ответы", `${unrecognized.count} из ${unrecognized.total}${byDomain ? ` (${byDomain})` : ""}`));
+  }
+  if ((quality.reasons || []).length) {
+    const list = el("ul", "nm-spec-reasons");
+    for (const reason of quality.reasons) list.appendChild(el("li", null, reason));
+    wrap.appendChild(list);
+  }
   return wrap;
 }
 
@@ -140,7 +151,7 @@ function mocaSection(entries) {
         ["Домен", "Балл", "Максимум", "Дефицит"],
         (entry.domains || []).map((row) => [row.domain, row.score, row.max_score, row.deficit]),
       ),
-      qualityLines(entry.quality || {}),
+      qualityBlock(entry.quality),
       line("Пульс", entry.heart_rate_bpm == null ? entry.heart_rate_status : `${Math.round(entry.heart_rate_bpm)} уд/мин`),
     );
     const speech = speechMarkers(entry.speech_markers);
@@ -169,7 +180,7 @@ function hadsSection(entries) {
       line("Депрессия", `${outOf(entry.depression.score, entry.depression.max_score)} — ${dash(entry.depression.interpretation)}`),
       line("Ответов", outOf(entry.answered_count, entry.question_count)),
       entry.notes ? line("Примечания", entry.notes) : null,
-      entry.limitations ? line("Ограничения", entry.limitations) : null,
+      qualityBlock(entry.quality),
     );
     if ((entry.answers || []).length) {
       card.appendChild(details(
@@ -187,13 +198,13 @@ function screeningSection(entries) {
   return section(
     "Базовый скрининг: видеоанализ",
     table(
-      ["Дата", "Пульс", "Статус измерения", "Видео пригодно", "События качества"],
+      ["Дата", "Пульс", "Статус измерения", "Видео пригодно", "Ограничения"],
       entries.map((entry) => [
         formatDate(entry.stored_at),
         entry.heart_rate_bpm == null ? null : `${Math.round(entry.heart_rate_bpm)} уд/мин`,
         entry.heart_rate_status,
         entry.video_usable == null ? null : entry.video_usable ? "да" : "нет",
-        (entry.video_quality_issues || []).map((issue) => (typeof issue === "string" ? issue : issue.code)).join(", ") || "нет",
+        ((entry.quality || {}).reasons || []).join(" ") || "нет",
       ]),
     ),
   );

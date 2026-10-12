@@ -53,14 +53,17 @@ function extractResultMetrics(item) {
   return metrics;
 }
 
+// The previous result of the same test, with the record it came from
 function findPreviousMetric(items, startIndex, reportType, metricKey) {
   for (let i = startIndex + 1; i < items.length; i += 1) {
     if (items[i].report_type !== reportType) continue;
     const previous = extractResultMetrics(items[i]).find((m) => m.key === metricKey);
-    if (previous) return previous;
+    if (previous) return { metric: previous, item: items[i] };
   }
   return null;
 }
+
+const isLimited = (item) => Boolean(item && item.quality && item.quality.limited);
 
 // Trend vs the previous result of the same test: arrow + word, not color alone
 function trendInfo(metric, previous) {
@@ -80,10 +83,11 @@ function formatResultDate(isoText) {
   return `${date.toLocaleDateString("ru-RU", { day: "numeric", month: "long", year: "numeric" })}, ${date.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}`;
 }
 
-// Limitations of the result under poor conditions (ТЗ: an explicit limit of
-// interpretation when the data quality is low)
-function resultLimitations(item) {
-  return ((item && item.summary) || {}).limitations || "";
+// ТЗ: when the data quality is low, the interpretation is explicitly
+// limited — the core sends the plain-language reason (screening/data_quality.py)
+function qualityLimit(item) {
+  const quality = (item && item.quality) || {};
+  return quality.limited ? quality.text || "" : "";
 }
 
 // HADS: only a neutral confirmation for the user (ТЗ, HADS module)
@@ -123,7 +127,11 @@ function buildResultCard(item, index, testItems) {
     if (metric.max) value.appendChild(el("small", null, ` / ${metric.max}`));
     if (metric.unit) value.appendChild(el("small", null, ` ${metric.unit}`));
     tile.appendChild(value);
-    const trend = trendInfo(metric, findPreviousMetric(testItems, index, item.report_type, metric.key));
+    // Methodology: dynamics only between reliable sessions — no arrow when
+    // either result may be inaccurate
+    const previous = findPreviousMetric(testItems, index, item.report_type, metric.key);
+    const comparable = previous && !isLimited(item) && !isLimited(previous.item);
+    const trend = comparable ? trendInfo(metric, previous.metric) : null;
     if (trend) tile.appendChild(el("span", `nm-report-trend nm-report-trend-${trend.cls}`, trend.text));
     metrics.appendChild(tile);
   }
@@ -131,8 +139,12 @@ function buildResultCard(item, index, testItems) {
 
   const hads = hadsCompletion(item);
   if (hads) card.appendChild(el("p", "nm-report-note", hads));
-  const limits = resultLimitations(item);
-  if (limits) card.appendChild(el("p", "nm-report-note", limits));
+  const limits = qualityLimit(item);
+  if (limits) {
+    const note = el("p", "nm-report-note nm-report-limited");
+    note.append(el("strong", null, "Результат может быть неточным. "), limits);
+    card.appendChild(note);
+  }
   return card;
 }
 
@@ -241,6 +253,7 @@ function domainHistory(items) {
     .map((item) => ({
       at: item.stored_at || "",
       byDomain: new Map(item.domains.moca_domains.map((row) => [row.domain, row])),
+      limited: Boolean(item.quality && item.quality.limited),
     }))
     .sort((a, b) => String(a.at).localeCompare(String(b.at)));
 }
@@ -264,8 +277,10 @@ function domainRow(domain, passes) {
     if (entry && entry.max_score) {
       const share = Math.max(0, Math.min(1, Number(entry.score) / Number(entry.max_score)));
       bar.style.setProperty("--nm-dyn-share", String(Math.round(share * 100)));
-      bar.title = `${shortDate(pass.at)}: ${entry.score} из ${entry.max_score}`;
+      bar.title = `${shortDate(pass.at)}: ${entry.score} из ${entry.max_score}`
+        + (pass.limited ? " — результат может быть неточным" : "");
       bar.dataset.filled = "true";
+      if (pass.limited) bar.dataset.limited = "true";
     } else {
       bar.title = `${shortDate(pass.at)}: нет данных`;
     }
@@ -335,6 +350,11 @@ function renderDynamics(panel, items) {
       `Прохождений: ${passes.length}. С ${shortDate(first.at)} по ${shortDate(last.at).replace(/\.$/, "")}. ` +
       "Высота столбика — доля набранных баллов домена."),
   );
+  if (passes.some((pass) => pass.limited)) {
+    panel.append(el("p", "nm-status-line",
+      "Столбики с пунктирной рамкой — прохождения, результат которых может быть неточным " +
+      "(условия прохождения или нераспознанные ответы). Сравнивайте их с осторожностью."));
+  }
 
 }
 

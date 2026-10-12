@@ -19,6 +19,8 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
+from neuro_mirror.screening.data_quality import assess
+
 # Поля записи, которые видит пользователь.
 USER_FIELDS = frozenset({
     "report_type", "type", "state", "session_id", "user_id", "stored_at",
@@ -34,9 +36,9 @@ USER_DOMAINS = frozenset({
     "hads_answered_count", "hads_question_count",
 })
 
-# Поля «summary», которые видит пользователь: ограничение интерпретации при
-# плохих условиях (ТЗ: «при низком качестве данных — явное ограничение»).
-USER_SUMMARY = frozenset({"limitations"})
+# Поля «summary», которые видит пользователь. Ограничение интерпретации
+# приходит отдельно, в «quality» (screening/data_quality.py).
+USER_SUMMARY: frozenset[str] = frozenset()
 
 # Рекомендация в пользовательском отчёте — постоянная и безопасная.
 USER_RECOMMENDATION = (
@@ -63,6 +65,10 @@ def user_view(item: dict[str, Any]) -> dict[str, Any]:
     view["summary"] = {
         key: deepcopy(value) for key, value in summary.items() if key in USER_SUMMARY
     }
+    # ТЗ: при низком качестве данных — явное ограничение интерпретации,
+    # показанное и пользователю. Ему — понятная фраза, без подробностей.
+    quality = assess(item)
+    view["quality"] = {"limited": quality["limited"], "text": quality["user_text"]}
     return view
 
 
@@ -88,10 +94,6 @@ def _moca_entry(item: dict[str, Any]) -> dict[str, Any]:
             "expected": task.get("expected"),
             "details": task.get("details"),
         })
-    unrecognized = sum(
-        1 for task in tasks
-        if task["max_score"] and not str(task["transcript"] or "").strip()
-    )
     return {
         "session_id": item.get("session_id"),
         "stored_at": item.get("stored_at"),
@@ -106,10 +108,9 @@ def _moca_entry(item: dict[str, Any]) -> dict[str, Any]:
             "values": deepcopy(domains.get("moca_speech_summary") or {}),
         },
         "quality": {
-            "limitations": summary.get("limitations", ""),
+            **assess(item),
             "video_quality_issues": deepcopy(domains.get("video_quality_issues") or []),
             "session_conditions": deepcopy(item.get("session_conditions") or {}),
-            "unrecognized_answers": unrecognized,
         },
         "heart_rate_bpm": domains.get("heart_rate_bpm"),
         "heart_rate_status": domains.get("heart_rate_status"),
@@ -153,6 +154,7 @@ def _hads_entry(item: dict[str, Any]) -> dict[str, Any] | None:
             for answer in hads.get("answers") or []
         ],
         "limitations": summary.get("limitations", ""),
+        "quality": assess(item),
     }
 
 
@@ -168,6 +170,7 @@ def _screening_entry(item: dict[str, Any]) -> dict[str, Any]:
         "video_quality_issues": deepcopy(domains.get("video_quality_issues") or []),
         "session_conditions": deepcopy(item.get("session_conditions") or {}),
         "limitations": (item.get("summary") or {}).get("limitations", ""),
+        "quality": assess(item),
     }
 
 

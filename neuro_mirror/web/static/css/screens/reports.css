@@ -250,3 +250,33 @@
   outline: var(--nm-focus);
   outline-offset: 0.125rem;
 }
+
+/* Ограничение интерпретации при низком качестве данных (ТЗ). Отмечено
+   текстом и рамкой, не одним цветом. */
+.nm-report-limited {
+  padding: 0.75rem 1rem;
+  border: 0.125rem dashed var(--nm-border-strong, #94a3b8);
+  border-radius: var(--nm-radius);
+}
+
+.nm-dyn-bar[data-limited="true"] {
+  outline: 0.125rem dashed var(--nm-text-dim);
+  outline-offset: 0.125rem;
+  opacity: 0.6;
+}
+
+.nm-spec-quality {
+  margin: 0.75rem 0;
+}
+
+.nm-spec-quality-limited {
+  padding: 0.75rem 1rem;
+  border: 0.125rem dashed var(--nm-border-strong, #94a3b8);
+  border-radius: var(--nm-radius);
+}
+
+.nm-spec-reasons {
+  margin: 0.5rem 0 0;
+  padding-left: 1.25rem;
+  font-size: var(--nm-font-body);
+}
