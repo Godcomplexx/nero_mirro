@@ -34,6 +34,14 @@ function startScreenLimit(box) {
 
 const sameCode = (a, b) => String(a).toLowerCase() === String(b).toLowerCase();
 
+// The game's own start keeps a place for a recorded GIF. The button that
+// leaves that screen and starts the task is «Начать игру».
+function skipRecordedExample(container) {
+  const begin = container.querySelector("[data-confirm-start]")
+    || container.querySelector("[data-complete] [data-start]");
+  if (begin) begin.click();
+}
+
 // Puts the game `gameCode` into `container`.
 //   onClose()    — the game's own «close» button was pressed
 //   onFinished() — the core answered that the game is over
@@ -60,10 +68,12 @@ export async function mountGame(
   const definition = catalog.find((item) => sameCode(item.code, gameCode)) || { code: gameCode, title: fallbackTitle };
   const base = `/api/games/${encodeURIComponent(definition.code)}`;
 
-  // Instruction, example and a practice round first — unless the game's own
-  // screen already has them
+  // Instruction, the self-playing example and a practice round. The games'
+  // own start screens still contain a GIF slot; after this example the slot
+  // is skipped and the task itself begins.
   const practice = practiceFor(definition.code);
-  if (introStage !== "game" && practice && (await usesInterfacePractice(definition.code, `${base}/renderer.js`))) {
+  const showExample = introStage !== "game" && practice && (await usesInterfacePractice(definition.code));
+  if (showExample) {
     await runGameIntro(container, {
       title: definition.title || fallbackTitle,
       practice,
@@ -140,6 +150,9 @@ export async function mountGame(
   container.replaceChildren();
   const cleanup = await renderer.mount({ container, definition, api: gameApi, close: onClose });
   if (adjust.onMounted) adjust.onMounted(container);
+  // The interface example already played, or the person is returning straight
+  // to the task: do not stop on the game's own «here will be a GIF» screen.
+  if (practice && (showExample || introStage === "game")) skipRecordedExample(container);
   // The game field is scaled to the room it has instead of getting a scrollbar
   const stopFitting =
     adjust.fit === false ? () => {} : fitToBox(container, ".game-stage-new", { maxZoom: startScreenLimit });

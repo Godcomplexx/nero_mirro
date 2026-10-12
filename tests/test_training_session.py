@@ -153,6 +153,25 @@ def test_endpoint_uses_the_most_recent_result(tmp_path):
     client.close()
 
 
+def test_endpoint_rebuilds_profile_from_saved_tasks(tmp_path):
+    """Старый отчёт сохранил задания, но не домены — занятие всё равно открывается."""
+    report = {
+        "session_id": "saved",
+        "stored_at": "2026-10-08T11:49:20",
+        "domains": {
+            "moca_domains": [],
+            "moca_tasks": [
+                {"task_id": "delayed_recall", "score": 3},
+            ],
+        },
+    }
+    client = _client_with(tmp_path, [report])
+    response = client.get("/api/training/session")
+    assert response.status_code == 200
+    assert response.json()["source_session_id"] == "saved"
+    client.close()
+
+
 def test_endpoint_explains_that_the_test_comes_first(tmp_path):
     """Без результата MoCA занятие не подобрать — это объяснимая причина, не сбой."""
     client = _client_with(tmp_path, [])

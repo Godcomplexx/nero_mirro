@@ -105,6 +105,7 @@ class MocaMissingSpeechTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(event.payload["task_count"], 1)
         self.assertEqual(event.payload["tasks"][0]["transcript"], "")
         self.assertEqual(event.payload["tasks"][0]["score"], 0)
+        self.assertTrue(event.payload["domains"])
 
 
 class _FakeSpeechWorker:

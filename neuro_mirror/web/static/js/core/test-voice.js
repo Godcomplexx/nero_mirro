@@ -6,7 +6,7 @@
 // continues the test — so "finished" is reported even when synthesis or
 // playback fails, otherwise the test would stall.
 
-export function createVoiceChannel({ finishedUrl, idField }) {
+export function createVoiceChannel({ finishedUrl, idField, onActive }) {
   let sequence = 0;
   let currentAudio = null;
   let lastKey = null;
@@ -40,15 +40,17 @@ export function createVoiceChannel({ finishedUrl, idField }) {
   async function play(text, ttsId) {
     stop();
     const mySequence = sequence;
+    const stillCurrent = () => mySequence === sequence;
+    if (onActive) onActive(true);
     try {
       const resp = await fetch("/api/tts/speak", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text }),
       });
-      if (!resp.ok) return;
+      if (!resp.ok || !stillCurrent()) return;
       const blob = await resp.blob();
-      if (mySequence !== sequence) return; // superseded or stopped
+      if (!stillCurrent()) return; // superseded or stopped
       const url = URL.createObjectURL(blob);
       const audio = new Audio(url);
       currentAudio = audio;
@@ -64,16 +66,19 @@ export function createVoiceChannel({ finishedUrl, idField }) {
     } catch (_) {
       // Autoplay blocked or synthesis failed — text stays on screen
     } finally {
+      if (stillCurrent() && onActive) onActive(false);
       await notifyFinished(ttsId);
     }
   }
 
-  // Plays a prompt once per id, however many snapshots repeat it
+  // Plays a prompt once per id, however many snapshots repeat it.
+  // Returns false when this snapshot only repeats an instruction already played.
   function playOnce(text, ttsId) {
     const key = ttsId || text;
-    if (key === lastKey) return;
+    if (key === lastKey) return false;
     lastKey = key;
     play(text, ttsId);
+    return true;
   }
 
   return { play, playOnce, stop };

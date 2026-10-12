@@ -8,7 +8,16 @@
 
 import { createVoiceChannel } from "./test-voice.js";
 
-const voice = createVoiceChannel({ finishedUrl: "/api/actions/moca_tts_finished", idField: "moca_tts_id" });
+const voice = createVoiceChannel({
+  finishedUrl: "/api/actions/moca_tts_finished",
+  idField: "moca_tts_id",
+  // The repeat button stays disabled while speech is actually playing.
+  // It must become available again once the instruction has finished.
+  onActive(active) {
+    moca.speaking = active;
+    emit();
+  },
+});
 
 // status: "idle" | "running" | "finished" | "stopped"
 const moca = {
@@ -79,9 +88,10 @@ function onSnapshot(event) {
     if (snap.moca_start_grace_seconds !== undefined) {
       moca.startGraceSeconds = snap.moca_start_grace_seconds;
     }
-    if (snap.moca_tts_text) {
+    // Later snapshots keep the last instruction text. Speaking is true only
+    // while a new instruction is actually being played.
+    if (snap.moca_tts_text && voice.playOnce(snap.moca_tts_text, snap.moca_tts_id || "")) {
       moca.speaking = true;
-      voice.playOnce(snap.moca_tts_text, snap.moca_tts_id || "");
     }
     if (recording) moca.speaking = false;
     emit();

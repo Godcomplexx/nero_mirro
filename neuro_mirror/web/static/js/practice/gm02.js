@@ -1,5 +1,5 @@
 // «Запомни последовательность»: cells light up one after another; repeat the
-// order. Replaces the game's own instruction with the recorded animation.
+// order. The start screen plays this by itself, with a cursor, instead of a GIF.
 
 import { el, button, sleep } from "./kit.js";
 

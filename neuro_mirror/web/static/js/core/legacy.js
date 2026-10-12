@@ -6,10 +6,18 @@
 // this file does, so the coupling stays in one place while app.js shrinks.
 // Deleted in the final cleanup stage together with app.js.
 
-/* global state, el, fetchJson, toggleCamera, unlockAudioPlayback, appendLogLine */
+/* global state, el, fetchJson, toggleCamera, stopCamera, updateUserChip, unlockAudioPlayback, appendLogLine */
 
 export function activeUser() {
   return state.activeUser || null;
+}
+
+// The profile as the server returned it after a change (e.g. of consents).
+// Without the video consent the camera is switched off, as on profile select.
+export function setActiveUser(user) {
+  state.activeUser = user;
+  if (!user.consents || user.consents.video !== true) stopCamera();
+  updateUserChip();
 }
 
 export function userConsents() {

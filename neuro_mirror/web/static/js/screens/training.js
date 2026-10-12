@@ -11,15 +11,24 @@
 // session (sessionStorage), so a page reload returns to the same place: the
 // game list, the same game and the same step of it (instruction, practice or
 // the game itself — a game interrupted by the reload starts over).
+//
+// The session is framed by the SAN questionnaire: once before the first game
+// and once after the last (or after the session is stopped). Both answers
+// carry the same session id, so the core can compare "before" and "after".
+// Either survey may be skipped. If the server has no questionnaire, the step
+// shows a notice and a button to continue — the screen does not invent questions.
 
 import { loadTrainingPlan, loadTrainingSession } from "../core/training.js";
-import { loadCatalog, mountGame } from "../core/games.js";
+import { loadCatalog, mountGame } from "../core/games.js?v=20261009-demo";
 import { activeUser } from "../core/legacy.js";
+import { loadSanQuestionnaire, saveSanAnswers } from "../core/questionnaires.js";
 import { createDomainTag } from "../components/domain-tag.js";
 import { confirmDialog } from "../components/confirm-dialog.js";
+import { createSanSurvey } from "../components/san-survey.js";
 import { notify } from "../components/notify.js";
 
-// loading → locked | overview | legacy | failed;  overview → playing → done
+// loading → locked | overview | legacy | failed;
+// overview → san-before → playing → san-after → done
 const model = {
   phase: "loading",
   userId: "",
@@ -35,18 +44,20 @@ const model = {
   freeGame: null,
   // Step of the game on screen: intro | practice | done | game
   stage: "intro",
+  // Ties the "before" and "after" questionnaires of one session together
+  sessionKey: "",
 };
 
 const PLACE_KEY = "nm-training-place";
-const RESTORABLE = new Set(["overview", "catalog", "free", "playing", "done"]);
+const RESTORABLE = new Set(["overview", "catalog", "free", "san-before", "playing", "san-after", "done"]);
 
 function savePlace() {
   try {
     if (!RESTORABLE.has(model.phase)) return;
-    const { phase, userId, session, index, completed, stopped, freeDomain, freeGame, stage } = model;
+    const { phase, userId, session, index, completed, stopped, freeDomain, freeGame, stage, sessionKey } = model;
     window.sessionStorage.setItem(
       PLACE_KEY,
-      JSON.stringify({ phase, userId, session, index, completed, stopped, freeDomain, freeGame, stage }),
+      JSON.stringify({ phase, userId, session, index, completed, stopped, freeDomain, freeGame, stage, sessionKey }),
     );
   } catch (_) {
     // storage unavailable — a reload simply starts from the overview
@@ -137,12 +148,28 @@ function dropGame() {
   nextButton = null;
 }
 
+function newSessionKey() {
+  if (window.crypto && typeof window.crypto.randomUUID === "function") return window.crypto.randomUUID();
+  return `training-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
 function startSession() {
   model.stopped = false;
   model.index = 0;
   model.completed = 0;
   model.stage = "intro";
+  model.sessionKey = newSessionKey();
+  model.phase = "san-before";
+  render();
+}
+
+function startGames() {
   model.phase = "playing";
+  render();
+}
+
+function finishSession() {
+  model.phase = "san-after";
   render();
 }
 
@@ -150,11 +177,11 @@ function advance() {
   if (model.currentFinished) model.completed += 1;
   dropGame();
   if (model.index + 1 >= games().length) {
-    model.phase = "done";
-  } else {
-    model.index += 1;
-    model.stage = "intro";
+    finishSession();
+    return;
   }
+  model.index += 1;
+  model.stage = "intro";
   render();
 }
 
@@ -182,8 +209,7 @@ async function stopSession() {
   if (model.currentFinished) model.completed += 1;
   dropGame();
   model.stopped = true;
-  model.phase = "done";
-  render();
+  finishSession();
 }
 
 function syncNextButton() {
@@ -553,6 +579,94 @@ function buildPlaying() {
   return wrap;
 }
 
+// ---- Questionnaire before and after the session --------------------------------
+
+// Only a loaded questionnaire is kept: after a failed load the next survey asks again
+let sanQuestionnaire = null;
+async function questionnaire() {
+  if (!sanQuestionnaire) sanQuestionnaire = await loadSanQuestionnaire();
+  return sanQuestionnaire;
+}
+
+const SAN_TEXTS = {
+  before: {
+    title: "Как вы себя чувствуете перед занятием?",
+    intro: "Ответьте на несколько вопросов перед началом — так будет видно, как меняется ваше состояние за занятие.",
+    finishLabel: "Начать занятие",
+  },
+  after: {
+    title: "Как вы себя чувствуете после занятия?",
+    intro: "Ответьте на те же вопросы ещё раз — их сравнят с ответами перед занятием.",
+    finishLabel: "Завершить",
+  },
+};
+
+function buildSan(moment) {
+  const phase = model.phase;
+  const wrap = el("div", "nm-training-san");
+  wrap.appendChild(el("p", "nm-panel-text", "Загружаю вопросы…"));
+  const isCurrent = () => model.phase === phase && wrap.isConnected;
+  const proceed = () => {
+    if (!isCurrent()) return;
+    if (moment === "before") {
+      startGames();
+    } else {
+      model.phase = "done";
+      render();
+    }
+  };
+  questionnaire().then((data) => {
+    if (!isCurrent()) return;
+    if (!data) {
+      const box = el("section", "nm-panel nm-stub");
+      const title = el("h2", "nm-panel-title", "Оценка самочувствия");
+      title.tabIndex = -1;
+      const skipLabel = moment === "before" ? "Начать занятие" : "Завершить";
+      box.append(
+        title,
+        el(
+          "p",
+          "nm-panel-text",
+          moment === "before"
+            ? "Вопросы о самочувствии ещё не подключены. Этот шаг можно пропустить и начать занятие."
+            : "Вопросы о самочувствии ещё не подключены. Этот шаг можно пропустить и завершить занятие.",
+        ),
+      );
+      const skipRow = el("div", "nm-btn-row");
+      skipRow.appendChild(button(skipLabel, "primary", proceed));
+      box.appendChild(skipRow);
+      wrap.replaceChildren(box);
+      title.focus();
+      return;
+    }
+    const texts = SAN_TEXTS[moment];
+    const survey = createSanSurvey({
+      questionnaire: data,
+      title: texts.title,
+      intro: texts.intro,
+      finishLabel: texts.finishLabel,
+      async onDone(answers) {
+        try {
+          await saveSanAnswers(answers, { moment, sessionId: model.sessionKey });
+        } catch (error) {
+          notify(`Ответы не сохранились: ${error.message || error}. Нажмите «${texts.finishLabel}» ещё раз или пропустите опрос.`);
+          throw error;
+        }
+        proceed();
+      },
+    });
+    const row = el("div", "nm-btn-row");
+    row.appendChild(button("Пропустить опрос", "secondary", proceed));
+    wrap.replaceChildren(survey, row);
+    const heading = survey.querySelector("h2");
+    if (heading) {
+      heading.tabIndex = -1;
+      heading.focus();
+    }
+  });
+  return wrap;
+}
+
 function buildDone() {
   const total = games().length;
   const card = el("section", "nm-panel nm-result");
@@ -582,7 +696,9 @@ function render() {
     overview: buildOverview,
     catalog: buildCatalog,
     free: buildFree,
+    "san-before": () => buildSan("before"),
     playing: buildPlaying,
+    "san-after": () => buildSan("after"),
     done: buildDone,
   };
   body.appendChild(views[model.phase]());
@@ -614,7 +730,7 @@ export const trainingScreen = {
     // asked from the core again (the profile or the test result may have changed)
     const userId = (activeUser() || {}).id || "";
     // Back from another section: the game list or a game stays where it was
-    if (["playing", "catalog", "free"].includes(model.phase) && model.userId === userId) {
+    if (["san-before", "playing", "san-after", "catalog", "free"].includes(model.phase) && model.userId === userId) {
       render();
       return;
     }

@@ -154,14 +154,19 @@ export function createTestScreen(config) {
     return panel;
   }
 
-  function buildResult(title, text, restartLabel) {
+  function buildResult(title, text, restartLabel, nextStep) {
     const card = el("section", "nm-panel nm-result");
     const heading = el("h2", "nm-panel-title", title);
     heading.tabIndex = -1;
     card.append(heading, el("p", "nm-panel-text", text));
     const row = el("div", "nm-btn-row");
+    if (nextStep) {
+      row.appendChild(button(nextStep.label, "primary", () => {
+        if (window.nmOpenSection) window.nmOpenSection(nextStep.section);
+      }));
+    }
     row.append(
-      button("В меню", "primary", () => window.nmOpenSection && window.nmOpenSection("home")),
+      button("В меню", nextStep ? "secondary" : "primary", () => window.nmOpenSection && window.nmOpenSection("home")),
       button("Открыть отчёты", "secondary", () => {
         if (window.nmOpenSection) window.nmOpenSection("reports");
         }),
@@ -188,7 +193,7 @@ export function createTestScreen(config) {
       view = config.createView();
       host.appendChild(view.element);
     } else if (mode === "done") {
-      const card = buildResult(config.doneTitle, config.doneText, "Пройти ещё раз");
+      const card = buildResult(config.doneTitle, config.doneText, "Пройти ещё раз", config.nextStep);
       focusTarget = card.querySelector("h2");
       host.appendChild(card);
     } else if (mode === "stopped") {

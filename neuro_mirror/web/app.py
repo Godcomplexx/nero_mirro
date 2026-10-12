@@ -51,6 +51,7 @@ from neuro_mirror.core.access_journal import (
     VIEW_RESULTS,
     AccessJournal,
 )
+from neuro_mirror.screening.moca_scoring import cognitive_profile
 from neuro_mirror.screening.san_survey import (
     MOMENTS,
     questionnaire as san_questionnaire,
@@ -365,7 +366,7 @@ def create_app() -> FastAPI:
         profile: list[dict[str, Any]] = []
         source_session = ""
         for item in items:
-            candidate = ((item.get("domains") or {}).get("moca_domains")) or []
+            candidate = cognitive_profile(item.get("domains"))
             if candidate:
                 profile = list(candidate)
                 source_session = str(item.get("session_id") or "")

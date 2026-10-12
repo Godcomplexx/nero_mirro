@@ -4,6 +4,8 @@
 // on a face scale with text labels. A shared component — the deck uses it
 // after screening and before/after training. Renders whatever questionnaire
 // the server provides ({ questions, scale }); answers are handed to onDone.
+// If onDone returns a promise, the finish button waits for it (the answers
+// are being sent) and can be pressed again if it rejects.
 
 // Faces are presentation only; questions and scale labels come from the
 // server (js/core/questionnaires.js). Face i is picked by the option's
@@ -94,7 +96,6 @@ export function createSanSurvey({ questionnaire, title, intro, finishLabel = "З
   next.className = "nm-btn nm-btn-primary";
   actions.append(back, next);
 
-  // No "answers are saved" hint here: SAN answers are not stored yet.
   panel.append(progressText, progress, fieldset, actions);
   layout.append(list, panel);
   root.append(heading, introEl, layout);
@@ -160,7 +161,9 @@ export function createSanSurvey({ questionnaire, title, intro, finishLabel = "З
       label.innerHTML = `<span class="nm-san-face">${faceSvg(faceFor(position, SCALE.length))}</span>`;
       const caption = document.createElement("span");
       caption.className = "nm-san-caption";
-      caption.textContent = option.label;
+      // A question may word its answers its own way; the faces follow the scale
+      const own = (question.options || []).find((item) => item && item.value === option.value);
+      caption.textContent = own && own.label ? own.label : option.label;
       label.appendChild(caption);
       scale.append(input, label);
     });
@@ -177,13 +180,24 @@ export function createSanSurvey({ questionnaire, title, intro, finishLabel = "З
     renderList();
     renderQuestion();
   });
-  next.addEventListener("click", () => {
-    if (answers[index] === null) return;
+  let sending = false;
+  next.addEventListener("click", async () => {
+    if (answers[index] === null || sending) return;
     if (index === QUESTIONS.length - 1) {
-      if (onDone) {
-        onDone(
-          QUESTIONS.map((question, i) => ({ id: question.id, value: answers[i] }))
-        );
+      if (!onDone) return;
+      sending = true;
+      next.disabled = true;
+      back.disabled = true;
+      try {
+        await onDone(QUESTIONS.map((question, i) => ({ id: question.id, value: answers[i] })));
+      } catch (_) {
+        // The caller has told the person what went wrong; they may try again
+      } finally {
+        sending = false;
+        if (root.isConnected) {
+          next.disabled = answers[index] === null;
+          back.disabled = index === 0;
+        }
       }
       return;
     }

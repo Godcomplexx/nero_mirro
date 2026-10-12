@@ -1,11 +1,9 @@
 // neuro_mirror/web/static/js/practice/index.js
 //
-// Start of every game made by the interface: instruction, live example and a
-// practice round (js/components/game-intro.js). A game whose own screen code
-// already brings its own practice (the core's feature/game-difficulty branch
-// does that for all games) is shown as it is — see usesInterfacePractice().
-// «Запомни последовательность» is the exception: its own start (with a
-// recorded animation) is replaced by the interface's one.
+// Start of every game made by the interface: instruction, a live example
+// (the practice round playing itself, with a cursor) and a practice round
+// the person does (js/components/game-intro.js). This replaces the GIF
+// slots on the games' own start screens.
 
 import gm01 from "./gm01.js";
 import gm02 from "./gm02.js";
@@ -59,23 +57,11 @@ const PRACTICES = {
   "GM-24": gm24,
 };
 
-// Games whose own start screen is skipped in favour of the interface's one
-// (js/core/game-adjustments.js jumps straight to the game)
-const REPLACES_OWN_START = new Set(["GM-02"]);
-
 export function practiceFor(gameCode) {
   return PRACTICES[String(gameCode).toUpperCase()] || null;
 }
 
-// Whether the interface's start should be shown for this game
-export async function usesInterfacePractice(gameCode, rendererUrl) {
-  const code = String(gameCode).toUpperCase();
-  if (!PRACTICES[code]) return false;
-  if (REPLACES_OWN_START.has(code)) return true;
-  try {
-    const source = await fetch(rendererUrl).then((response) => response.text());
-    return !source.includes("data-training");
-  } catch (_) {
-    return true;
-  }
+// Every game with a practice module starts from the interface example.
+export async function usesInterfacePractice(gameCode) {
+  return Boolean(practiceFor(gameCode));
 }

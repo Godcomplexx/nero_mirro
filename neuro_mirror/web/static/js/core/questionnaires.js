@@ -8,9 +8,13 @@
 //
 // Expected contract for GET /api/questionnaires/san:
 //   {
-//     "questions": [{ "id": "wellbeing_1", "group": "Самочувствие", "text": "…" }, …],
+//     "questions": [{ "id": "wellbeing_1", "group": "Самочувствие", "text": "…",
+//                     "options": [{ "value": 1, "label": "…" }, …] }, …],  // options optional
 //     "scale":     [{ "value": 1, "label": "Очень плохое" }, … ]   // negative → positive
 //   }
+//
+// Answers go to POST /api/questionnaires/san as
+//   { "moment": "before" | "after", "answers": { "<question id>": value }, "session_id": "…" }
 
 import { api, log } from "./legacy.js";
 
@@ -32,7 +36,21 @@ export async function loadSanQuestionnaire() {
     if (isValidQuestionnaire(data)) return data;
     log("[san] questionnaire from server has an unexpected shape — showing stub");
   } catch (_) {
-    // Endpoint not implemented on the server yet — expected for now.
+    // A server without the questionnaire — the screen shows a stub.
   }
   return null;
+}
+
+// answers: [{ id, value }] as handed over by the SAN survey's onDone.
+// Throws when the server did not store them.
+export function saveSanAnswers(answers, { moment, sessionId = "" }) {
+  const byId = {};
+  for (const answer of answers) {
+    if (answer.id != null && answer.value != null) byId[answer.id] = answer.value;
+  }
+  return api("/api/questionnaires/san", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ moment, answers: byId, session_id: sessionId }),
+  });
 }

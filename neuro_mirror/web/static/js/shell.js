@@ -8,11 +8,11 @@
 import { confirmDialog } from "./components/confirm-dialog.js";
 import { screeningScreen } from "./screens/screening.js";
 import { hadsScreen } from "./screens/hads.js";
-import { mocaScreen } from "./screens/moca.js";
+import { mocaScreen } from "./screens/moca.js?v=20261009-san";
 import { reportsScreen } from "./screens/reports.js";
 import { serviceScreen } from "./screens/service.js";
 import { tasksScreen } from "./screens/tasks.js";
-import { trainingScreen } from "./screens/training.js";
+import { trainingScreen } from "./screens/training.js?v=20261009-demo";
 // Registers window.nmNotify for app.js (a classic script cannot import)
 import "./components/notify.js";
 import { loadTrainingPlan } from "./core/training.js";
@@ -90,7 +90,7 @@ const HOME_CARD_ORDER = ["screening", "moca", "tasks", "training", "reports", "h
 const ICONS = {
   home: '<path d="M12 3l9 8h-3v9h-5v-6H11v6H6v-9H3z"/>',
   clipboard: '<path d="M9 2h6a1 1 0 011 1v1h2a1 1 0 011 1v15a1 1 0 01-1 1H6a1 1 0 01-1-1V5a1 1 0 011-1h2V3a1 1 0 011-1zm1 2v1h4V4h-4zM8 11h8v2H8v-2zm0 4h8v2H8v-2z"/>',
-  heart: '<path d="M12 21s-7.5-5-10-9.5C.5 8 2 4 6 4c2.2 0 3.7 1.2 4.5 2.3C11.3 5.2 12.8 4 15 4c4 0 5.5 4 4 7.5C19.5 16 12 21 12 21z"/>',
+  heart: '<path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>',
   brain: '<path d="M12 2C8.14 2 5 5.14 5 9c0 2.38 1.19 4.47 3 5.74V17c0 .55.45 1 1 1h6c.55 0 1-.45 1-1v-2.26c1.81-1.27 3-3.36 3-5.74 0-3.86-3.14-7-7-7zM9 21h6v-1H9v1z"/>',
   list: '<path d="M4 5h2v2H4V5zm4 0h12v2H8V5zM4 11h2v2H4v-2zm4 0h12v2H8v-2zm-4 6h2v2H4v-2zm4 0h12v2H8v-2z"/>',
   activity: '<path d="M3 12h4l2.5-7 5 14 2.5-7h4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>',
@@ -237,7 +237,7 @@ function renderHomeSection() {
   const service = document.createElement("button");
   service.type = "button";
   service.className = "nm-link-button";
-  service.textContent = "Устройства и сведения о программе";
+  service.textContent = "Устройства, согласия и сведения о программе";
   service.addEventListener("click", () => selectSection("service"));
   wrap.appendChild(service);
 

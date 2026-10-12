@@ -465,6 +465,7 @@ class MocaTestPlugin(ProcessorPlugin):
             source=self.name,
             payload={
                 "tasks": scoring["tasks"],
+                "domains": scoring["domains"],
                 "session_id": self._session_id,
                 "stopped_early": stopped_early,
                 "task_count": len(results),
@@ -581,7 +582,10 @@ class MocaTestPlugin(ProcessorPlugin):
                 "screen": "moca",
                 "moca_awaiting_start": True,
                 "moca_task_id": task.task_id,
-                "moca_task_index": index + 1,
+                # Номер с нуля, как в остальных сообщениях теста. На последнем
+                # задании index + 1 совпал бы с числом заданий, и экран спрятал
+                # бы «Приступить», решив, что тест уже закончен.
+                "moca_task_index": index,
                 "moca_task_total": total,
                 "moca_start_grace_seconds": grace,
                 "moca_task_limit_seconds": TASK_TIME_LIMIT_SECONDS,

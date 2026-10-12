@@ -98,6 +98,53 @@
   color: #ffffff;
 }
 
+/* «Согласия»: one row per consent — what it is, its state, the action */
+.nm-consent-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.nm-consent-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem 1rem;
+  padding: 0.875rem 1rem;
+  border: 0.0625rem solid var(--nm-border);
+  border-radius: var(--nm-radius);
+}
+
+.nm-consent-info {
+  display: flex;
+  flex: 1 1 18rem;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.nm-consent-text,
+.nm-consent-note {
+  font-size: var(--nm-font-caption);
+  color: var(--nm-text-dim);
+}
+
+.nm-consent-state {
+  font-size: var(--nm-font-caption);
+  font-weight: 700;
+}
+
+.nm-consent-state-on {
+  color: var(--nm-success);
+}
+
+.nm-consent-state-off {
+  color: var(--nm-danger);
+}
+
 /* Devices and program info side by side when there is room */
 .nm-screen:has(> .nm-service) {
   display: grid;

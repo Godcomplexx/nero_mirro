@@ -119,15 +119,6 @@ function watchCardPress(container) {
 }
 
 const ADJUSTMENTS = {
-  // «Запомни последовательность»: the interface has already shown the
-  // instruction, example and practice — go straight to the game
-  "GM-02": {
-    onMounted(container) {
-      const start = container.querySelector("[data-confirm-start]");
-      if (start) start.click();
-    },
-  },
-
   "GM-01": {
     onMounted: watchCardFlips,
     // The second card of a pair stays open for its whole turn before the

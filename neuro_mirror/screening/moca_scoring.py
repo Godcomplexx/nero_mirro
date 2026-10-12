@@ -288,6 +288,22 @@ def summarize_domains(scored_tasks: list[dict[str, Any]]) -> list[dict[str, Any]
     return profile
 
 
+def cognitive_profile(domains: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """Профиль для подбора тренировок.
+
+    Берёт сохранённые домены. В старых отчётах их нет: тогда профиль
+    восстанавливается из баллов заданий, без повторного прохождения теста.
+    """
+    stored = domains if isinstance(domains, dict) else {}
+    profile = stored.get("moca_domains") or []
+    if profile:
+        return list(profile)
+    tasks = stored.get("moca_tasks") or []
+    if not tasks:
+        return []
+    return summarize_domains(list(tasks))
+
+
 def score_moca_tasks(tasks: list[dict[str, Any]]) -> dict[str, Any]:
     """Оценить список заданий и вернуть баллы по заданиям и общий итог."""
     scored_tasks = [_score_and_analyze(task) for task in tasks]

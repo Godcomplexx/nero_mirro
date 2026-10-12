@@ -17,12 +17,6 @@ export function mount({ container, definition, api, close }) {
           <li>Когда появится надпись «Повторите последовательность», нажмите эти клетки в том же порядке.</li>
         </ol>
         <p class="gm02-training-note">Сначала выполним тренировочный пример. Он не учитывается в результате игры.</p>
-        <p class="gm02-example-title">Посмотрите пример</p>
-        <img
-          class="gm02-training-gif"
-          src="/game-assets/tutorials/gm02_sequence.gif"
-          alt="Пример выполнения задания: клетки подсвечиваются, затем их нажимают в том же порядке"
-        >
         <button type="button" class="icon-btn primary-btn" data-start><span>Перейти к тренировке</span></button>
       </div>
       <div class="gm02-module-grid" data-grid hidden aria-label="Игровое поле"></div>
@@ -227,23 +221,6 @@ export function mount({ container, definition, api, close }) {
     }
     .gm02-training-steps li + li { margin-top: 8px; }
     .gm02-training-note { margin-bottom: 12px !important; font-size: 15px !important; }
-    .gm02-example-title {
-      margin: 0 0 8px !important;
-      color: #17212b !important;
-      font-size: 16px !important;
-      font-weight: 700;
-    }
-    .gm02-training-gif {
-      display: block;
-      width: auto;
-      max-width: 100%;
-      height: min(34vh, 330px);
-      margin: 0 auto 14px;
-      border: 1px solid #cbd8de;
-      border-radius: 14px;
-      object-fit: contain;
-      background: #f4f7f8;
-    }
     .gm02-training-actions { display: flex; justify-content: center; gap: 12px; flex-wrap: wrap; }
     .gm02-training-repeat {
       border-color: #60727d;
@@ -282,7 +259,6 @@ export function mount({ container, definition, api, close }) {
       .gm02-module.is-instruction-stage { padding-top: 10px; }
       .gm02-training-steps { margin-bottom: 10px; font-size: 14px; line-height: 1.3; }
       .gm02-training-note { margin-bottom: 7px !important; }
-      .gm02-training-gif { height: 24vh; margin-bottom: 8px; }
       .gm02-module-grid { width: min(50vh, 430px, 70vw); }
     }
   `;

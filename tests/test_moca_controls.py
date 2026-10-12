@@ -76,6 +76,7 @@ def test_the_task_starts_as_soon_as_the_button_is_pressed():
         )
         announcement = await asyncio.wait_for(updates.queue.get(), timeout=1)
         assert announcement.payload["moca_awaiting_start"] is True
+        assert announcement.payload["moca_task_index"] == 0
         assert announcement.payload["moca_task_limit_seconds"] == TASK_TIME_LIMIT_SECONDS
 
         await press(plugin, "moca_begin_task")
@@ -93,6 +94,30 @@ def test_the_task_starts_by_itself_when_nobody_presses():
         await asyncio.wait_for(
             plugin._await_task_start(MOCA_TASKS[0], 0, len(MOCA_TASKS)), timeout=2
         )
+
+    asyncio.run(run())
+
+
+def test_the_last_task_still_waits_for_the_button():
+    """Иначе на отложенном воспроизведении кнопки «Приступить» нет."""
+    async def run():
+        bus = EventBus()
+        plugin = a_plugin(bus, grace=30.0)
+        plugin._running = True
+        updates = bus.subscribe(Topics.UI_UPDATE)
+        last = len(MOCA_TASKS) - 1
+
+        waiting = asyncio.create_task(
+            plugin._await_task_start(MOCA_TASKS[last], last, len(MOCA_TASKS))
+        )
+        announcement = await asyncio.wait_for(updates.queue.get(), timeout=1)
+        assert announcement.payload["moca_awaiting_start"] is True
+        assert announcement.payload["moca_task_id"] == "delayed_recall"
+        assert announcement.payload["moca_task_index"] == last
+        assert announcement.payload["moca_task_index"] < announcement.payload["moca_task_total"]
+
+        await press(plugin, "moca_begin_task")
+        await asyncio.wait_for(waiting, timeout=1)
 
     asyncio.run(run())
 

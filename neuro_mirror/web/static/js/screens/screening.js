@@ -3,9 +3,9 @@
 // Базовый скрининг (deck slide 4): «Проверка оборудования → Видеоанализ →
 // Самочувствие». Step 3 is the HADS test the backend chains after the video
 // analysis on its own (shown in place, js/components/hads-test.js), then
-// the SAN questionnaire. Its questions come from the server; the step falls
-// back to a stub only if the server returns nothing usable. The answers are
-// not sent back to the server yet.
+// the SAN questionnaire. Its questions come from the server and the answers
+// are stored there; the step falls back to a stub only if the server returns
+// nothing usable.
 //
 // The screen keeps its progress in module state, so leaving the section and
 // coming back (deck: navigation must not reset progress) shows where the
@@ -14,7 +14,8 @@
 import { api, cameraStream, cameraVideo, isCameraActive, log, unlockAudio } from "../core/legacy.js";
 import { createSessionCheck } from "../core/session-check.js";
 import { createSanSurvey } from "../components/san-survey.js";
-import { loadSanQuestionnaire } from "../core/questionnaires.js";
+import { loadSanQuestionnaire, saveSanAnswers } from "../core/questionnaires.js";
+import { notify } from "../components/notify.js";
 import { renderCheckList } from "../components/check-list.js";
 import { createHadsView } from "../components/hads-test.js";
 
@@ -136,7 +137,16 @@ async function loadSan() {
         title: "Давайте оценим ваше самочувствие",
         intro: "Эти вопросы помогут лучше понять ваше состояние после видеоанализа. Выберите ответ, который подходит больше всего.",
         finishLabel: "Завершить скрининг",
-        onDone: () => setPhase("done"),
+        // Screening comes before any training session, so it is a "before" state
+        async onDone(answers) {
+          try {
+            await saveSanAnswers(answers, { moment: "before" });
+          } catch (error) {
+            notify(`Ответы не сохранились: ${error.message || error}. Нажмите «Завершить скрининг» ещё раз.`);
+            throw error;
+          }
+          if (model.phase === "san") setPhase("done");
+        },
       })
     : buildSanStub();
   // Rebuild the SAN area with the loaded content and move focus to it
