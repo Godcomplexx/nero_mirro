@@ -14,7 +14,7 @@
 //   }
 //
 // Answers go to POST /api/questionnaires/san as
-//   { "moment": "before" | "after", "answers": { "<question id>": value }, "session_id": "…" }
+//   { "moment": "before" | "after" | "screening", "answers": { "<question id>": value }, "session_id": "…" }
 
 import { api, log } from "./legacy.js";
 

@@ -12,7 +12,6 @@
 """
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -216,54 +215,3 @@ def score_hads(answers: list[dict[str, Any]]) -> dict[str, Any]:
         "notes": notes,
         "answers": answers,
     }
-
-
-# ── Voice answer matching ──────────────────────────────────────────────────────
-
-_NUMBER_WORDS: dict[int, tuple[str, ...]] = {
-    0: ("1", "один", "одно", "первый", "первое", "раз"),
-    1: ("2", "два", "второй", "второе"),
-    2: ("3", "три", "третий", "третье"),
-    3: ("4", "четыре", "четвертый", "четвёртый", "четвертое", "четвёртое"),
-}
-
-
-def _normalize(text: str) -> str:
-    text = text.lower().replace("ё", "е")
-    text = re.sub(r"[^\wа-я0-9]+", " ", text)
-    return " ".join(text.split())
-
-
-def match_hads_answer(transcript: str, options: tuple[HadsOption, ...]) -> int | None:
-    """Return the option index the transcript refers to, or None.
-
-    Matching order:
-      1. exact option-number word ("два", "вариант три", "4")
-      2. exact full option text
-      3. unique containment of one option's text in the transcript
-    """
-    normalized = _normalize(transcript)
-    if not normalized:
-        return None
-    tokens = set(normalized.split())
-
-    number_hits = [
-        idx for idx, words in _NUMBER_WORDS.items() if tokens & set(words)
-    ]
-    if len(number_hits) == 1:
-        return number_hits[0]
-
-    option_texts = [_normalize(option.text) for option in options]
-
-    for idx, option_text in enumerate(option_texts):
-        if normalized == option_text:
-            return idx
-
-    containment_hits = [
-        idx for idx, option_text in enumerate(option_texts)
-        if option_text and option_text in normalized
-    ]
-    if len(containment_hits) == 1:
-        return containment_hits[0]
-
-    return None

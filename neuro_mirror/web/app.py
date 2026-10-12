@@ -337,7 +337,7 @@ def create_app() -> FastAPI:
         if moment not in MOMENTS:
             raise HTTPException(
                 status_code=400,
-                detail="Укажите, когда заполнен опросник: до занятия или после.",
+                detail="Укажите, когда заполнен опросник: до занятия, после него или на скрининге.",
             )
         result = score_san(payload.answers)
         record = {

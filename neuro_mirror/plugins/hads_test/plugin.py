@@ -2,12 +2,13 @@
 
 Runs the 14 HADS questions sequentially. For every question:
   - Sends UI_UPDATE so the browser shows the question and the 4 answer options
-  - Speaks the question and options via browser TTS (same mechanism as MoCA)
-  - Accepts the answer EITHER as a click on an option (UI_ACTION "hads_answer")
-    OR by voice: records via server microphone, transcribes through
-    SpeechWorkerPlugin and matches the transcript to an option
-  - Unrecognized voice answers are re-asked up to VOICE_RETRIES times;
-    clicking always works, including while recording
+  - Speaks the question and options via browser TTS (same mechanism as MoCA):
+    the voice duplicates the text on screen, it does not replace it
+  - Accepts the answer only as a click on an option (UI_ACTION "hads_answer")
+
+ТЗ, модуль HADS: «Ввод ответов выбором варианта (без аудио-ввода
+пациента)». Микрофон в этом тесте не включается и ответы голосом не
+распознаются.
 After all questions publishes HADS_TEST_RESULT with both subscale scores.
 """
 from __future__ import annotations
@@ -17,7 +18,6 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
-from neuro_mirror.core.dataset_store import DatasetStore
 from neuro_mirror.core.settings import Settings
 from neuro_mirror.interfaces.processor import ProcessorPlugin
 from neuro_mirror.models.events import Event, Topics
@@ -25,20 +25,16 @@ from neuro_mirror.screening.hads_scoring import (
     HADS_QUESTIONS,
     PART_LABELS,
     HadsQuestion,
-    match_hads_answer,
     score_hads,
 )
-from neuro_mirror.utils.audio import VoiceRecorder, delete_temp_audio
 
 logger = logging.getLogger(__name__)
 
-VOICE_RETRIES = 2          # voice attempts before falling back to click-only
-RECORD_SECONDS = 12.0      # max recording time per voice attempt
-CLICK_WAIT_SECONDS = 180.0 # how long to wait for a click after voice attempts
+CLICK_WAIT_SECONDS = 180.0  # how long to wait for a click on one question
 
 
 class HadsTestPlugin(ProcessorPlugin):
-    """Runs the HADS questionnaire with combined click + voice input."""
+    """Runs the HADS questionnaire; answers are given by click only."""
 
     plugin_name = "hads_test"
 
@@ -47,11 +43,9 @@ class HadsTestPlugin(ProcessorPlugin):
         bus,
         *,
         settings: Settings,
-        dataset_store: DatasetStore | None = None,
     ) -> None:
         super().__init__(bus)
         self.settings = settings
-        self.dataset_store = dataset_store
         self._running = False
         self._stop_requested = False
         self._test_task: asyncio.Task[None] | None = None
@@ -59,11 +53,8 @@ class HadsTestPlugin(ProcessorPlugin):
         self._tts_waiters: dict[str, asyncio.Future[bool]] = {}
         self._answer_waiter: asyncio.Future[int] | None = None
         self._current_question_index = -1
-        self._audio_allowed = True
         self._resume_checkpoint: dict[str, Any] = {}
         self._session_id = ""
-        self._answer_started_at = ""
-        self._answer_finished_at = ""
 
     def subscribed_topics(self) -> tuple[str, ...]:
         return (Topics.HADS_START, Topics.HADS_STOP, Topics.UI_ACTION)
@@ -75,9 +66,8 @@ class HadsTestPlugin(ProcessorPlugin):
                 self._stop_requested = True
                 self._resolve_pending_tts(False)
                 self._cancel_answer_waiter()
-                # Cancel the task outright so a long await (recording,
-                # transcription) doesn't keep the test "running" for
-                # up to two more minutes and block a restart
+                # Cancel the task outright so a long await (waiting for a
+                # click) doesn't keep the test "running" and block a restart
                 if self._test_task is not None:
                     self._test_task.cancel()
                     try:
@@ -101,7 +91,6 @@ class HadsTestPlugin(ProcessorPlugin):
         self._running = True
         self._session_id = str(event.payload.get("session_id") or "")
         self._stop_requested = False
-        self._audio_allowed = bool(event.payload.get("audio_allowed", True))
         checkpoint = event.payload.get("resume_checkpoint")
         self._resume_checkpoint = dict(checkpoint) if isinstance(checkpoint, dict) else {}
         self._test_task = asyncio.create_task(self._run_test_guarded(), name="hads-test-run")
@@ -154,16 +143,11 @@ class HadsTestPlugin(ProcessorPlugin):
             raise ValueError("Контрольная точка HADS повреждена.")
         total = len(HADS_QUESTIONS)
 
-        input_instruction = (
-            "Отвечайте голосом — назовите номер варианта — или нажимайте на вариант на экране."
-            if self._audio_allowed
-            else "Выбирайте ответ нажатием на вариант на экране."
-        )
         intro = (
             "Начинаем тест на тревожность и депрессию. "
             "Я буду читать утверждения и варианты ответа. "
             "Выберите вариант, который лучше всего описывает ваше состояние "
-            f"за последнюю неделю. {input_instruction}"
+            "за последнюю неделю, и нажмите на него на экране."
         )
         await self._publish_question_ui(None, -1, total, message="Приготовьтесь...")
         await self._speak(intro, screen_payload=self._question_payload(None, -1, total))
@@ -230,7 +214,6 @@ class HadsTestPlugin(ProcessorPlugin):
                 payload={
                     **self._question_payload(question, idx, total),
                     "hads_selected_option": option_index,
-                    "hads_recording": False,
                     "message": f"Ответ принят: {option.text}",
                 },
             ))
@@ -244,7 +227,6 @@ class HadsTestPlugin(ProcessorPlugin):
                 # On early stop the aggregator has already switched the UI to idle —
                 # don't drag it back to the test screen
                 "screen": "idle" if stopped_early else "hads",
-                "hads_recording": False,
                 "hads_stopped": stopped_early,
                 "hads_question_index": total,
                 "hads_question_total": total,
@@ -261,7 +243,7 @@ class HadsTestPlugin(ProcessorPlugin):
             payload=scoring,
         ))
 
-    # ── Answer waiting: click future + voice attempts ───────────────────────────
+    # ── Answer waiting: a click on an option ────────────────────────────────────
 
     async def _wait_for_answer(
         self,
@@ -271,69 +253,16 @@ class HadsTestPlugin(ProcessorPlugin):
         waiter: asyncio.Future[int],
     ) -> int | None:
         try:
-            if not self._audio_allowed:
-                await self.bus.publish(
-                    Event(
-                        topic=Topics.UI_UPDATE,
-                        source=self.name,
-                        payload={
-                            **self._question_payload(question, idx, total),
-                            "hads_recording": False,
-                            "message": "Выберите вариант ответа на экране.",
-                        },
-                    )
+            await self.bus.publish(
+                Event(
+                    topic=Topics.UI_UPDATE,
+                    source=self.name,
+                    payload={
+                        **self._question_payload(question, idx, total),
+                        "message": "Выберите вариант ответа на экране.",
+                    },
                 )
-                try:
-                    return await asyncio.wait_for(
-                        asyncio.shield(waiter), timeout=CLICK_WAIT_SECONDS
-                    )
-                except (asyncio.TimeoutError, asyncio.CancelledError):
-                    return None
-            for attempt in range(VOICE_RETRIES + 1):
-                if self._stop_requested or waiter.done():
-                    break
-
-                transcript = await self._record_while_waiting(waiter, question, idx, total)
-                if waiter.done() or self._stop_requested:
-                    break
-
-                if transcript:
-                    matched = match_hads_answer(transcript, question.options)
-                    if matched is not None:
-                        return matched
-                    logger.info(
-                        "hads_test: ответ не распознан, длина %d",
-                        len(transcript),
-                    )
-
-                if attempt < VOICE_RETRIES:
-                    await self._speak(
-                        "Не расслышал. Назовите номер варианта — один, два, три или четыре — "
-                        "или нажмите на вариант на экране.",
-                        screen_payload=self._question_payload(question, idx, total),
-                        abort_future=waiter,
-                    )
-
-            if waiter.done():
-                return waiter.result()
-            if self._stop_requested:
-                return None
-
-            # Voice failed — wait for a click only
-            await self._speak(
-                "Пожалуйста, выберите вариант ответа нажатием на экране.",
-                screen_payload=self._question_payload(question, idx, total),
-                abort_future=waiter,
             )
-            await self.bus.publish(Event(
-                topic=Topics.UI_UPDATE,
-                source=self.name,
-                payload={
-                    **self._question_payload(question, idx, total),
-                    "hads_recording": False,
-                    "message": "Выберите вариант ответа на экране.",
-                },
-            ))
             try:
                 return await asyncio.wait_for(
                     asyncio.shield(waiter), timeout=CLICK_WAIT_SECONDS
@@ -345,93 +274,6 @@ class HadsTestPlugin(ProcessorPlugin):
                 self._answer_waiter = None
             if not waiter.done():
                 waiter.cancel()
-
-    async def _record_while_waiting(
-        self,
-        waiter: asyncio.Future[int],
-        question: HadsQuestion,
-        idx: int,
-        total: int,
-    ) -> str:
-        """Record one voice attempt; abort early if a click answer arrives."""
-        recorder = VoiceRecorder(
-            sample_rate=self.settings.voice_sample_rate,
-            channels=self.settings.voice_channels,
-            max_seconds=RECORD_SECONDS,
-            silence_threshold=self.settings.voice_silence_threshold,
-            silence_duration=self.settings.voice_silence_duration,
-            min_speech_duration=self.settings.voice_min_speech_duration,
-        )
-        if not recorder.available:
-            logger.warning("hads_test: микрофон недоступен — остаётся только клик")
-            try:
-                await asyncio.wait_for(asyncio.shield(waiter), timeout=CLICK_WAIT_SECONDS)
-            except (asyncio.TimeoutError, asyncio.CancelledError):
-                pass
-            return ""
-
-        try:
-            audio_path = recorder.start()
-            # Server-clock bounds of this answer; the dataset aligns them with
-            # the browser video through the shared reference in the manifest.
-            self._answer_started_at = datetime.now(UTC).isoformat()
-            self._answer_finished_at = ""
-        except Exception:
-            logger.exception("hads_test: ошибка старта записи")
-            return ""
-
-        await self.bus.publish(Event(
-            topic=Topics.UI_UPDATE,
-            source=self.name,
-            payload={
-                **self._question_payload(question, idx, total),
-                "hads_recording": True,
-                "message": "Говорите или нажмите вариант...",
-            },
-        ))
-
-        try:
-            deadline = RECORD_SECONDS + 0.5
-            elapsed = 0.0
-            poll = 0.2
-            while elapsed < deadline:
-                await asyncio.sleep(poll)
-                elapsed += poll
-                if not recorder.recording:
-                    break
-                if waiter.done() or self._stop_requested:
-                    break
-            audio_path = recorder.stop() or audio_path
-            self._answer_finished_at = datetime.now(UTC).isoformat()
-        except asyncio.CancelledError:
-            try:
-                recorder.stop()
-            finally:
-                delete_temp_audio(audio_path)
-            raise
-        except Exception:
-            logger.exception("hads_test: ошибка записи")
-            try:
-                recorder.stop()
-            except Exception:
-                pass
-            delete_temp_audio(audio_path)
-            return ""
-
-        if waiter.done() or self._stop_requested:
-            delete_temp_audio(audio_path)
-            return ""
-
-        await self.bus.publish(Event(
-            topic=Topics.UI_UPDATE,
-            source=self.name,
-            payload={
-                **self._question_payload(question, idx, total),
-                "hads_recording": False,
-                "message": "Распознаю ответ...",
-            },
-        ))
-        return await self._transcribe(audio_path, question=question)
 
     def _handle_click_answer(self, payload: dict[str, Any]) -> None:
         if not self._running:
@@ -500,7 +342,6 @@ class HadsTestPlugin(ProcessorPlugin):
             source=self.name,
             payload={
                 **self._question_payload(question, idx, total),
-                "hads_recording": False,
                 "message": message or (
                     f"Вопрос {idx + 1} из {total}" if question is not None else ""
                 ),
@@ -517,7 +358,7 @@ class HadsTestPlugin(ProcessorPlugin):
         return (
             f"Вопрос {idx + 1}. {question.text}. "
             f"Варианты ответа. {options_spoken}. "
-            "Назовите номер ответа."
+            "Выберите вариант на экране."
         )
 
     async def _speak(
@@ -552,7 +393,6 @@ class HadsTestPlugin(ProcessorPlugin):
                     **screen_payload,
                     "hads_tts_id": tts_id,
                     "hads_tts_text": text,
-                    "hads_recording": False,
                     "message": "Слушайте вопрос...",
                 },
             ))
@@ -595,59 +435,3 @@ class HadsTestPlugin(ProcessorPlugin):
             if not waiter.done():
                 waiter.set_result(result)
         self._tts_waiters.clear()
-
-    async def _transcribe(
-        self,
-        audio_path: str,
-        *,
-        question: HadsQuestion | None = None,
-    ) -> str:
-        transcript = ""
-        try:
-            reply = await self.bus.request(
-                Event(
-                    topic=Topics.REQ_SPEECH_TRANSCRIBE,
-                    source=self.name,
-                    payload={"audio_path": audio_path, "suppress_ui": True},
-                ),
-                timeout=120.0,
-            )
-            transcript = str(reply.get("transcript") or "")
-            return transcript
-        except Exception as exc:
-            logger.warning("hads_test: transcribe error: %s", exc)
-            return ""
-        finally:
-            # Copy into the dataset while the file still exists; capture must
-            # never interfere with the test, so failures are swallowed.
-            self._store_dataset_audio(audio_path, question=question, transcript=transcript)
-            delete_temp_audio(audio_path)
-
-    def _store_dataset_audio(
-        self,
-        audio_path: str,
-        *,
-        question: HadsQuestion | None,
-        transcript: str,
-    ) -> None:
-        if self.dataset_store is None or not self._session_id:
-            return
-        try:
-            self.dataset_store.store_answer_audio(
-                self._session_id,
-                source_path=audio_path,
-                task_id=question.question_id if question else "answer",
-                labels={
-                    "scenario": "hads",
-                    "part": question.part if question else "",
-                    "question": question.text if question else "",
-                    "options": [option.text for option in question.options] if question else [],
-                    "transcript": transcript,
-                    "started_at": self._answer_started_at,
-                    "finished_at": self._answer_finished_at,
-                    "sample_rate": self.settings.voice_sample_rate,
-                    "channels": self.settings.voice_channels,
-                },
-            )
-        except Exception as exc:  # noqa: BLE001 — capture is best-effort
-            logger.warning("hads_test: не удалось сохранить аудио в датасет: %s", exc)

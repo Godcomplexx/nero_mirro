@@ -82,7 +82,7 @@ def create_runtime(
     plugin_manager.register(SpeechWorkerPlugin(bus, settings=settings))
     plugin_manager.register(VoiceTestPlugin(bus, settings=settings))
     plugin_manager.register(MocaTestPlugin(bus, settings=settings, dataset_store=dataset_store))
-    plugin_manager.register(HadsTestPlugin(bus, settings=settings, dataset_store=dataset_store))
+    plugin_manager.register(HadsTestPlugin(bus, settings=settings))
     for game_plugin in iter_game_plugins(bus):
         plugin_manager.register(game_plugin)
     plugin_manager.register(

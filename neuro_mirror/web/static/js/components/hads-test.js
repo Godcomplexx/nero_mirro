@@ -59,12 +59,10 @@ export function createHadsView() {
   const options = document.createElement("div");
   options.className = "nm-hads-options";
   fieldset.append(legend, options);
-  const voiceNote = document.createElement("p");
-  voiceNote.className = "nm-hads-voice";
   const status = document.createElement("p");
   status.className = "nm-status-line";
   status.setAttribute("role", "status");
-  card.append(part, fieldset, voiceNote, status);
+  card.append(part, fieldset, status);
 
   const actions = document.createElement("div");
   actions.className = "nm-btn-row nm-hads-actions";
@@ -143,9 +141,6 @@ export function createHadsView() {
     nextButton.textContent = state.questionIndex === total - 1 ? "Завершить тест" : "Следующий вопрос";
     stopButton.disabled = !hasQuestion && state.questionIndex >= total;
 
-    voiceNote.textContent = state.recording
-      ? "Можно также ответить голосом — назовите номер варианта."
-      : "";
     status.textContent = accepted ? "Ответ принят." : "";
   }
 

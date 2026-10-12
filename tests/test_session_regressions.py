@@ -123,7 +123,8 @@ def test_resume_uses_current_permissions_and_ignores_late_events(tmp_path):
         store.interrupt(sid, 'stop')
         await agg.handle_event(Event(topic=Topics.UI_ACTION, source='test', payload={
             'action': 'resume_session', 'session_id': sid, 'audio_allowed': False}))
-        assert (await sub.queue.get()).payload['audio_allowed'] is False
+        # HADS отвечают только кликом (ТЗ): флага аудио в запуске нет вовсе.
+        assert 'audio_allowed' not in (await sub.queue.get()).payload
         assert store.get(sid)['permissions']['audio'] is False
         await agg.handle_event(Event(topic=Topics.SESSION_ERROR, source='test', payload={
             'session_id': 'older-session', 'reason': 'late error'}))
@@ -165,7 +166,8 @@ def test_video_screening_transitions_to_hads_without_audio(tmp_path):
         agg._latest_results['video'] = {'heart_rate_status': 'unavailable'}
         with patch('asyncio.sleep', new_callable=AsyncMock):
             await agg._maybe_finish_screening()
-        assert (await sub.queue.get()).payload['audio_allowed'] is False
+        # HADS отвечают только кликом (ТЗ): без согласия на аудио тест идёт так же.
+        assert 'audio_allowed' not in (await sub.queue.get()).payload
         assert agg.state == SessionState.HADS
     asyncio.run(run())
 

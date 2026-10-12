@@ -12,7 +12,6 @@ from neuro_mirror.core.settings import Settings
 from neuro_mirror.core.user_profiles import UserProfileStore
 from neuro_mirror.models.events import Event, Topics
 from neuro_mirror.plugins.aggregator.plugin import AggregatorPlugin
-from neuro_mirror.plugins.hads_test.plugin import HadsTestPlugin
 from neuro_mirror.plugins.moca_test.plugin import MocaTestPlugin
 from neuro_mirror.plugins.storage.plugin import StoragePlugin
 from neuro_mirror.screening.audio_analyzer import analyze_audio
@@ -35,16 +34,6 @@ class TempAudioLifecycleTest(unittest.IsolatedAsyncioTestCase):
             path = Path(temp.name)
         plugin = MocaTestPlugin(_RequestBus(), settings=Settings())
         self.assertEqual(await plugin._transcribe(str(path)), "тест")
-        self.assertFalse(path.exists())
-
-    async def test_hads_removes_audio_after_failure(self) -> None:
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp:
-            path = Path(temp.name)
-        plugin = HadsTestPlugin(
-            _RequestBus(error=RuntimeError("worker failed")),
-            settings=Settings(),
-        )
-        self.assertEqual(await plugin._transcribe(str(path)), "")
         self.assertFalse(path.exists())
 
 
@@ -240,3 +229,14 @@ class HonestUnavailableMetricsTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_hads_never_records_the_patient():
+    """ТЗ, модуль HADS: ввод ответов выбором варианта, без аудио-ввода пациента."""
+    import inspect
+
+    from neuro_mirror.plugins.hads_test import plugin as hads_plugin
+
+    source = inspect.getsource(hads_plugin)
+    assert "VoiceRecorder" not in source
+    assert "REQ_SPEECH_TRANSCRIBE" not in source

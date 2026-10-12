@@ -12,7 +12,6 @@ import unittest
 from neuro_mirror.screening.hads_scoring import (
     HADS_QUESTIONS,
     interpret_subscale,
-    match_hads_answer,
     score_hads,
 )
 
@@ -145,26 +144,6 @@ class HadsScoringTest(unittest.TestCase):
         result = score_hads([])
         self.assertFalse(result["complete"])
         self.assertTrue(result["notes"])
-
-
-class HadsVoiceMatchTest(unittest.TestCase):
-    def test_number_words_map_to_screen_positions(self) -> None:
-        options = HADS_QUESTIONS[0].options
-        self.assertEqual(match_hads_answer("один", options), 0)
-        self.assertEqual(match_hads_answer("вариант два", options), 1)
-        self.assertEqual(match_hads_answer("три", options), 2)
-        self.assertEqual(match_hads_answer("четвёртый", options), 3)
-
-    def test_option_text_matches_exactly(self) -> None:
-        options = HADS_QUESTIONS[0].options
-        self.assertEqual(match_hads_answer("совсем не испытываю", options), 3)
-        self.assertEqual(match_hads_answer("часто", options), 1)
-
-    def test_ambiguous_or_empty_input_is_rejected(self) -> None:
-        options = HADS_QUESTIONS[0].options
-        self.assertIsNone(match_hads_answer("два или три", options))
-        self.assertIsNone(match_hads_answer("не понял", options))
-        self.assertIsNone(match_hads_answer("", options))
 
 
 if __name__ == "__main__":

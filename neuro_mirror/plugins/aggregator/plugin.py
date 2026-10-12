@@ -468,7 +468,6 @@ class AggregatorPlugin(ProcessorPlugin):
         and the final report should combine video + HADS results.
         """
         payload = payload or {}
-        audio_allowed = bool(payload.get("audio_allowed", self._session_permissions.get("audio", False)))
         if not chain and start_session:
             self._begin_session("hads", payload)
         self.state = SessionState.HADS
@@ -485,11 +484,7 @@ class AggregatorPlugin(ProcessorPlugin):
                     "screen": "hads",
                     "message": (
                         "Начинается тест на тревожность и депрессию (HADS). "
-                        + (
-                            "Отвечайте голосом или нажимайте на вариант ответа."
-                            if audio_allowed
-                            else "Выбирайте ответ нажатием на экран."
-                        )
+                        "Выбирайте ответ нажатием на экран."
                     ),
                     "hads_question_index": 0,
                     "hads_question_total": 14,
@@ -501,7 +496,6 @@ class AggregatorPlugin(ProcessorPlugin):
                 topic=Topics.HADS_START,
                 source=self.name,
                 payload={
-                    "audio_allowed": audio_allowed,
                     "session_id": self._active_session_id,
                     "resume_checkpoint": checkpoint or {},
                 },

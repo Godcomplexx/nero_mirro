@@ -2,7 +2,8 @@
 //
 // Follows the HADS test run by the server (plugins/hads_test): questions,
 // answer options and scoring all come from the backend; this module only
-// keeps the latest state, plays the voiced prompts and sends clicks.
+// keeps the latest state, plays the voiced prompts and sends clicks. Answers
+// are given by click only (ТЗ: without the patient's audio input).
 // Moved out of app.js (renderHads / submitHadsAnswer / stopHadsTest / TTS).
 
 import { createVoiceChannel } from "./test-voice.js";
@@ -19,7 +20,6 @@ const hads = {
   text: "",
   options: [],
   selected: null,
-  recording: false,
   message: "",
 };
 
@@ -40,7 +40,6 @@ function onSnapshot(event) {
     hads.text = snap.hads_question_text || "";
     hads.options = Array.isArray(snap.hads_options) ? snap.hads_options : [];
     hads.selected = snap.hads_selected_option ?? null;
-    hads.recording = Boolean(snap.hads_recording);
     hads.message = snap.message || "";
     // An answer accepted while the question is still being read cuts the speech
     if (hads.selected != null) voice.stop();

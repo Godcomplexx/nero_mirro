@@ -12,6 +12,8 @@ from neuro_mirror.screening.moca_scoring import VOICE_MOCA_MAX_SCORE, score_moca
 from neuro_mirror.screening.san_survey import (
     MOMENT_AFTER,
     MOMENT_BEFORE,
+    MOMENT_SCREENING,
+    MOMENTS,
     QUESTION_IDS,
     compare,
     questionnaire,
@@ -207,3 +209,9 @@ def test_the_whole_path_holds_together():
 def test_the_moment_of_the_survey_is_recorded():
     """Без отметки «до» или «после» сравнивать нечего."""
     assert MOMENT_BEFORE != MOMENT_AFTER
+
+
+def test_the_screening_survey_is_not_mixed_with_a_session():
+    """Опрос на скрининге не попадает в сравнение «до» и «после» занятия."""
+    assert MOMENT_SCREENING in MOMENTS
+    assert MOMENT_SCREENING not in (MOMENT_BEFORE, MOMENT_AFTER)

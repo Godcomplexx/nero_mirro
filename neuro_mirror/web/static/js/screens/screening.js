@@ -137,10 +137,11 @@ async function loadSan() {
         title: "Давайте оценим ваше самочувствие",
         intro: "Эти вопросы помогут лучше понять ваше состояние после видеоанализа. Выберите ответ, который подходит больше всего.",
         finishLabel: "Завершить скрининг",
-        // Screening comes before any training session, so it is a "before" state
+        // Marked as screening: "before" and "after" belong to a training
+        // session and are compared with each other
         async onDone(answers) {
           try {
-            await saveSanAnswers(answers, { moment: "before" });
+            await saveSanAnswers(answers, { moment: "screening" });
           } catch (error) {
             notify(`Ответы не сохранились: ${error.message || error}. Нажмите «Завершить скрининг» ещё раз.`);
             throw error;

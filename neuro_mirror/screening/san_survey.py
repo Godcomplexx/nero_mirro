@@ -22,10 +22,13 @@ GROUP_WELLBEING = "Самочувствие"
 GROUP_ACTIVITY = "Активность"
 GROUP_MOOD = "Настроение"
 
-# Когда опросник предъявляется.
+# Когда опросник предъявляется. «До» и «после» относятся к занятию курса
+# и сравниваются между собой; опрос в контуре скрининга (ТЗ, модуль оценки
+# самочувствия) отмечается отдельно, чтобы не попасть в это сравнение.
 MOMENT_BEFORE = "before"
 MOMENT_AFTER = "after"
-MOMENTS = (MOMENT_BEFORE, MOMENT_AFTER)
+MOMENT_SCREENING = "screening"
+MOMENTS = (MOMENT_BEFORE, MOMENT_AFTER, MOMENT_SCREENING)
 
 INTRO = (
     "Оцените, как вы чувствуете себя сейчас. "
