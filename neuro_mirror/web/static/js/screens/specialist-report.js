@@ -1,0 +1,408 @@
+// neuro_mirror/web/static/js/screens/specialist-report.js
+//
+// «Для специалиста» — the extended report of the ТЗ (reporting module):
+// scores, domains, markers, data quality, event journal, HADS results and
+// training results. The user's own tabs show a brief view without the HADS
+// score and interpretation; this tab opens only after the specialist PIN.
+//
+// The core decides everything: GET /api/specialist/status { configured,
+// active }, POST /api/specialist/setup | login | logout | pin { pin } and
+// GET /api/specialist/report (403 when the mode is closed — it closes by
+// itself after a while without requests). This screen only shows them.
+
+import { api } from "../core/legacy.js";
+import { notify } from "../components/notify.js";
+
+function el(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text != null) node.textContent = text;
+  return node;
+}
+
+function button(label, variant, onClick) {
+  const node = el("button", `nm-btn nm-btn-${variant}`, label);
+  node.type = "button";
+  node.addEventListener("click", onClick);
+  return node;
+}
+
+function formatDate(isoText) {
+  const date = new Date(isoText);
+  if (Number.isNaN(date.getTime())) return "—";
+  return `${date.toLocaleDateString("ru-RU", { day: "numeric", month: "long", year: "numeric" })}, ${date.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}`;
+}
+
+const dash = (value) => (value == null || value === "" ? "—" : String(value));
+const outOf = (score, max) => (score == null ? "—" : max ? `${score} из ${max}` : String(score));
+
+function table(headers, rows) {
+  const wrap = el("div", "nm-spec-table-wrap");
+  const node = el("table", "nm-spec-table");
+  const head = el("thead");
+  const headRow = el("tr");
+  for (const header of headers) headRow.appendChild(el("th", null, header));
+  head.appendChild(headRow);
+  const body = el("tbody");
+  for (const row of rows) {
+    const tr = el("tr");
+    for (const cell of row) tr.appendChild(el("td", null, dash(cell)));
+    body.appendChild(tr);
+  }
+  node.append(head, body);
+  wrap.appendChild(node);
+  return wrap;
+}
+
+function section(title, ...children) {
+  const node = el("section", "nm-spec-section");
+  node.appendChild(el("h3", "nm-spec-title", title));
+  return appendAll(node, ...children);
+}
+
+function details(summary, ...children) {
+  const node = el("details", "nm-spec-details");
+  node.appendChild(el("summary", null, summary));
+  return appendAll(node, ...children);
+}
+
+// Optional blocks come as null; append() would print them as the text "null"
+function appendAll(node, ...children) {
+  node.append(...children.filter(Boolean));
+  return node;
+}
+
+function line(label, value) {
+  const node = el("p", "nm-spec-line");
+  node.append(el("span", "nm-spec-label", `${label}: `), el("strong", null, dash(value)));
+  return node;
+}
+
+// ---- Sections -----------------------------------------------------------------
+
+const SPEECH_ROWS = [
+  { key: "words_per_minute", label: "Темп речи", unit: "слов/мин" },
+  { key: "average_time_to_first_response_seconds", label: "Задержка ответа", unit: "с" },
+  { key: "pause_count", label: "Пауз в ответах", unit: "" },
+  { key: "total_pause_seconds", label: "Время пауз", unit: "с" },
+  { key: "lexical_diversity", label: "Лексическое разнообразие", unit: "" },
+  { key: "fillers", label: "Слов-заполнителей", unit: "" },
+  { key: "self_corrections", label: "Самоисправлений", unit: "" },
+  { key: "word_repetitions", label: "Повторов слов", unit: "" },
+  { key: "unfinished_utterances", label: "Незаконченных фраз", unit: "" },
+];
+
+// Only measured values: an empty field means there was nothing to measure,
+// and a zero put there would be indistinguishable from a real zero
+function speechMarkers(markers) {
+  const values = (markers && markers.values) || {};
+  const rows = [];
+  for (const row of SPEECH_ROWS) {
+    let value = values[row.key];
+    if (value && typeof value === "object") value = value.count;
+    if (value == null) continue;
+    const shown = typeof value === "number" ? Math.round(value * 100) / 100 : value;
+    rows.push([row.label, row.unit ? `${shown} ${row.unit}` : String(shown)]);
+  }
+  if (!rows.length) return null;
+  const panel = el("div", "nm-speech-panel");
+  panel.append(
+    el("h4", "nm-speech-title", "Речевые маркеры"),
+    el("p", "nm-speech-note", markers.note),
+    table(["Показатель", "Значение"], rows),
+  );
+  return panel;
+}
+
+function qualityLines(quality) {
+  const wrap = el("div");
+  const issues = (quality.video_quality_issues || []).map((issue) => (typeof issue === "string" ? issue : issue.code || JSON.stringify(issue)));
+  wrap.append(
+    line("Ограничения", quality.limitations || "не отмечены"),
+    line("Ответов без распознанной речи", quality.unrecognized_answers),
+    line("События низкого качества видео", issues.length ? issues.join(", ") : "нет"),
+  );
+  return wrap;
+}
+
+function mocaSection(entries) {
+  if (!entries.length) return section("Когнитивный тест (MoCA)", el("p", "nm-panel-text", "Тест ещё не проходили."));
+  const cards = entries.map((entry, index) => {
+    const card = el("article", "nm-report-card");
+    appendAll(
+      card,
+      el("h4", "nm-spec-subtitle", `${formatDate(entry.stored_at)} — ${outOf(entry.score, entry.max_score)}`),
+      line("Интерпретация", entry.interpretation),
+      entry.notes ? line("Примечания", entry.notes) : null,
+      table(
+        ["Домен", "Балл", "Максимум", "Дефицит"],
+        (entry.domains || []).map((row) => [row.domain, row.score, row.max_score, row.deficit]),
+      ),
+      qualityLines(entry.quality || {}),
+      line("Пульс", entry.heart_rate_bpm == null ? entry.heart_rate_status : `${Math.round(entry.heart_rate_bpm)} уд/мин`),
+    );
+    const speech = speechMarkers(entry.speech_markers);
+    if (speech) card.appendChild(speech);
+    card.appendChild(details(
+      "Ответы по заданиям",
+      table(
+        ["Задание", "Домен", "Балл", "Ответ (распознанный)", "Ожидалось"],
+        (entry.tasks || []).map((task) => [task.task_id, task.domain, outOf(task.score, task.max_score), task.transcript, task.expected]),
+      ),
+    ));
+    card.dataset.latest = String(index === 0);
+    return card;
+  });
+  return section("Когнитивный тест (MoCA)", ...cards);
+}
+
+function hadsSection(entries) {
+  if (!entries.length) return section("Тревога и депрессия (HADS)", el("p", "nm-panel-text", "Опросник ещё не заполняли."));
+  const cards = entries.map((entry) => {
+    const card = el("article", "nm-report-card");
+    appendAll(
+      card,
+      el("h4", "nm-spec-subtitle", formatDate(entry.stored_at)),
+      line("Тревога", `${outOf(entry.anxiety.score, entry.anxiety.max_score)} — ${dash(entry.anxiety.interpretation)}`),
+      line("Депрессия", `${outOf(entry.depression.score, entry.depression.max_score)} — ${dash(entry.depression.interpretation)}`),
+      line("Ответов", outOf(entry.answered_count, entry.question_count)),
+      entry.notes ? line("Примечания", entry.notes) : null,
+      entry.limitations ? line("Ограничения", entry.limitations) : null,
+    );
+    if ((entry.answers || []).length) {
+      card.appendChild(details(
+        "Ответы на вопросы",
+        table(["Вопрос", "Ответ", "Балл"], entry.answers.map((answer) => [answer.question, answer.option_text, answer.score])),
+      ));
+    }
+    return card;
+  });
+  return section("Тревога и депрессия (HADS)", ...cards);
+}
+
+function screeningSection(entries) {
+  if (!entries.length) return null;
+  return section(
+    "Базовый скрининг: видеоанализ",
+    table(
+      ["Дата", "Пульс", "Статус измерения", "Видео пригодно", "События качества"],
+      entries.map((entry) => [
+        formatDate(entry.stored_at),
+        entry.heart_rate_bpm == null ? null : `${Math.round(entry.heart_rate_bpm)} уд/мин`,
+        entry.heart_rate_status,
+        entry.video_usable == null ? null : entry.video_usable ? "да" : "нет",
+        (entry.video_quality_issues || []).map((issue) => (typeof issue === "string" ? issue : issue.code)).join(", ") || "нет",
+      ]),
+    ),
+  );
+}
+
+const MOMENT_LABELS = { before: "до занятия", after: "после занятия", screening: "на скрининге" };
+
+function sanSection(entries) {
+  if (!entries.length) return null;
+  return section(
+    "Самочувствие (опросник)",
+    table(
+      ["Дата", "Когда", "Самочувствие", "Активность", "Настроение"],
+      entries.map((entry) => {
+        const byGroup = Object.fromEntries((entry.groups || []).map((group) => [group.group, group.mean]));
+        return [formatDate(entry.stored_at), MOMENT_LABELS[entry.moment] || entry.moment,
+          byGroup["Самочувствие"], byGroup["Активность"], byGroup["Настроение"]];
+      }),
+    ),
+    el("p", "nm-status-line", "Среднее по блоку, шкала 1–5."),
+  );
+}
+
+const SESSION_STATUS = { planned: "запланировано", in_progress: "идёт", completed: "выполнено", incomplete: "завершено досрочно" };
+
+function trainingSection(course) {
+  if (!course) return section("Тренировки", el("p", "nm-panel-text", "Курс тренировок ещё не начат."));
+  const plan = Object.entries(course.plan || {}).map(([domain, count]) => `${domain} ${count}`).join(", ");
+  const levels = Object.entries(course.levels || {}).map(([code, state]) => [code, state.level, (state.flags || []).join(", ") || "—"]);
+  const children = [
+    line("Состав занятия", plan),
+    table(
+      ["Занятие", "Этап", "Статус", "Выполнено", "Пауз"],
+      (course.sessions || []).map((session) => [session.number, session.stage, SESSION_STATUS[session.status] || session.status,
+        session.status === "planned" ? null : `${session.done} из ${session.total}`, session.status === "planned" ? null : session.pauses]),
+    ),
+  ];
+  if (levels.length) children.push(el("h4", "nm-spec-subtitle", "Уровни форм"), table(["Форма", "Уровень", "Отметки"], levels));
+  if ((course.level_changes || []).length) {
+    children.push(details(
+      "Переходы уровней",
+      table(
+        ["Перед занятием", "Форма", "Было", "Стало", "Успешность"],
+        course.level_changes.map((change) => [change.before_session, change.game_code, change.from_level, change.to_level,
+          change.success ? `${change.success.correct} из ${change.success.total}` : null]),
+      ),
+    ));
+  }
+  children.push(el("p", "nm-status-line", course.note));
+  return section("Тренировки", ...children);
+}
+
+const SCENARIO_LABELS = { screening: "Базовый скрининг", hads: "HADS", moca: "MoCA", training_game: "Игра" };
+
+function journalSection(rows) {
+  if (!rows.length) return null;
+  return section(
+    "Журнал событий",
+    table(
+      ["Начало", "Сценарий", "Статус", "Окончание", "Причина прерывания"],
+      rows.map((row) => [formatDate(row.started_at), SCENARIO_LABELS[row.scenario] || row.scenario, row.status,
+        row.finished_at ? formatDate(row.finished_at) : null, row.interruption_reason]),
+    ),
+  );
+}
+
+// ---- Access -------------------------------------------------------------------
+
+function pinField(labelText, id) {
+  const wrap = el("div", "nm-spec-field");
+  const label = el("label", null, labelText);
+  label.htmlFor = id;
+  const input = el("input", "nm-input");
+  input.id = id;
+  input.type = "password";
+  input.inputMode = "numeric";
+  input.autocomplete = "off";
+  input.maxLength = 8;
+  wrap.append(label, input);
+  return { wrap, input };
+}
+
+function buildAccess(status, onOpened) {
+  const panel = el("section", "nm-panel");
+  const setup = !status.configured;
+  panel.append(
+    el("h2", "nm-panel-title", "Отчёт для специалиста"),
+    el("p", "nm-panel-text", setup
+      ? "PIN специалиста ещё не задан. Задайте его — от 4 до 8 цифр. Расширенный отчёт откроется только по этому PIN."
+      : "Расширенный отчёт с баллами, результатами HADS и журналом событий доступен специалисту. Введите PIN."),
+  );
+  const first = pinField(setup ? "Новый PIN" : "PIN", "nm-spec-pin");
+  const second = setup ? pinField("Повторите PIN", "nm-spec-pin-repeat") : null;
+  const message = el("p", "nm-status-line");
+  message.setAttribute("role", "status");
+  const form = el("form", "nm-spec-form");
+  form.append(first.wrap);
+  if (second) form.append(second.wrap);
+  const submit = el("button", "nm-btn nm-btn-primary", setup ? "Задать PIN и открыть отчёт" : "Открыть отчёт");
+  submit.type = "submit";
+  form.append(submit, message);
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const pin = first.input.value.trim();
+    if (second && pin !== second.input.value.trim()) {
+      message.textContent = "PIN не совпадают. Введите их ещё раз.";
+      second.input.focus();
+      return;
+    }
+    submit.disabled = true;
+    try {
+      await api(setup ? "/api/specialist/setup" : "/api/specialist/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pin }),
+      });
+      onOpened();
+    } catch (error) {
+      message.textContent = error.message || String(error);
+      first.input.value = "";
+      if (second) second.input.value = "";
+      first.input.focus();
+    } finally {
+      submit.disabled = false;
+    }
+  });
+  panel.appendChild(form);
+  setTimeout(() => first.input.isConnected && first.input.focus(), 0);
+  return panel;
+}
+
+function buildChangePin() {
+  const field = pinField("Новый PIN", "nm-spec-new-pin");
+  const form = el("form", "nm-spec-form");
+  const save = el("button", "nm-btn nm-btn-secondary", "Сохранить новый PIN");
+  save.type = "submit";
+  form.append(field.wrap, save);
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    try {
+      await api("/api/specialist/pin", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pin: field.input.value.trim() }),
+      });
+      field.input.value = "";
+      notify("PIN специалиста изменён.", { kind: "info" });
+    } catch (error) {
+      notify(`PIN не изменён: ${error.message || error}`);
+    }
+  });
+  return details("Сменить PIN", form);
+}
+
+function buildReport(report, onClosed) {
+  const panel = el("section", "nm-panel nm-spec-report");
+  const head = el("div", "nm-spec-head");
+  head.append(
+    el("h2", "nm-panel-title", `Отчёт специалиста — ${report.user ? report.user.name : ""}`),
+    button("Выйти из режима специалиста", "secondary", async () => {
+      try {
+        await api("/api/specialist/logout", { method: "POST" });
+      } finally {
+        onClosed();
+      }
+    }),
+  );
+  appendAll(
+    panel,
+    head,
+    el("p", "nm-status-line", `Сформирован: ${formatDate(report.generated_at)}. Режим закрывается сам через 15 минут без действий.`),
+    mocaSection(report.moca || []),
+    hadsSection(report.hads || []),
+    screeningSection(report.screening || []),
+    sanSection(report.san || []),
+    trainingSection(report.training),
+    journalSection(report.journal || []),
+    buildChangePin(),
+  );
+  return panel;
+}
+
+// ---- Tab ------------------------------------------------------------------------
+
+export function buildSpecialistTab() {
+  const host = el("div", "nm-spec-host");
+  host.setAttribute("aria-live", "polite");
+
+  async function refresh() {
+    host.replaceChildren(el("p", "nm-panel-text", "Загружаю…"));
+    let status;
+    try {
+      status = await api("/api/specialist/status");
+    } catch (error) {
+      host.replaceChildren(el("p", "nm-panel-text", `Не удалось связаться с ядром: ${error.message || error}`));
+      return;
+    }
+    if (!status.active) {
+      host.replaceChildren(buildAccess(status, refresh));
+      return;
+    }
+    try {
+      const report = await api("/api/specialist/report");
+      host.replaceChildren(buildReport(report, refresh));
+    } catch (error) {
+      // The mode closed meanwhile (idle timeout): ask for the PIN again
+      host.replaceChildren(buildAccess({ configured: true, active: false }, refresh));
+      notify(`Отчёт не открылся: ${error.message || error}`);
+    }
+  }
+
+  refresh();
+  return host;
+}

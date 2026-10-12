@@ -65,15 +65,29 @@ def test_the_aggregator_carries_the_summary_into_the_report():
     assert '"moca_speech_summary"' in source
 
 
-def test_the_report_screen_shows_the_summary():
+def test_the_specialist_report_shows_the_summary():
+    """Речевые маркеры видит специалист, с пометкой методологии.
+
+    Пользователю они не показываются: в его виде отчёта поля нет.
+    """
     from pathlib import Path
+
+    from neuro_mirror.screening.report_views import USER_DOMAINS, specialist_report
+
+    report = specialist_report(
+        [{"report_type": "moca", "domains": {"moca_speech_summary": {"words_per_minute": 90}}}],
+        sessions=[],
+    )
+    markers = report["moca"][0]["speech_markers"]
+    assert markers["values"]["words_per_minute"] == 90
+    # Методология скрининга 2.0: речевые показатели — исследовательские.
+    assert markers["note"] == "Исследовательский показатель, не для клинической интерпретации."
+    assert "moca_speech_summary" not in USER_DOMAINS
 
     screen = (
         Path(aggregator_module.__file__).parents[2]
-        / "web" / "static" / "js" / "screens" / "reports.js"
+        / "web" / "static" / "js" / "screens" / "specialist-report.js"
     )
     text = screen.read_text(encoding="utf-8")
-    assert "moca_speech_summary" in text
-    assert "Показатели речи" in text
-    # Методология скрининга 2.0: речевые показатели — исследовательские.
-    assert "Исследовательский показатель, не для клинической интерпретации" in text
+    assert "Речевые маркеры" in text
+    assert "markers.note" in text

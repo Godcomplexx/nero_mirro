@@ -51,6 +51,8 @@ from neuro_mirror.core.access_journal import (
     VIEW_RESULTS,
     AccessJournal,
 )
+from neuro_mirror.core.specialist_access import SpecialistAccess, SpecialistAccessError
+from neuro_mirror.screening import report_views
 from neuro_mirror.screening.moca_scoring import cognitive_profile
 from neuro_mirror.screening.san_survey import (
     MOMENTS,
@@ -128,6 +130,10 @@ class ClientLogIn(BaseModel):
 
 class SessionFrameIn(BaseModel):
     image_base64: str
+
+
+class SpecialistPinIn(BaseModel):
+    pin: str = ""
 
 
 class TrainingFinishIn(BaseModel):
@@ -248,6 +254,7 @@ def create_app() -> FastAPI:
 
     app = FastAPI(title="Neuro Mirror Web", lifespan=lifespan)
     access_journal = AccessJournal()
+    specialist = SpecialistAccess()
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
     app.mount("/game-assets", StaticFiles(directory=str(game_assets_dir)), name="game-assets")
 
@@ -800,12 +807,113 @@ def create_app() -> FastAPI:
 
         items = reply.get("items") or []
         items.sort(key=lambda item: str(item.get("stored_at") or ""), reverse=True)
+        # Пользователь получает краткий вид: без балла и интерпретации HADS,
+        # без речевых показателей и сырых данных модулей (ТЗ, отчётность).
+        items = report_views.user_results(items)
         access_journal.record(
             action=VIEW_RESULTS,
             user_id=str(active.get("id") or ""),
-            details={"count": len(items)},
+            details={"count": len(items), "role": "user"},
         )
-        return JSONResponse({"user": _serialize_user(active), "items": items})
+        return JSONResponse({
+            "user": _serialize_user(active),
+            "items": items,
+            "recommendation": report_views.USER_RECOMMENDATION,
+        })
+
+    # ---- Режим специалиста и расширенный отчёт ----
+
+    @app.get("/api/specialist/status")
+    async def specialist_status() -> JSONResponse:
+        return JSONResponse(specialist.status())
+
+    @app.post("/api/specialist/setup")
+    async def specialist_setup(payload: SpecialistPinIn) -> JSONResponse:
+        """Задать PIN специалиста при первом входе."""
+        try:
+            specialist.set_pin(payload.pin)
+        except SpecialistAccessError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _log.info("задан PIN специалиста")
+        return JSONResponse(specialist.status())
+
+    @app.post("/api/specialist/login")
+    async def specialist_login(payload: SpecialistPinIn) -> JSONResponse:
+        try:
+            specialist.login(payload.pin)
+        except SpecialistAccessError as exc:
+            _log.info("отказ во входе в режим специалиста: %s", exc)
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        _log.info("вход в режим специалиста")
+        return JSONResponse(specialist.status())
+
+    @app.post("/api/specialist/logout")
+    async def specialist_logout() -> JSONResponse:
+        specialist.logout()
+        _log.info("выход из режима специалиста")
+        return JSONResponse(specialist.status())
+
+    @app.post("/api/specialist/pin")
+    async def specialist_change_pin(payload: SpecialistPinIn) -> JSONResponse:
+        try:
+            specialist.change_pin(payload.pin)
+        except SpecialistAccessError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _log.info("PIN специалиста изменён")
+        return JSONResponse(specialist.status())
+
+    @app.get("/api/specialist/report")
+    async def specialist_report() -> JSONResponse:
+        """Расширенный отчёт специалиста по активному пользователю.
+
+        Баллы, домены, речевые маркеры, качество данных, журнал событий,
+        результаты HADS и тренировок (ТЗ, модуль отчётности).
+        """
+        ctx: WebAppContext = app.state.context
+        if not specialist.is_active():
+            raise HTTPException(status_code=403, detail="Отчёт специалиста доступен после входа по PIN.")
+        active = _active_user_or_400()
+        user_id = str(active.get("id") or "")
+        try:
+            reply = await ctx.runtime.bus.request(
+                Event(
+                    topic=Topics.REQ_STORAGE_QUERY,
+                    source="web.specialist",
+                    payload={"user_id": user_id},
+                ),
+                timeout=10.0,
+            )
+        except asyncio.TimeoutError:
+            raise HTTPException(status_code=504, detail="Хранилище не ответило.")
+        items = list(reply.get("items") or [])
+        items.sort(key=lambda item: str(item.get("stored_at") or ""), reverse=True)
+
+        store = ctx.runtime.training_course_store
+        course = store.latest_course(user_id)
+        levels: dict[str, Any] = {}
+        log: list[dict[str, Any]] = []
+        if course is not None:
+            next_number = min(len(store.closed_sessions(course)) + 1, COURSE_SESSIONS)
+            states, log = form_states(store.passes(course), next_number)
+            levels = {code: describe(state) for code, state in sorted(states.items())}
+
+        report = report_views.specialist_report(
+            items,
+            sessions=ctx.runtime.session_store.list_for_user(user_id),
+            course=course,
+            levels=levels,
+            level_changes=log,
+        )
+        access_journal.record(
+            action=VIEW_RESULTS,
+            user_id=user_id,
+            details={"kind": "specialist_report", "role": "specialist"},
+        )
+        return JSONResponse({
+            "user": _serialize_user(active),
+            "generated_at": datetime.now(UTC).isoformat(),
+            **report,
+        })
 
     @app.get("/api/results/games/export")
     async def export_game_results() -> JSONResponse:

@@ -8,6 +8,7 @@ from neuro_mirror.interfaces.processor import ProcessorPlugin
 from neuro_mirror.core.dataset_store import DatasetStore
 from neuro_mirror.core.session_store import SessionStore
 from neuro_mirror.core.settings import Settings
+from neuro_mirror.screening.report_views import user_view
 from neuro_mirror.models.events import Event, Topics
 from neuro_mirror.screening.training_plan import explain_plan, plan_session
 from neuro_mirror.version import session_version_manifest
@@ -773,13 +774,9 @@ class AggregatorPlugin(ProcessorPlugin):
                 "summary": hads_summary,
                 "sources": {"video": video, "hads": hads},
             }
-            anx = hads.get("anxiety_score")
-            dep = hads.get("depression_score")
-            message = (
-                "Базовый скрининг завершён. "
-                f"Тревога: {anx} из 21 ({hads.get('anxiety_interpretation', '')}). "
-                f"Депрессия: {dep} из 21 ({hads.get('depression_interpretation', '')})."
-            )
+            # ТЗ, модуль HADS: пользователю — только нейтральное
+            # подтверждение; балл и интерпретация видны специалисту.
+            message = "Базовый скрининг завершён. Ответы сохранены."
         else:
             report_payload = {
                 "report_type": "hads",
@@ -789,13 +786,7 @@ class AggregatorPlugin(ProcessorPlugin):
                 "summary": hads_summary,
                 "sources": {"hads": hads},
             }
-            message = (
-                "Тест на тревожность завершён. "
-                f"Тревога: {hads.get('anxiety_score')} из 21 "
-                f"({hads.get('anxiety_interpretation', '')}). "
-                f"Депрессия: {hads.get('depression_score')} из 21 "
-                f"({hads.get('depression_interpretation', '')})."
-            )
+            message = "Тест на тревожность и депрессию завершён. Ответы сохранены."
 
         report_payload = self._complete_report(report_payload)
         await self.bus.publish(Event(topic=Topics.REPORT_DATA, source=self.name, payload=report_payload))
@@ -807,7 +798,9 @@ class AggregatorPlugin(ProcessorPlugin):
                 payload={
                     "screen": "summary",
                     "message": message,
-                    "report": report_payload,
+                    # На экран уходит пользовательский вид: полный отчёт
+                    # остаётся в хранилище для специалиста.
+                    "report": user_view(report_payload),
                     "assistant_source": "тест HADS" if not chained else "скрининг",
                 },
             )
@@ -877,7 +870,7 @@ class AggregatorPlugin(ProcessorPlugin):
                 payload={
                     "screen": "summary",
                     "message": "Тест MoCA завершён. Все задания выполнены.",
-                    "report": report_payload,
+                    "report": user_view(report_payload),
                     "assistant_source": "тест MoCA",
                 },
             )

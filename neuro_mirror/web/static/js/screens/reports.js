@@ -3,16 +3,23 @@
 // «Отчёты» (deck slide 12) in the work area, replacing the old «Мои
 // результаты» overlay. «Последняя сессия» lists the stored reports from
 // GET /api/results with the same metrics and trends as before (moved from
-// app.js: extractResultMetrics, findPreviousMetric, trendBadge, …). Scores
-// stay visible — there is no specialist role yet (user decision 2026-09-23).
+// app.js: extractResultMetrics, findPreviousMetric, trendBadge, …).
+//
+// ТЗ, reporting module: the user gets a brief report — what was done, the
+// overall result and its dynamics, limitations, a recommendation. The core
+// already sends the user's view (screening/report_views.py): no HADS score
+// or interpretation, no speech markers. For HADS the user only sees that the
+// questionnaire was filled in. The extended report lives in «Для
+// специалиста» (js/screens/specialist-report.js), behind the specialist PIN.
+//
 // «Динамика» draws per-domain bars from the same stored reports
-// (domains.moca_domains). The speech block carries the research label
-// required by the screening methodology. The detailed report and the PDF
-// export are not implemented yet; their buttons stay disabled.
-// «Выгрузить результаты игр» saves GET /api/results/games/export as a file.
+// (domains.moca_domains). The PDF export is not implemented yet; its button
+// stays disabled. «Выгрузить результаты игр» saves
+// GET /api/results/games/export as a file.
 
 import { activeUser, api } from "../core/legacy.js";
 import { notify } from "../components/notify.js";
+import { buildSpecialistTab } from "./specialist-report.js";
 
 const REPORT_TYPE_LABELS = {
   screening: "Базовый скрининг",
@@ -25,24 +32,6 @@ const REPORT_TYPE_LABELS = {
 function extractResultMetrics(item) {
   const domains = (item && item.domains) || {};
   const metrics = [];
-  if (domains.hads_anxiety_score != null) {
-    metrics.push({
-      key: "anxiety",
-      label: "Тревога",
-      value: Number(domains.hads_anxiety_score),
-      max: Number(domains.hads_anxiety_max || 21),
-      betterWhen: "lower",
-    });
-  }
-  if (domains.hads_depression_score != null) {
-    metrics.push({
-      key: "depression",
-      label: "Депрессия",
-      value: Number(domains.hads_depression_score),
-      max: Number(domains.hads_depression_max || 21),
-      betterWhen: "lower",
-    });
-  }
   if (domains.moca_score != null) {
     metrics.push({
       key: "moca",
@@ -91,71 +80,22 @@ function formatResultDate(isoText) {
   return `${date.toLocaleDateString("ru-RU", { day: "numeric", month: "long", year: "numeric" })}, ${date.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}`;
 }
 
-function resultInterpretations(item) {
-  const summary = (item && item.summary) || {};
-  return [
-    summary.hads_anxiety_interpretation,
-    summary.hads_depression_interpretation,
-    summary.moca_interpretation,
-    summary.hads_notes,
-    summary.limitations,
-  ].filter(Boolean).join(" · ");
+// Limitations of the result under poor conditions (ТЗ: an explicit limit of
+// interpretation when the data quality is low)
+function resultLimitations(item) {
+  return ((item && item.summary) || {}).limitations || "";
 }
 
-// Речевые показатели по всем ответам теста. Считаются ядром при оценке
-// (summarize_speech_metrics) и до отчёта раньше не доходили.
-//
-// Показываются только измеренные значения: пустое поле означает, что измерить
-// было нечем — например, записи не сохранялись, — и подставлять туда ноль
-// нельзя, он неотличим от настоящего нуля.
-const SPEECH_RESEARCH_NOTE = "Исследовательский показатель, не для клинической интерпретации.";
-
-const SPEECH_ROWS = [
-  { key: "words_per_minute", label: "Темп речи", unit: "слов/мин" },
-  { key: "average_time_to_first_response_seconds", label: "Задержка ответа", unit: "с" },
-  { key: "pause_count", label: "Пауз в ответах", unit: "" },
-  { key: "total_pause_seconds", label: "Время пауз", unit: "с" },
-  { key: "lexical_diversity", label: "Лексическое разнообразие", unit: "" },
-  { key: "fillers", label: "Слов-заполнителей", unit: "" },
-  { key: "self_corrections", label: "Самоисправлений", unit: "" },
-  { key: "word_repetitions", label: "Повторов слов", unit: "" },
-  { key: "unfinished_utterances", label: "Незаконченных фраз", unit: "" },
-];
-
-function countOf(value) {
-  if (value && typeof value === "object") return value.count;
-  return value;
+// HADS: only a neutral confirmation for the user (ТЗ, HADS module)
+function hadsCompletion(item) {
+  const domains = (item && item.domains) || {};
+  if (domains.hads_answered_count == null) return "";
+  const answered = Number(domains.hads_answered_count);
+  const total = Number(domains.hads_question_count || 14);
+  return `Опросник о тревоге и депрессии (HADS) заполнен: ${answered} из ${total} ответов. Результаты доступны специалисту.`;
 }
 
-function speechPanel(item) {
-  const summary = item?.domains?.moca_speech_summary;
-  if (!summary || typeof summary !== "object") return null;
-
-  const rows = [];
-  for (const row of SPEECH_ROWS) {
-    const value = countOf(summary[row.key]);
-    if (value == null) continue;
-    rows.push({ ...row, value: typeof value === "number" ? Math.round(value * 100) / 100 : value });
-  }
-  if (!rows.length) return null;
-
-  const panel = el("div", "nm-speech-panel");
-  panel.append(el("h4", "nm-speech-title", "Показатели речи"));
-  // Методология скрининга 2.0: речевые показатели — исследовательские, не
-  // для клинической интерпретации; без этой пометки блок не показывается.
-  panel.append(el("p", "nm-speech-note", SPEECH_RESEARCH_NOTE));
-  const list = el("div", "nm-speech-rows");
-  for (const row of rows) {
-    const line = el("div", "nm-speech-row");
-    line.append(
-      el("span", "nm-speech-label", row.label),
-      el("strong", "nm-speech-value", row.unit ? `${row.value} ${row.unit}` : String(row.value)),
-    );
-    list.appendChild(line);
-  }
-  panel.appendChild(list);
-  return panel;
-}
+const hasContent = (item) => extractResultMetrics(item).length > 0 || Boolean(hadsCompletion(item));
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -187,13 +127,12 @@ function buildResultCard(item, index, testItems) {
     if (trend) tile.appendChild(el("span", `nm-report-trend nm-report-trend-${trend.cls}`, trend.text));
     metrics.appendChild(tile);
   }
-  card.appendChild(metrics);
+  if (metrics.children.length) card.appendChild(metrics);
 
-  const speech = speechPanel(item);
-  if (speech) card.appendChild(speech);
-
-  const note = resultInterpretations(item);
-  if (note) card.appendChild(el("p", "nm-report-note", note));
+  const hads = hadsCompletion(item);
+  if (hads) card.appendChild(el("p", "nm-report-note", hads));
+  const limits = resultLimitations(item);
+  if (limits) card.appendChild(el("p", "nm-report-note", limits));
   return card;
 }
 
@@ -201,21 +140,24 @@ async function loadSessions(list) {
   list.innerHTML = "";
   list.appendChild(el("p", "nm-panel-text", "Загружаю результаты…"));
   let items;
+  let recommendation = "";
   try {
     const data = await api("/api/results");
     items = data.items || [];
+    recommendation = data.recommendation || "";
   } catch (error) {
     list.innerHTML = "";
     list.appendChild(el("p", "nm-panel-text", `Не удалось загрузить результаты: ${error.message || error}`));
     return;
   }
-  // Only medically meaningful records (tests with numbers)
-  const testItems = items.filter((item) => extractResultMetrics(item).length > 0);
+  // Records of completed tests: with numbers or a filled-in questionnaire
+  const testItems = items.filter(hasContent);
   list.innerHTML = "";
   if (testItems.length === 0) {
     list.appendChild(el("p", "nm-panel-text", "Результатов пока нет. Пройдите скрининг или тест — они появятся здесь."));
     return;
   }
+  if (recommendation) list.appendChild(el("p", "nm-help-bar", recommendation));
   testItems.forEach((item, index) => list.appendChild(buildResultCard(item, index, testItems)));
 }
 
@@ -357,13 +299,11 @@ function buildDynamicsTab() {
   loadDynamics(host);
 
   const row = el("div", "nm-btn-row");
-  for (const label of ["Сформировать детальный отчёт", "Скачать PDF"]) {
-    const btn = el("button", "nm-btn nm-btn-secondary", label);
-    btn.type = "button";
-    btn.disabled = true;
-    row.appendChild(btn);
-  }
-  panel.append(row, el("p", "nm-status-line", "Детальный отчёт и выгрузка в PDF — в разработке."));
+  const pdf = el("button", "nm-btn nm-btn-secondary", "Скачать PDF");
+  pdf.type = "button";
+  pdf.disabled = true;
+  row.appendChild(pdf);
+  panel.append(row, el("p", "nm-status-line", "Подробный отчёт — во вкладке «Для специалиста». Выгрузка в PDF — в разработке."));
   return panel;
 }
 
@@ -403,6 +343,7 @@ function renderDynamics(panel, items) {
 const TABS = [
   { id: "sessions", label: "Последняя сессия", build: buildSessionsTab },
   { id: "dynamics", label: "Динамика", build: buildDynamicsTab },
+  { id: "specialist", label: "Для специалиста", build: buildSpecialistTab },
 ];
 
 let activeTab = "sessions";
