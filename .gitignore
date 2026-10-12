@@ -1,7 +1,6 @@
 ﻿__pycache__/
 *.pyc
 runtime/users.json
-runtime/specialist.json
 runtime/avatars/
 runtime/screenings.jsonl
 runtime/appearance_memory.json

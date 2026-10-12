@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 
 from neuro_mirror.core.specialist_access import (
     IDLE_TIMEOUT,
+    PIN_ENV,
     MAX_FAILED_ATTEMPTS,
     SpecialistAccess,
     SpecialistAccessError,
@@ -152,39 +153,36 @@ class Clock:
         return self.now
 
 
-def test_the_pin_is_stored_only_as_a_hash(tmp_path):
-    access = SpecialistAccess(tmp_path / "specialist.json")
-    access.set_pin("4821")
-    assert "4821" not in (tmp_path / "specialist.json").read_text(encoding="utf-8")
-    assert access.is_active()
-
-
-@pytest.mark.parametrize("pin", ["", "12", "123456789", "12a4"])
-def test_a_pin_must_be_four_to_eight_digits(tmp_path, pin):
-    with pytest.raises(SpecialistAccessError):
-        SpecialistAccess(tmp_path / "specialist.json").set_pin(pin)
-
-
-def test_the_pin_cannot_be_set_twice(tmp_path):
-    access = SpecialistAccess(tmp_path / "specialist.json")
-    access.set_pin("4821")
-    with pytest.raises(SpecialistAccessError):
-        SpecialistAccess(tmp_path / "specialist.json").set_pin("1111")
-
-
-def test_a_wrong_pin_does_not_open_the_mode(tmp_path):
-    SpecialistAccess(tmp_path / "specialist.json").set_pin("4821")
-    access = SpecialistAccess(tmp_path / "specialist.json")
-    with pytest.raises(SpecialistAccessError):
-        access.login("0000")
-    assert not access.is_active()
+def test_the_pin_comes_from_the_environment(monkeypatch):
+    monkeypatch.setenv(PIN_ENV, "4821")
+    access = SpecialistAccess()
+    assert access.configured
     access.login("4821")
     assert access.is_active()
 
 
-def test_too_many_wrong_pins_lock_the_entry(tmp_path):
-    SpecialistAccess(tmp_path / "specialist.json").set_pin("4821")
-    access = SpecialistAccess(tmp_path / "specialist.json")
+def test_without_the_variable_the_mode_is_unavailable(monkeypatch):
+    monkeypatch.delenv(PIN_ENV, raising=False)
+    access = SpecialistAccess()
+    assert not access.configured
+    with pytest.raises(SpecialistAccessError, match="не задан"):
+        access.login("")
+
+
+@pytest.mark.parametrize("pin", ["12", "123456789", "12a4"])
+def test_a_malformed_pin_does_not_open_anything(pin):
+    assert not SpecialistAccess(pin).configured
+
+
+def test_a_wrong_pin_does_not_open_the_mode():
+    access = SpecialistAccess("4821")
+    with pytest.raises(SpecialistAccessError):
+        access.login("0000")
+    assert not access.is_active()
+
+
+def test_too_many_wrong_pins_lock_the_entry():
+    access = SpecialistAccess("4821")
     for _ in range(MAX_FAILED_ATTEMPTS):
         with pytest.raises(SpecialistAccessError):
             access.login("0000")
@@ -192,38 +190,25 @@ def test_too_many_wrong_pins_lock_the_entry(tmp_path):
         access.login("4821")
 
 
-def test_the_mode_closes_by_itself_when_left_idle(tmp_path):
+def test_the_mode_closes_by_itself_when_left_idle():
     clock = Clock()
-    access = SpecialistAccess(tmp_path / "specialist.json", clock=clock)
-    access.set_pin("4821")
+    access = SpecialistAccess("4821", clock=clock)
+    access.login("4821")
     clock.now += IDLE_TIMEOUT - timedelta(seconds=1)
     assert access.is_active(), "обращение продлевает режим"
     clock.now += IDLE_TIMEOUT + timedelta(seconds=1)
     assert not access.is_active()
 
 
-def test_the_pin_is_changed_only_from_the_open_mode(tmp_path):
-    access = SpecialistAccess(tmp_path / "specialist.json")
-    access.set_pin("4821")
-    access.logout()
-    with pytest.raises(SpecialistAccessError):
-        access.change_pin("1357")
-    access.login("4821")
-    access.change_pin("1357")
-    access.logout()
-    access.login("1357")
-
-
 # ── Маршруты ──────────────────────────────────────────────────────────────────
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
-    from neuro_mirror.core import specialist_access as access_module
     from neuro_mirror.core.user_profiles import UserProfileStore
     from neuro_mirror.plugins.games.course_store import TrainingCourseStore
     from neuro_mirror.web.app import create_app
 
-    monkeypatch.setattr(access_module, "DEFAULT_PATH", tmp_path / "specialist.json")
+    monkeypatch.setenv(PIN_ENV, "4821")
     users = UserProfileStore(tmp_path)
     user = users.create_user("Test", consent=True, personal_data_consent=True,
                              audio_data_consent=True, video_data_consent=True)
@@ -255,11 +240,11 @@ def test_results_for_the_user_carry_no_hads_score(client):
 
 def test_the_specialist_report_is_closed_without_the_pin(client):
     assert client.get("/api/specialist/report").status_code == 403
-    assert client.get("/api/specialist/status").json() == {"configured": False, "active": False}
 
 
 def test_the_specialist_report_opens_after_the_pin(client):
-    assert client.post("/api/specialist/setup", json={"pin": "4821"}).status_code == 200
+    assert client.get("/api/specialist/status").json() == {"configured": True, "active": False}
+    assert client.post("/api/specialist/login", json={"pin": "4821"}).status_code == 200
     report = client.get("/api/specialist/report").json()
     assert report["hads"][0]["anxiety"]["score"] == 11
     assert report["moca"][0]["tasks"]

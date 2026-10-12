@@ -6,9 +6,11 @@
 // score and interpretation; this tab opens only after the specialist PIN.
 //
 // The core decides everything: GET /api/specialist/status { configured,
-// active }, POST /api/specialist/setup | login | logout | pin { pin } and
+// active }, POST /api/specialist/login { pin } | logout and
 // GET /api/specialist/report (403 when the mode is closed — it closes by
 // itself after a while without requests). This screen only shows them.
+// The PIN is set by the administrator in the environment variable
+// NEURO_MIRROR_SPECIALIST_PIN; it is neither set nor changed from here.
 
 import { api } from "../core/legacy.js";
 import { notify } from "../components/notify.js";
@@ -276,74 +278,43 @@ function pinField(labelText, id) {
 
 function buildAccess(status, onOpened) {
   const panel = el("section", "nm-panel");
-  const setup = !status.configured;
-  panel.append(
-    el("h2", "nm-panel-title", "Отчёт для специалиста"),
-    el("p", "nm-panel-text", setup
-      ? "PIN специалиста ещё не задан. Задайте его — от 4 до 8 цифр. Расширенный отчёт откроется только по этому PIN."
-      : "Расширенный отчёт с баллами, результатами HADS и журналом событий доступен специалисту. Введите PIN."),
-  );
-  const first = pinField(setup ? "Новый PIN" : "PIN", "nm-spec-pin");
-  const second = setup ? pinField("Повторите PIN", "nm-spec-pin-repeat") : null;
+  panel.appendChild(el("h2", "nm-panel-title", "Отчёт для специалиста"));
+  if (!status.configured) {
+    panel.appendChild(el("p", "nm-panel-text",
+      "PIN специалиста не задан. Его задаёт администратор при установке программы: " +
+      "переменная окружения NEURO_MIRROR_SPECIALIST_PIN, от 4 до 8 цифр."));
+    return panel;
+  }
+  panel.appendChild(el("p", "nm-panel-text",
+    "Расширенный отчёт с баллами, результатами HADS и журналом событий доступен специалисту. Введите PIN."));
+  const field = pinField("PIN", "nm-spec-pin");
   const message = el("p", "nm-status-line");
   message.setAttribute("role", "status");
   const form = el("form", "nm-spec-form");
-  form.append(first.wrap);
-  if (second) form.append(second.wrap);
-  const submit = el("button", "nm-btn nm-btn-primary", setup ? "Задать PIN и открыть отчёт" : "Открыть отчёт");
+  const submit = el("button", "nm-btn nm-btn-primary", "Открыть отчёт");
   submit.type = "submit";
-  form.append(submit, message);
+  form.append(field.wrap, submit, message);
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
-    const pin = first.input.value.trim();
-    if (second && pin !== second.input.value.trim()) {
-      message.textContent = "PIN не совпадают. Введите их ещё раз.";
-      second.input.focus();
-      return;
-    }
     submit.disabled = true;
     try {
-      await api(setup ? "/api/specialist/setup" : "/api/specialist/login", {
+      await api("/api/specialist/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pin }),
+        body: JSON.stringify({ pin: field.input.value.trim() }),
       });
       onOpened();
     } catch (error) {
       message.textContent = error.message || String(error);
-      first.input.value = "";
-      if (second) second.input.value = "";
-      first.input.focus();
+      field.input.value = "";
+      field.input.focus();
     } finally {
       submit.disabled = false;
     }
   });
   panel.appendChild(form);
-  setTimeout(() => first.input.isConnected && first.input.focus(), 0);
+  setTimeout(() => field.input.isConnected && field.input.focus(), 0);
   return panel;
-}
-
-function buildChangePin() {
-  const field = pinField("Новый PIN", "nm-spec-new-pin");
-  const form = el("form", "nm-spec-form");
-  const save = el("button", "nm-btn nm-btn-secondary", "Сохранить новый PIN");
-  save.type = "submit";
-  form.append(field.wrap, save);
-  form.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    try {
-      await api("/api/specialist/pin", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pin: field.input.value.trim() }),
-      });
-      field.input.value = "";
-      notify("PIN специалиста изменён.", { kind: "info" });
-    } catch (error) {
-      notify(`PIN не изменён: ${error.message || error}`);
-    }
-  });
-  return details("Сменить PIN", form);
 }
 
 function buildReport(report, onClosed) {
@@ -369,7 +340,6 @@ function buildReport(report, onClosed) {
     sanSection(report.san || []),
     trainingSection(report.training),
     journalSection(report.journal || []),
-    buildChangePin(),
   );
   return panel;
 }

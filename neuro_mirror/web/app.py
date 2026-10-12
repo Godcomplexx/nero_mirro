@@ -827,16 +827,6 @@ def create_app() -> FastAPI:
     async def specialist_status() -> JSONResponse:
         return JSONResponse(specialist.status())
 
-    @app.post("/api/specialist/setup")
-    async def specialist_setup(payload: SpecialistPinIn) -> JSONResponse:
-        """Задать PIN специалиста при первом входе."""
-        try:
-            specialist.set_pin(payload.pin)
-        except SpecialistAccessError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        _log.info("задан PIN специалиста")
-        return JSONResponse(specialist.status())
-
     @app.post("/api/specialist/login")
     async def specialist_login(payload: SpecialistPinIn) -> JSONResponse:
         try:
@@ -851,15 +841,6 @@ def create_app() -> FastAPI:
     async def specialist_logout() -> JSONResponse:
         specialist.logout()
         _log.info("выход из режима специалиста")
-        return JSONResponse(specialist.status())
-
-    @app.post("/api/specialist/pin")
-    async def specialist_change_pin(payload: SpecialistPinIn) -> JSONResponse:
-        try:
-            specialist.change_pin(payload.pin)
-        except SpecialistAccessError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        _log.info("PIN специалиста изменён")
         return JSONResponse(specialist.status())
 
     @app.get("/api/specialist/report")
