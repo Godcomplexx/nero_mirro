@@ -14,8 +14,9 @@ export const CHECK_NAMES = ["camera", "face", "mic", "voice"];
 const CHECK_REQUIREMENTS = {
   screening: { camera: true, face: true, mic: true, voice: true, required: ["camera", "face"] },
   moca: { camera: false, face: false, mic: true, voice: true, required: ["mic", "voice"] },
-  // HADS можно пройти нажатием — микрофон желателен, но не обязателен
-  hads: { camera: false, face: false, mic: true, voice: true, required: [] },
+  // HADS проходится только нажатием (ТЗ 5.4.6: без аудио-ввода) — микрофон
+  // и голос не проверяются
+  hads: { camera: false, face: false, mic: false, voice: false, required: [] },
 };
 
 export function getCheckRequirements(scenario) {
@@ -265,12 +266,6 @@ export function createSessionCheck(scenario, { onItem = () => {}, onStatus = () 
       return {
         canStart: false,
         message: "Исправьте отмеченное красным и нажмите «Проверить снова».",
-      };
-    }
-    if (anyFail && scenario === "hads") {
-      return {
-        canStart: true,
-        message: "Голос недоступен — можно начинать, отвечать будете нажатием на варианты.",
       };
     }
     if (anyFail) {

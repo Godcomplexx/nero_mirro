@@ -127,12 +127,12 @@ export function createTestScreen(config) {
     renderCheckList(list, requirements, model.items);
     panel.appendChild(list);
 
-    // Without the audio consent the microphone is not used at all — say so
-    // instead of leaving an empty check list
-    if (userConsents().audio === false) {
-      panel.appendChild(el("p", "nm-help-bar", config.scenario === "moca"
-        ? "В профиле нет согласия на обработку аудиоданных. Этот тест проходится голосом, поэтому запустить его не получится. Выберите или создайте профиль с таким согласием."
-        : "В профиле нет согласия на обработку аудиоданных, поэтому микрофон не используется. Отвечать нужно нажатием на варианты."));
+    // MoCA is answered by voice: without the audio consent it cannot start —
+    // say so instead of leaving an empty check list. HADS never uses the
+    // microphone, so the consent does not matter there.
+    if (config.scenario === "moca" && userConsents().audio === false) {
+      panel.appendChild(el("p", "nm-help-bar",
+        "В профиле нет согласия на обработку аудиоданных. Этот тест проходится голосом, поэтому запустить его не получится. Выберите или создайте профиль с таким согласием."));
     }
 
     const row = el("div", "nm-btn-row nm-test-actions");
