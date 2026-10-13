@@ -348,6 +348,9 @@ function playOn(stage, game, isCurrent, { onFinished, onClose }) {
     // Уровень приходит в составе занятия: его назначило ядро по прошлым
     // прохождениям, здесь он только передаётся дальше.
     difficultyLevel: game.difficulty_level ?? null,
+    // Набор стимулов также назначает ядро: селектор учитывает уже показанные
+    // формы. В свободной игре поля нет, и общий загрузчик выберет набор случайно.
+    stimulusSet: game.stimulus_set ?? null,
     introStage: model.stage,
     onIntroStage(step) {
       if (isCurrent()) setStage(step);

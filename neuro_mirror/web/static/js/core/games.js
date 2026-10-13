@@ -54,10 +54,20 @@ export async function mountGame(
     // Сложность задания. Её назначает ядро по прошлым занятиям и отдаёт в
     // составе занятия; интерфейс только передаёт её обратно при запуске.
     difficultyLevel = null,
+    // В составе занятия набор уже подобран с учётом истории. Для свободной
+    // игры он выбирается ниже случайно, чтобы не использовать постоянно первый.
+    stimulusSet = null,
   } = {},
 ) {
   const catalog = await loadCatalog();
   const definition = catalog.find((item) => sameCode(item.code, gameCode)) || { code: gameCode, title: fallbackTitle };
+  const availableStimulusSets = Array.isArray(definition.stimulus_sets) ? definition.stimulus_sets : [];
+  const selectedStimulusSet = availableStimulusSets.includes(stimulusSet)
+    ? stimulusSet
+    : availableStimulusSets.length
+      ? availableStimulusSets[Math.floor(Math.random() * availableStimulusSets.length)]
+      : "";
+  const runtimeDefinition = { ...definition, selected_stimulus_set: selectedStimulusSet };
   const base = `/api/games/${encodeURIComponent(definition.code)}`;
 
   // Instruction, example and a practice round first — unless the game's own
@@ -98,11 +108,13 @@ export async function mountGame(
     }
   };
   const gameApi = {
-    async start() {
+    async start(payload = {}) {
+      const body = selectedStimulusSet ? { stimulus_set: selectedStimulusSet, ...payload } : { ...payload };
+      if (difficultyLevel != null) body.difficulty_level = difficultyLevel;
       const options = { method: "POST" };
-      if (difficultyLevel != null) {
+      if (Object.keys(body).length > 0) {
         options.headers = { "Content-Type": "application/json" };
-        options.body = JSON.stringify({ difficulty_level: difficultyLevel });
+        options.body = JSON.stringify(body);
       }
       previous = await request(`${base}/start`, options);
       return previous;
@@ -138,7 +150,7 @@ export async function mountGame(
   };
 
   container.replaceChildren();
-  const cleanup = await renderer.mount({ container, definition, api: gameApi, close: onClose });
+  const cleanup = await renderer.mount({ container, definition: runtimeDefinition, api: gameApi, close: onClose });
   if (adjust.onMounted) adjust.onMounted(container);
   // The game field is scaled to the room it has instead of getting a scrollbar
   const stopFitting =

@@ -45,6 +45,7 @@ SUCCESS_RATE_METRICS: dict[str, str] = {
     "GM-02": "m08_series_accuracy",
     "GM-03": "u01_correct_action_rate",
     "GM-04": "m07_target_recognition_rate",
+    "GM-05": "m07_target_recognition_rate",
     "GM-06": "m08_series_accuracy",
     "GM-07": "u01_correct_action_rate",
     "GM-09": "a06_tracking_accuracy",
