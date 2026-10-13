@@ -40,6 +40,40 @@
   font-size: var(--nm-font-body);
 }
 
+/* Рекомендуемый следующий шаг (ПМИ 1.30, 1.31): заметнее карточек, но
+   не перекрывает их — сценарий выбирает человек. */
+.nm-next-step {
+  margin: 1rem 0 0.25rem;
+  padding: 1.25rem 1.5rem;
+  background: var(--nm-surface);
+  border: 0.125rem solid var(--nm-primary);
+  border-radius: var(--nm-radius);
+  color: var(--nm-text);
+}
+
+.nm-next-step-label {
+  margin: 0;
+  color: var(--nm-text-dim);
+  font-size: var(--nm-font-caption);
+}
+
+.nm-next-step-title {
+  margin: 0.25rem 0 0.5rem;
+  font-size: var(--nm-font-body);
+  font-weight: 700;
+}
+
+.nm-next-step-text {
+  margin: 0 0 1rem;
+  font-size: var(--nm-font-body);
+}
+
+.nm-next-step-note {
+  margin: 0.75rem 0 0;
+  color: var(--nm-text-dim);
+  font-size: var(--nm-font-caption);
+}
+
 .nm-link-button {
   display: inline-flex;
   align-items: center;
@@ -71,6 +105,15 @@
   .nm-resume-banner {
     margin-top: 0.5rem;
     padding: 0.5rem 1rem;
+  }
+
+  .nm-next-step {
+    margin-top: 0.5rem;
+    padding: 0.75rem 1.25rem;
+  }
+
+  .nm-next-step-text {
+    margin-bottom: 0.5rem;
   }
 
   .nm-link-button {

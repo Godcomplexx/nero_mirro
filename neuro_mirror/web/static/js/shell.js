@@ -197,6 +197,51 @@ async function loadResumeBanner(slot) {
   }
 }
 
+// The scenario the core suggests next (ТЗ 5.4.8; ПМИ 1.30, 1.31): primary
+// screening for a new profile, training once the screening is done, the
+// repeated test after the course. Shown before anything starts; the button
+// only opens the section. GET /api/next-step →
+// { step, section, title, text, action, reports_note }
+function buildNextStep(step) {
+  const panel = document.createElement("section");
+  panel.className = "nm-next-step";
+  panel.setAttribute("aria-label", "Рекомендуемый следующий шаг");
+  const label = document.createElement("p");
+  label.className = "nm-next-step-label";
+  label.textContent = "Рекомендуемый следующий шаг";
+  const title = document.createElement("h2");
+  title.className = "nm-next-step-title";
+  title.textContent = step.title;
+  const text = document.createElement("p");
+  text.className = "nm-next-step-text";
+  text.textContent = step.text;
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "nm-btn nm-btn-primary";
+  button.textContent = step.action;
+  button.addEventListener("click", () => selectSection(step.section));
+  panel.append(label, title, text, button);
+  if (step.reports_note) {
+    const note = document.createElement("p");
+    note.className = "nm-next-step-note";
+    note.textContent = step.reports_note;
+    panel.appendChild(note);
+  }
+  return panel;
+}
+
+async function loadNextStep(slot) {
+  try {
+    const resp = await fetch("/api/next-step");
+    if (!resp.ok) return;
+    const step = await resp.json();
+    if (!document.body.contains(slot) || !SECTIONS.some((section) => section.id === step.section)) return;
+    slot.appendChild(buildNextStep(step));
+  } catch (_) {
+    // A hint, not a gate: the cards below still open every scenario
+  }
+}
+
 // A profile must be chosen before anything else. app.js owns that state
 // (its `state.activeUser` is not reachable from a module), but it reliably
 // toggles #user-chip's `hidden` attribute via updateUserChip() whenever a
@@ -219,6 +264,10 @@ function renderHomeSection() {
   subtitle.className = "nm-workarea-subtitle";
   subtitle.textContent = "Выберите сценарий работы";
   wrap.appendChild(subtitle);
+
+  const nextStepSlot = document.createElement("div");
+  wrap.appendChild(nextStepSlot);
+  loadNextStep(nextStepSlot);
 
   const bannerSlot = document.createElement("div");
   wrap.appendChild(bannerSlot);

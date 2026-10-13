@@ -51,6 +51,7 @@ from neuro_mirror.core.access_journal import (
     VIEW_RESULTS,
     AccessJournal,
 )
+from neuro_mirror.core.next_step import next_step
 from neuro_mirror.core.specialist_access import SpecialistAccess, SpecialistAccessError
 from neuro_mirror.screening import report_views
 from neuro_mirror.screening.moca_scoring import cognitive_profile
@@ -731,22 +732,22 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=400, detail=str(exc))
         return JSONResponse({"user": _serialize_user(user)}, status_code=201)
 
-    def _next_step_suggestion(user: dict[str, Any]) -> str:
-        """Assistant onboarding: suggest the next step from progress flags."""
-        progress = user.get("progress") or {}
-        if not progress.get("screening_done"):
-            return "Давайте начнём с быстрой диагностики — нажмите «Проверка» внизу экрана."
-        if not progress.get("moca_done"):
-            return "Предлагаю пройти голосовой тест MoCA — нажмите «Тест MoCA» внизу экрана."
-        if progress.get("training_course"):
-            return (
-                f"Продолжим тренировки по курсу «{progress['training_course']}»? "
-                "Откройте «Меню» → «Тренировка»."
-            )
-        return (
-            "Все базовые проверки пройдены. Можно повторить проверку "
-            "или посмотреть «Мои результаты»."
+    def _next_step_for(user: dict[str, Any]) -> dict[str, Any]:
+        """Следующий сценарий для профиля — по прогрессу и состоянию курса."""
+        ctx: WebAppContext = app.state.context
+        store = ctx.runtime.training_course_store
+        course = store.latest_course(str(user.get("id") or ""))
+        return next_step(
+            user.get("progress") or {},
+            course=course,
+            completed_sessions=len(store.closed_sessions(course)) if course else 0,
+            sessions_total=COURSE_SESSIONS,
         )
+
+    @app.get("/api/next-step")
+    async def get_next_step() -> JSONResponse:
+        """Какой сценарий предложить активному пользователю (ПМИ 1.30, 1.31)."""
+        return JSONResponse(_next_step_for(_active_user_or_400()))
 
     @app.post("/api/users/{user_id}/select")
     async def select_user(user_id: str) -> JSONResponse:
@@ -764,7 +765,7 @@ def create_app() -> FastAPI:
                 payload={"user_id": user["id"]},
             )
         )
-        greeting = f"Здравствуйте, {user['name']}! {_next_step_suggestion(user)}"
+        greeting = f"Здравствуйте, {user['name']}! {_next_step_for(user)['text']}"
         await ctx.state_store.apply_update(
             {
                 "screen": "idle",
