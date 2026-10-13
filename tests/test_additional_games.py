@@ -21,6 +21,7 @@ from neuro_mirror.plugins.games.gm13_categories.plugin import Gm13CategoriesPlug
 from neuro_mirror.plugins.games.gm14_word_builder.plugin import Gm14WordBuilderPlugin
 from neuro_mirror.plugins.games.gm14_word_builder.stimuli import WORD_SETS
 from neuro_mirror.plugins.games.gm15_picture_naming.plugin import Gm15PictureNamingPlugin
+from neuro_mirror.plugins.games.gm16_phonemic_fluency.plugin import Gm16PhonemicFluencyPlugin
 from neuro_mirror.plugins.games.gm17_mental_rotation.plugin import Gm17MentalRotationPlugin
 from neuro_mirror.plugins.games.gm17_mental_rotation.stimuli import SHAPE_SETS
 from neuro_mirror.plugins.games.gm18_puzzle.plugin import Gm18PuzzlePlugin
@@ -90,6 +91,17 @@ def test_gm05_falls_back_to_the_first_word_set() -> None:
     assert reply["category"] == "Продукты питания"
 
 
+def test_gm05_difficulty_controls_targets_choices_and_study_time() -> None:
+    plugin = Gm05WordListPlugin(EventBus())
+
+    for level, targets, choices, study_ms in ((1, 4, 8, 6000), (2, 6, 12, 7000), (3, 8, 16, 8000)):
+        reply = plugin.start_game({"difficulty_level": level})
+        assert reply["difficulty_level"] == level
+        assert len(reply["study_words"]) == targets
+        assert len(reply["choices"]) == choices
+        assert reply["study_ms"] == study_ms
+
+
 def test_gm08_uses_the_selected_signal() -> None:
     reply = Gm08StopSignalPlugin(EventBus()).start_game(
         {"stimulus_set": "цифра 1"}
@@ -97,6 +109,20 @@ def test_gm08_uses_the_selected_signal() -> None:
 
     assert reply["stimulus_set"] == "цифра 1"
     assert reply["symbol"] == "1"
+
+
+def test_gm08_difficulty_controls_signal_timing() -> None:
+    plugin = Gm08StopSignalPlugin(EventBus())
+
+    for level, display_ms, trial_slot_ms in (
+        (1, 1200, 1800),
+        (2, 900, 1500),
+        (3, 650, 1200),
+    ):
+        reply = plugin.start_game({"difficulty_level": level})
+        assert reply["difficulty_level"] == level
+        assert reply["display_ms"] == display_ms
+        assert reply["trial_slot_ms"] == trial_slot_ms
 
 
 def test_gm09_uses_the_selected_object_shape_in_every_round() -> None:
@@ -108,14 +134,15 @@ def test_gm09_uses_the_selected_object_shape_in_every_round() -> None:
     assert {item["shape"] for item in session.rounds} == {"bird"}
 
 
-def test_gm10_uses_only_the_selected_scene() -> None:
-    reply = Gm10FindDifferencePlugin(EventBus()).start_game(
-        {"stimulus_set": "магазин"}
-    )
+def test_gm10_uses_all_scenes_for_selected_difficulty() -> None:
+    plugin = Gm10FindDifferencePlugin(EventBus())
+    reply = plugin.start_game({"stimulus_set": "магазин", "difficulty_level": 3})
+    session = plugin._sessions[reply["session_id"]]
 
     assert reply["stimulus_set"] == "магазин"
     assert reply["scene"] == "Магазин"
-    assert reply["scene_count"] == 1
+    assert reply["scene_count"] == 3
+    assert {scene["name"] for scene in session.scenes} == {"Магазин", "Станция", "Мастерская"}
 
 
 def test_gm11_uses_only_the_selected_arithmetic_rule() -> None:
@@ -129,6 +156,23 @@ def test_gm11_uses_only_the_selected_arithmetic_rule() -> None:
     assert reply["rule_count"] == 1
 
 
+def test_gm11_difficulty_controls_operation_switches() -> None:
+    plugin = Gm11SerialCountPlugin(EventBus())
+
+    expectations = {
+        1: ([5], ["сложение"]),
+        2: ([5, 5], ["сложение", "вычитание"]),
+        3: ([3, 2, 3, 2], ["сложение", "вычитание", "сложение", "вычитание"]),
+    }
+    for level, (counts, rule_names) in expectations.items():
+        reply = plugin.start_game({"stimulus_set": "сложение", "difficulty_level": level})
+        session = plugin._sessions[reply["session_id"]]
+        assert reply["difficulty_level"] == level
+        assert reply["required_correct"] == counts[0]
+        assert session.block_correct_counts == counts
+        assert [rule["stimulus_set"] for rule in session.rules] == rule_names
+
+
 def test_gm12_uses_only_the_selected_picture_category() -> None:
     plugin = Gm12WordPicturePlugin(EventBus())
     reply = plugin.start_game({"stimulus_set": "еда"})
@@ -136,8 +180,24 @@ def test_gm12_uses_only_the_selected_picture_category() -> None:
 
     assert reply["stimulus_set"] == "еда"
     assert reply["category"] == "еда"
-    assert reply["trial_count"] == 10
+    assert reply["trial_count"] == 30
     assert {item[0] for item in session.order} == {"еда"}
+
+
+def test_gm12_difficulty_controls_category_switching() -> None:
+    plugin = Gm12WordPicturePlugin(EventBus())
+
+    easy = plugin.start_game({"stimulus_set": "еда", "difficulty_level": 1})
+    easy_categories = [item[0] for item in plugin._sessions[easy["session_id"]].order]
+    assert easy_categories == ["еда"] * 30
+
+    medium = plugin.start_game({"stimulus_set": "еда", "difficulty_level": 2})
+    medium_categories = [item[0] for item in plugin._sessions[medium["session_id"]].order]
+    assert medium_categories == ["еда"] * 15 + ["животные"] * 15
+
+    hard = plugin.start_game({"stimulus_set": "еда", "difficulty_level": 3})
+    hard_categories = [item[0] for item in plugin._sessions[hard["session_id"]].order]
+    assert hard_categories == ["еда", "животные", "предметы быта"] * 10
 
 
 def test_gm13_uses_only_the_selected_category() -> None:
@@ -149,6 +209,30 @@ def test_gm13_uses_only_the_selected_category() -> None:
     assert reply["category"] == "Мебель"
     assert reply["block_count"] == 1
     assert len(session.categories) == 1
+
+
+def test_gm13_difficulty_controls_category_blocks() -> None:
+    plugin = Gm13CategoriesPlugin(EventBus())
+    expected_counts = {1: 1, 2: 2, 3: 3}
+
+    for level, expected_count in expected_counts.items():
+        reply = plugin.start_game({"stimulus_set": "мебель", "difficulty_level": level})
+        session = plugin._sessions[reply["session_id"]]
+        categories = [category["name"] for category in session.categories]
+        assert reply["difficulty_level"] == level
+        assert reply["block_count"] == expected_count
+        assert reply["duration_ms"] == 20_000
+        assert categories[0] == "Мебель"
+        assert len(categories) == len(set(categories)) == expected_count
+
+
+def test_gm13_randomly_selects_a_category_when_none_is_requested() -> None:
+    plugin = Gm13CategoriesPlugin(EventBus())
+
+    reply = plugin.start_game({"difficulty_level": 1})
+
+    assert reply["stimulus_set"] in {"овощи", "животные", "мебель"}
+    assert reply["category"].casefold() == reply["stimulus_set"]
 
 
 def test_gm14_uses_only_the_selected_word_set() -> None:
@@ -169,6 +253,39 @@ def test_gm15_uses_only_the_selected_picture_category() -> None:
     assert reply["stimulus_set"] == "предметы быта"
     assert reply["category"] == "Предметы быта"
     assert {item["category"] for item in session.items} == {"Предметы быта"}
+    assert len(session.items) == 30
+
+
+def test_gm15_difficulty_controls_category_switching() -> None:
+    plugin = Gm15PictureNamingPlugin(EventBus())
+
+    medium = plugin.start_game({"stimulus_set": "животные", "difficulty_level": 2})
+    medium_categories = [item["category"] for item in plugin._sessions[medium["session_id"]].items]
+    assert medium_categories[:15] == ["Животные"] * 15
+    assert len(set(medium_categories[15:])) == 1
+    assert medium_categories[15] != "Животные"
+    assert len(medium_categories) == 30
+
+    hard = plugin.start_game({"stimulus_set": "животные", "difficulty_level": 3})
+    hard_categories = [item["category"] for item in plugin._sessions[hard["session_id"]].items]
+    assert hard_categories[::3] == ["Животные"] * 10
+    assert len(set(hard_categories)) == 3
+    assert len(hard_categories) == 30
+
+
+def test_gm16_difficulty_controls_letter_productivity() -> None:
+    plugin = Gm16PhonemicFluencyPlugin(EventBus())
+    pools = {
+        1: set("ПСКОВР"),
+        2: set("МБДТНГЗИАУЛ"),
+        3: set("ФШЧЭХЖЦ"),
+    }
+
+    for level, letters in pools.items():
+        reply = plugin.start_game({"difficulty_level": level})
+        assert reply["difficulty_level"] == level
+        assert reply["letter"] in letters
+        assert reply["recording_ms"] == 300_000
 
 
 def test_gm17_uses_only_the_selected_shape_set() -> None:
@@ -181,14 +298,21 @@ def test_gm17_uses_only_the_selected_shape_set() -> None:
     assert len(session.shape_order) == 30
 
 
-def test_gm18_uses_only_the_selected_puzzle_scene() -> None:
+def test_gm18_uses_all_puzzle_scenes_for_selected_difficulty() -> None:
     plugin = Gm18PuzzlePlugin(EventBus())
-    reply = plugin.start_game({"stimulus_set": "портрет"})
+    reply = plugin.start_game({"stimulus_set": "портрет", "difficulty_level": 3})
+    session = plugin._sessions[reply["session_id"]]
 
     assert reply["stimulus_set"] == "портрет"
-    assert reply["name"] == "Магазин"
-    assert reply["required_rounds"] == 1
-    assert reply["image"].endswith("shop_a.png")
+    assert reply["required_rounds"] == 3
+    assert reply["rows"] == 4
+    assert reply["columns"] == 5
+    assert reply["difficulty_parameters"] == {"pieces": 20, "puzzles": 3}
+    assert {puzzle["image"] for puzzle in session.puzzles} == {
+        "shop_a.png",
+        "station_hard_01_a.png",
+        "workshop_hard_02_a.png",
+    }
 
 
 def test_gm21_uses_the_selected_main_category() -> None:

@@ -7,7 +7,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from neuro_mirror.plugins.games.base import BrowserGamePlugin
-from neuro_mirror.plugins.games.gm16_phonemic_fluency.stimuli import LETTERS, RECORDING_MS
+from neuro_mirror.plugins.games.difficulty_config import level_config
+from neuro_mirror.plugins.games.gm16_phonemic_fluency.stimuli import MAX_RECORDING_MS
 from neuro_mirror.screening.gm16_scoring import analyse_phonemic_response, score_gm16
 
 
@@ -15,6 +16,8 @@ from neuro_mirror.screening.gm16_scoring import analyse_phonemic_response, score
 class FluencySession:
     session_id: str
     letter: str
+    difficulty_level: int
+    difficulty_parameters: dict[str, Any]
     shown_at_ms: float = field(default_factory=lambda: time.time() * 1000)
     round_events: list[dict[str, Any]] = field(default_factory=list)
 
@@ -28,15 +31,34 @@ class Gm16PhonemicFluencyPlugin(BrowserGamePlugin):
         self._sessions: dict[str, FluencySession] = {}
         self._random = secrets.SystemRandom()
 
-    def _start(self) -> dict[str, Any]:
-        session = FluencySession(uuid.uuid4().hex, self._random.choice(LETTERS))
+    def start_game(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._start(difficulty_level=payload.get("difficulty_level"))
+
+    def _start(self, *, difficulty_level: object = None) -> dict[str, Any]:
+        config = level_config(self.game_code)
+        try:
+            level = int(difficulty_level or config["default_level"])
+        except (TypeError, ValueError):
+            level = int(config["default_level"])
+        available_levels = {int(item["level"]): item for item in config["levels"]}
+        if level not in available_levels:
+            level = int(config["default_level"])
+        parameters = dict(available_levels[level]["parameters"])
+        session = FluencySession(
+            uuid.uuid4().hex,
+            self._random.choice(tuple(parameters["letters"])),
+            level,
+            parameters,
+        )
         self._sessions[session.session_id] = session
         return {
             "ok": True,
             "finished": False,
             "session_id": session.session_id,
             "letter": session.letter,
-            "recording_ms": RECORDING_MS,
+            "difficulty_level": session.difficulty_level,
+            "difficulty_parameters": dict(session.difficulty_parameters),
+            "recording_ms": int(session.difficulty_parameters.get("max_recording_ms", MAX_RECORDING_MS)),
         }
 
     def _answer(self, payload: dict[str, Any]) -> dict[str, Any]:
