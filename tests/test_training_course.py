@@ -174,10 +174,10 @@ def test_a_form_failing_through_mastering_is_marked_hard_for_the_specialist():
     assert log[0]["flags"] == [FLAG_HARD]
 
 
-def test_forms_without_levels_are_not_adapted():
-    history = passes((3, "GM-05", Success(10, 10)))
+def test_forms_without_adaptation_keep_their_level():
+    history = passes((3, "GM-12", Success(10, 10)))
     states, _ = form_states(history, 6)
-    assert "GM-05" not in states
+    assert "GM-12" not in states
 
 
 # ── Состав курса ──────────────────────────────────────────────────────────────

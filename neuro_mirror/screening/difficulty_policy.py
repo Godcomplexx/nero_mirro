@@ -57,6 +57,10 @@ SUCCESS_COUNTS: dict[str, tuple[str, str]] = {
     "GM-02": ("m08_correct_series", "m08_series_total"),
     "GM-03": ("u01_correct_actions", "u01_actions_total"),
     "GM-04": ("m07_recognized_targets", "m07_targets_total"),
+    # Верные решения «было / не было» по каждому слову списка, а не доля
+    # узнанных: иначе отметка всех слов давала бы 100%. Решение команды:
+    # в методике (раздел 7) у GM-05 «готовность к адаптации — нет».
+    "GM-05": ("u01_correct_decisions", "u01_decisions_total"),
     "GM-06": ("m08_correct_series", "m08_series_total"),
     "GM-07": ("u01_correct_actions", "u01_actions_total"),
     "GM-09": ("a06_tracked_targets", "a06_targets_total"),

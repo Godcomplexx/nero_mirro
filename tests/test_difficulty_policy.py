@@ -21,14 +21,18 @@ from neuro_mirror.screening.difficulty_policy import (
 
 # ── Соответствие матрице игр ──────────────────────────────────────────────────
 
-# Формы, у которых курс меняет уровень. Это 12 форм с уровнями из «Матрицы
-# игр v5» и с показателем успешности по методике (раздел 7, «Готовность к
-# адаптации»: да). У остальных уровни есть, но предварительные (draft в
-# game_levels.json): игра идёт на них, а курс уровень не меняет.
+# Формы, у которых курс меняет уровень: 12 форм с уровнями из «Матрицы игр
+# v5» и показателем успешности по методике (раздел 7, «Готовность к
+# адаптации»: да), плюс GM-05 по решению команды. У остальных уровни
+# предварительные (draft в game_levels.json): игра идёт на них, а курс
+# уровень не меняет.
 ADAPTIVE_FORMS = {
-    "GM-01", "GM-02", "GM-03", "GM-04", "GM-06",
+    "GM-01", "GM-02", "GM-03", "GM-04", "GM-05", "GM-06",
     "GM-07", "GM-09", "GM-10", "GM-14", "GM-17", "GM-18", "GM-22",
 }
+
+# Адаптивные формы с предварительными уровнями — только явно перечисленные.
+ADAPTIVE_ON_DRAFT_LEVELS = {"GM-05"}
 
 
 def test_only_forms_ready_for_adaptation_change_level():
@@ -230,10 +234,14 @@ def test_levels_missing_in_the_matrix_are_marked_draft():
 
 
 def test_the_course_adapts_only_forms_with_approved_levels():
-    from neuro_mirror.plugins.games.difficulty_config import level_status
+    """Исключение — только явно перечисленные формы, с пометкой в JSON."""
+    from neuro_mirror.plugins.games.difficulty_config import level_config, level_status
 
-    for code in ADAPTIVE_FORMS:
+    for code in ADAPTIVE_FORMS - ADAPTIVE_ON_DRAFT_LEVELS:
         assert level_status(code) == "configured", code
+    for code in ADAPTIVE_ON_DRAFT_LEVELS:
+        assert level_status(code) == "draft", code
+        assert "согласовать" in level_config(code).get("note", ""), code
 
 
 def test_the_levels_document_matches_the_json():
@@ -248,3 +256,38 @@ def test_the_levels_document_matches_the_json():
     current = module.TARGET.read_text(encoding="utf-8")
     module.main()
     assert module.TARGET.read_text(encoding="utf-8") == current, "запустите python docs/make_game_levels_doc.py"
+
+
+# ── GM-05: верные решения по каждому слову списка ─────────────────────────────
+
+def word_list_pass(selected_old: int, selected_new: int, *, old: int = 4, new: int = 4) -> dict:
+    from neuro_mirror.screening.gm05_scoring import score_gm05_rounds
+
+    targets = [f"старое{i}" for i in range(old)]
+    distractors = [f"новое{i}" for i in range(new)]
+    selected = targets[:selected_old] + distractors[:selected_new]
+    return score_gm05_rounds(
+        [{"targets": targets, "distractors": distractors, "selected": selected}], expected_rounds=1
+    )
+
+
+@pytest.mark.parametrize("selected_old, selected_new, expected, action", [
+    (4, 0, Success(8, 8), "up"),
+    (3, 1, Success(6, 8), "keep"),
+    (4, 4, Success(4, 8), "keep"),
+    (0, 0, Success(4, 8), "keep"),
+])
+def test_word_list_counts_every_decision(selected_old, selected_new, expected, action):
+    """Отметка всех слов подряд или ни одного — около половины, не повышение."""
+    result = success("GM-05", word_list_pass(selected_old, selected_new))
+    assert result == expected
+    level = apply_pass(FormState(level=1), result).level
+    assert level == (2 if action == "up" else 1)
+
+
+def test_word_list_keeps_hits_and_false_alarms_for_the_report():
+    metrics = word_list_pass(3, 1)
+    assert metrics["m07_recognized_words"] == 3
+    assert metrics["m07_words_total"] == 4
+    assert metrics["g08_false_alarms"] == 1
+    assert metrics["g08_new_words_total"] == 4
