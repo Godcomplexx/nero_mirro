@@ -1,9 +1,9 @@
 // neuro_mirror/web/static/js/screens/training.js
 //
 // «Тренировка» (deck slide 10). The core forms the course of twelve sessions
-// at once (js/core/training.js): the same tasks in every session, only the
-// difficulty of each task follows how correctly it was done. The core owns
-// every game (js/core/games.js). This screen shows the session, then plays
+// at once (js/core/training.js): the same split by domain in every session,
+// the games rotate between sessions, and the difficulty of each game follows
+// how correctly it was done. The core owns every game (js/core/games.js). This screen shows the session, then plays
 // the games one after another in the order given, inside the work area.
 //
 // The person does not choose games: the course does. «Выбрать игру самому»
@@ -306,7 +306,7 @@ function buildOverview() {
   course.append(
     el("h2", "nm-panel-title", started ? "Продолжить тренировку" : "Начать тренировку"),
     el("p", "nm-training-total", sessionTitle()),
-    el("p", "nm-panel-text nm-optional-text", "Курс из 12 занятий составлен по результатам вашего когнитивного теста. Задания в занятиях одни и те же, сложность подстраивается под ваши результаты."),
+    el("p", "nm-panel-text nm-optional-text", "Курс из 12 занятий составлен по результатам вашего когнитивного теста. Игры меняются от занятия к занятию, сложность подстраивается под ваши результаты."),
     el("p", "nm-training-total", started
       ? `Выполнено ${doneCount()} из ${games().length} ${tasksWord(games().length)}`
       : `${games().length} ${tasksWord(games().length)} в занятии`),

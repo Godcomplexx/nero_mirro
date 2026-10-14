@@ -4,10 +4,11 @@
 от 08.10.2026 (на утверждении); номера разделов ниже ссылаются на неё.
 Полное описание и состояние каждого правила — docs/training-course.md.
 
-Курс формируется сразу на 12 занятий: состав по доменам и сами формы
-выбираются один раз по входному скринингу и во всех 12 занятиях одинаковы.
-От занятия к занятию меняются только стимульный набор (по этапу) и уровень
-каждой формы — по правильности её прохождений.
+Курс формируется сразу на 12 занятий. Состав по доменам задаётся входным
+скринингом и во всех занятиях одинаков. Конкретные формы подбираются при
+открытии каждого занятия (``training_session``) и чередуются по приоритетам
+методики; стимульный набор зависит от этапа, а уровень каждой формы — от
+правильности её прохождений.
 
 Здесь только правила, без хранения. Уровни не хранятся отдельно, а каждый раз
 выводятся из прохождений курса — так сохранённое состояние не может
@@ -176,29 +177,32 @@ def _state_fields(state: FormState) -> dict[str, Any]:
     return {"to_level": fields["level"], "flags": fields["flags"]}
 
 
-def course_slots(games: list[dict[str, Any]], user_id: str) -> list[dict[str, Any]]:
-    """12 занятий курса с одними и теми же заданиями.
+def course_slots() -> list[dict[str, Any]]:
+    """12 занятий курса — номер и этап. Задания появляются при открытии."""
+    return [
+        {"number": number, "stage": stage_for(number).id, "games": []}
+        for number in range(1, COURSE_SESSIONS + 1)
+    ]
 
-    Стимульный набор и зерно известны заранее — они зависят только от номера
-    занятия. Уровень ставится, когда занятие открывается (``apply_levels``):
-    он зависит от того, как прошли предыдущие занятия.
+
+def slot_items(games: list[dict[str, Any]], user_id: str, session_number: int) -> list[dict[str, Any]]:
+    """Задания занятия со стимульным набором и зерном по номеру занятия.
+
+    Уровень ставит ``apply_levels``: он зависит от предыдущих занятий.
     """
-    slots = []
-    for number in range(1, COURSE_SESSIONS + 1):
-        items = []
-        for game in games:
-            definition = get_game_definition(game["game_code"])
-            stimulus_set, set_number = stimulus_set_for(definition, number)
-            items.append({
-                **game,
-                "stimulus_set": stimulus_set,
-                "stimulus_set_number": set_number,
-                "randomization_seed": randomization_seed(user_id, definition.code, number),
-                "difficulty_level": None,
-                "flags": [],
-            })
-        slots.append({"number": number, "stage": stage_for(number).id, "games": items})
-    return slots
+    items = []
+    for game in games:
+        definition = get_game_definition(game["game_code"])
+        stimulus_set, set_number = stimulus_set_for(definition, session_number)
+        items.append({
+            **game,
+            "stimulus_set": stimulus_set,
+            "stimulus_set_number": set_number,
+            "randomization_seed": randomization_seed(user_id, definition.code, session_number),
+            "difficulty_level": None,
+            "flags": [],
+        })
+    return items
 
 
 def apply_levels(items: list[dict[str, Any]], states: dict[str, FormState]) -> None:

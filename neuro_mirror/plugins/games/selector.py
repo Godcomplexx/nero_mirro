@@ -1,7 +1,8 @@
 """Deterministic, testable rules for selecting a game form within a domain."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from datetime import datetime
 
 from neuro_mirror.plugins.games.catalog import GAME_CATALOG
@@ -22,6 +23,23 @@ class Presentation:
 
 
 @dataclass(frozen=True, slots=True)
+class CourseRanking:
+    """Приоритеты выбора формы внутри курса.
+
+    «Методика подбора и оценки тренировочного курса» v2: формы с уровнями,
+    готовыми к адаптации, идут первыми (раздел 5.2: формы без адаптации — когда
+    домену не хватает адаптивных); реже выбираются формы с отметками
+    «трудная» и «потолок» (раздел 6.3); затем механика, реже встречавшаяся в
+    курсе, и форма, которой не было в прошлом занятии (раздел 4.4).
+    """
+
+    adaptive_codes: frozenset[str] = frozenset()
+    discouraged_codes: frozenset[str] = frozenset()
+    mechanic_counts: Mapping[str, int] = field(default_factory=dict)
+    previous_session_codes: frozenset[str] = frozenset()
+
+
+@dataclass(frozen=True, slots=True)
 class SelectionDecision:
     game: GameDefinition
     stimulus_set: str
@@ -37,7 +55,7 @@ def select_game(
     available_codes: frozenset[str] | None = None,
     definitions: tuple[GameDefinition, ...] = GAME_CATALOG,
     previous: GameDefinition | None = None,
-    adaptive_codes: frozenset[str] = frozenset(),
+    course: CourseRanking | None = None,
 ) -> SelectionDecision:
     """Select without repeating a form; preferences are compared lexicographically.
 
@@ -49,9 +67,8 @@ def select_game(
     and modalities alternate against it, and against the last presentation in
     history only at the start of a session.
 
-    ``adaptive_codes`` — формы с уровнями сложности. Они идут первыми: формы
-    без уровней берутся, когда домену не хватает адаптивных (методика,
-    раздел 5.2).
+    ``course`` — приоритеты курса (``CourseRanking``); без него выбор идёт
+    только по чередованию и истории показов.
     """
     candidates = [item for item in definitions if item.primary_domain == primary_domain]
     if available_codes is not None:
@@ -63,6 +80,7 @@ def select_game(
         )
 
     last = previous if previous is not None else (history[-1] if history else None)
+    course = course or CourseRanking()
     counts = {item.code: 0 for item in candidates}
     latest: dict[str, float] = {item.code: float("-inf") for item in candidates}
     for entry in history:
@@ -70,11 +88,17 @@ def select_game(
             counts[entry.game_code] += 1
             latest[entry.game_code] = max(latest[entry.game_code], entry.presented_at.timestamp())
 
+    def mechanic_exposure(item: GameDefinition) -> int:
+        return sum(course.mechanic_counts.get(mechanic, 0) for mechanic in item.mechanics)
+
     def rank(item: GameDefinition) -> tuple[object, ...]:
         repeats_mechanic = bool(last and set(item.mechanics) & set(last.mechanics))
         repeats_modality = bool(last and set(item.modalities) & set(last.modalities))
         return (
-            bool(adaptive_codes) and item.code not in adaptive_codes,
+            bool(course.adaptive_codes) and item.code not in course.adaptive_codes,
+            item.code in course.discouraged_codes,
+            mechanic_exposure(item),
+            item.code in course.previous_session_codes,
             repeats_mechanic,
             repeats_modality,
             counts[item.code],
@@ -101,8 +125,12 @@ def select_game(
         stimulus_candidates = list(selected.stimulus_sets)
     stimulus_set = stimulus_candidates[0] if stimulus_candidates else ""
     reasons = ["ведущий домен совпадает", "форма не повторяется в занятии"]
-    if selected.code in adaptive_codes:
+    if selected.code in course.adaptive_codes:
         reasons.append("у формы есть уровни сложности")
+    if selected.code in course.discouraged_codes:
+        reasons.append("форма с отметкой «трудная» или «потолок»: других форм домена нет")
+    if course.previous_session_codes and selected.code not in course.previous_session_codes:
+        reasons.append("формы не было в прошлом занятии")
     if last and not set(selected.mechanics) & set(last.mechanics):
         reasons.append("механика чередуется")
     if last and not set(selected.modalities) & set(last.modalities):

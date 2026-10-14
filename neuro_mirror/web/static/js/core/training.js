@@ -21,8 +21,8 @@ async function detailOf(response) {
 }
 
 // The session of the course the core keeps for the user. The course is
-// formed at once: twelve slots with the same tasks; only levels and stimulus
-// sets differ between sessions.
+// formed at once: twelve slots with the same split by domain; the games
+// themselves are picked when a session opens and rotate between sessions.
 // GET /api/training/session → { course: { session_number, sessions_total,
 // completed_sessions, stage: { id, title },
 // slots: [{ number, stage, status: planned | in_progress | completed | incomplete }] },

@@ -1,9 +1,13 @@
-"""Состав курса тренировок: от профиля MoCA до списка конкретных игр.
+"""Занятие курса тренировок: от профиля MoCA до списка конкретных игр.
 
-Состав собирается один раз, при открытии курса, и дальше не меняется: все 12
-занятий проходят одни и те же задания в одном порядке. Меняются только
-уровень каждой формы — по правильности её прохождений — и стимульный набор
-по этапу курса (``training_course``).
+Состав по доменам считается из входного профиля и во всех 12 занятиях один и
+тот же. Конкретные формы (игры) подбираются заново к каждому занятию по
+приоритетам «Методики подбора и оценки тренировочного курса» v2 (разделы 4.4,
+5.2, 6.3): сначала формы с адаптацией, реже — с отметками «трудная» и
+«потолок», затем механика, реже встречавшаяся в курсе, и форма, которой не
+было в прошлом занятии. Так за калибровку охватываются все формы, а дальше
+они чередуются. Уровень каждой формы и стимульный набор задаёт
+``training_course``.
 
 Сборка целиком лежит в ядре, а не в интерфейсе. Интерфейс получает
 упорядоченный список игр и просто проигрывает его: правило подбора, перевод
@@ -19,12 +23,20 @@ from typing import Any, Iterable
 from neuro_mirror.plugins.games.catalog import GAME_CATALOG
 from neuro_mirror.plugins.games.contracts import Domain, GameDefinition, Modality, ResponseType
 from neuro_mirror.plugins.games.selector import (
+    CourseRanking,
     NoEligibleGameError,
     Presentation,
     select_game,
 )
-from neuro_mirror.screening.difficulty_policy import adaptation, has_levels
+from neuro_mirror.screening.difficulty_policy import (
+    FLAG_CEILING,
+    FLAG_HARD,
+    FormState,
+    adaptation,
+    has_levels,
+)
 from neuro_mirror.screening.moca_scoring import MOCA_MODULES
+from neuro_mirror.screening.training_course import stage_for
 from neuro_mirror.screening.training_plan import DEFAULT_SESSION_SIZE, plan_session
 
 # Профиль называет домены по-русски, игры — кодами. Соответствие берётся из
@@ -91,19 +103,40 @@ def _start_with_simple_form(
 def build_training_session(
     profile: Iterable[dict[str, Any]],
     *,
+    session_number: int = 1,
+    course_sessions: tuple[tuple[str, ...], ...] = (),
+    states: dict[str, FormState] | None = None,
     history: tuple[Presentation, ...] = (),
     available_codes: frozenset[str] | None = None,
     definitions: tuple[GameDefinition, ...] = GAME_CATALOG,
     session_size: int = DEFAULT_SESSION_SIZE,
 ) -> dict[str, Any]:
-    """Собрать состав курса: план по доменам плюс конкретные игры по порядку."""
+    """Собрать занятие курса: план по доменам плюс конкретные игры по порядку.
+
+    ``course_sessions`` — коды форм, показанных в прошлых занятиях курса, по
+    порядку занятий; ``states`` — уровни и отметки форм перед этим занятием.
+    """
     profile = list(profile)
     if not profile:
         return {"plan": {}, "games": [], "session_size": 0, "skipped": []}
 
+    states = states or {}
     by_code = {item.code: item for item in definitions}
-    adaptive_codes = frozenset(code for code in by_code if has_levels(code))
     plan = plan_session(profile, session_size=session_size)
+    mechanic_counts: dict[str, int] = {}
+    for session_codes in course_sessions:
+        for code in session_codes:
+            definition = by_code.get(code)
+            for mechanic in definition.mechanics if definition else ():
+                mechanic_counts[mechanic] = mechanic_counts.get(mechanic, 0) + 1
+    ranking = CourseRanking(
+        adaptive_codes=frozenset(code for code in by_code if has_levels(code)),
+        discouraged_codes=frozenset(
+            code for code, state in states.items() if state.flags & {FLAG_HARD, FLAG_CEILING}
+        ),
+        mechanic_counts=mechanic_counts,
+        previous_session_codes=frozenset(course_sessions[-1]) if course_sessions else frozenset(),
+    )
     games: list[dict[str, Any]] = []
     skipped: list[dict[str, str]] = []
     used_codes: set[str] = set()
@@ -122,10 +155,10 @@ def build_training_session(
                 available_codes=available_codes,
                 definitions=definitions,
                 previous=previous,
-                adaptive_codes=adaptive_codes,
+                course=ranking,
             )
         except NoEligibleGameError as exc:
-            # Курс не срывается из-за исчерпания форм одного домена:
+            # Занятие не срывается из-за исчерпания форм одного домена:
             # остальные игры остаются, а пропуск виден в ответе.
             skipped.append({"domain": domain_label, "reason": str(exc)})
             continue
@@ -141,7 +174,9 @@ def build_training_session(
             "reasons": list(decision.reasons),
         })
 
-    _start_with_simple_form(games, by_code)
+    # Калибровка начинается с простой формы: клик и зрительная подача (5.2)
+    if stage_for(session_number).id == "calibration":
+        _start_with_simple_form(games, by_code)
     for position, game in enumerate(games, start=1):
         game["position"] = position
 

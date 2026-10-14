@@ -22,31 +22,26 @@ from neuro_mirror.screening.training_course import form_states
 ROTATION = get_game_definition("GM-17")
 
 
+ROTATION_ITEM = {
+    "position": 1,
+    "domain": "Абстракция",
+    "domain_code": "abstraction",
+    "game_code": "GM-17",
+    "title": ROTATION.title,
+    "adaptation": "adaptive",
+    "reasons": [],
+}
+
+
 def course_with_rotation(store: TrainingCourseStore) -> dict:
-    """Курс из одного задания — «Поверни фигуру» — во всех 12 занятиях."""
-    return store.create_course(
-        user_id="u1",
-        entry_session_id="moca-1",
-        profile=[],
-        composition={
-            "plan": {"Абстракция": 1},
-            "games": [{
-                "position": 1,
-                "domain": "Абстракция",
-                "domain_code": "abstraction",
-                "game_code": "GM-17",
-                "title": ROTATION.title,
-                "adaptation": "adaptive",
-                "reasons": [],
-            }],
-        },
-    )
+    """Курс из одного задания — «Поверни фигуру» — в каждом занятии."""
+    return store.create_course(user_id="u1", entry_session_id="moca-1", profile=[], plan={"Абстракция": 1})
 
 
 def open_next(store: TrainingCourseStore, course: dict) -> dict:
     slot = store.next_slot(course)
     states, log = form_states(store.passes(course), slot["number"])
-    return store.open_slot(course, slot, states=states, level_changes=log)
+    return store.open_slot(course, slot, games=[dict(ROTATION_ITEM)], states=states, level_changes=log)
 
 
 async def play_rotation(bus: EventBus, plugin: Gm17MentalRotationPlugin, store: TrainingCourseStore, number: int) -> None:

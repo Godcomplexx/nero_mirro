@@ -186,17 +186,22 @@ def test_the_next_session_comes_after_the_previous_ends(tmp_path):
     client.close()
 
 
-def test_every_session_of_the_course_has_the_same_tasks(tmp_path):
-    """Курс формируется сразу на 12 слотов с одними и теми же заданиями."""
-    client = _client_with(tmp_path, [_stored_report(profile(3, 1, 0, 1))])
+def test_the_domain_plan_stays_and_forms_rotate(tmp_path):
+    """12 слотов сразу; состав по доменам постоянный, формы меняются (4.4, 5.2)."""
+    client = _client_with(tmp_path, [_stored_report(profile(3, 1, 0, 1))], game_replies=_started_game)
     first = client.get("/api/training/session").json()
     assert len(first["course"]["slots"]) == 12
-    codes = [game["game_code"] for game in first["games"]]
-    for _ in range(11):
-        client.post("/api/training/session/finish", json={})
-        body = client.get("/api/training/session").json()
-        assert [game["game_code"] for game in body["games"]] == codes
-        assert body["plan"] == first["plan"]
+    # Все задания первого занятия показаны и брошены — они считаются показанными
+    for game in first["games"]:
+        client.post(f"/api/games/{game['game_code']}/start",
+                    json={"course_session": 1, "course_position": game["position"]})
+    client.post("/api/training/session/finish", json={})
+    second = client.get("/api/training/session").json()
+    assert second["course"]["session_number"] == 2
+    assert second["plan"] == first["plan"]
+    first_codes = {game["game_code"] for game in first["games"]}
+    second_codes = {game["game_code"] for game in second["games"]}
+    assert second_codes != first_codes
     client.close()
 
 

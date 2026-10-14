@@ -60,13 +60,14 @@ from neuro_mirror.screening.san_survey import (
     questionnaire as san_questionnaire,
     score_san,
 )
-from neuro_mirror.plugins.games.course_store import ITEM_DONE, CourseError
+from neuro_mirror.plugins.games.course_store import ITEM_ABANDONED, ITEM_DONE, CourseError
 from neuro_mirror.screening.difficulty_policy import describe
 from neuro_mirror.screening.training_course import (
     COURSE_SESSIONS,
     form_states,
     stage_for,
 )
+from neuro_mirror.screening.training_plan import plan_session
 from neuro_mirror.screening.training_session import build_training_session
 from neuro_mirror.plugins.ui.web_plugin import WebUIPlugin, WebUIStateStore
 from neuro_mirror.plugins.user_progress.plugin import UserProgressPlugin
@@ -418,7 +419,7 @@ def create_app() -> FastAPI:
             "plan": course["plan"],
             "games": session["games"],
             "session_size": len(session["games"]),
-            "skipped": course["skipped"],
+            "skipped": session.get("skipped") or [],
             "level_changes": session["level_changes"],
             "profile": course["entry"]["profile"],
             "source_session_id": course["entry"]["session_id"],
@@ -428,9 +429,10 @@ def create_app() -> FastAPI:
     async def training_session() -> JSONResponse:
         """Текущее занятие курса.
 
-        Курс формируется сразу на 12 занятий: состав и задания выбираются один
-        раз по входному скринингу и во всех занятиях одинаковы. Когда занятие
-        открывается, в него проставляются уровни форм по правильности
+        Курс формируется сразу на 12 занятий; состав по доменам задаётся
+        входным скринингом и во всех занятиях одинаков. Когда занятие
+        открывается, к нему подбираются формы — с чередованием по приоритетам
+        методики — и проставляются их уровни по правильности
         предыдущих прохождений; дальше план не меняется, и перезагрузка
         страницы возвращает то же занятие. Новый курс начинается только после
         выходного скрининга — когнитивного теста, пройденного после 12-го
@@ -465,28 +467,43 @@ def create_app() -> FastAPI:
                             "его результату начнётся новый курс."
                         ),
                     )
-            composition = build_training_session(
-                profile,
-                history=ctx.runtime.game_history_store.for_user(user_id),
-                available_codes=implemented_game_codes(),
-            )
-            if not composition["games"]:
+            plan = plan_session(profile)
+            if not plan:
                 raise HTTPException(status_code=409, detail="Не удалось подобрать ни одного задания.")
             course = store.create_course(
                 user_id=user_id,
                 entry_session_id=entry_session,
                 profile=profile,
-                composition=composition,
+                plan=plan,
             )
 
         slot = store.next_slot(course)
         number = int(slot["number"])
         states, log = form_states(store.passes(course), number)
+        # Формы, показанные в прошлых занятиях: по ним чередуются механики и
+        # не повторяется прошлое занятие (методика, раздел 4.4)
+        shown = (ITEM_DONE, ITEM_ABANDONED)
+        course_sessions = tuple(
+            tuple(item["game_code"] for item in previous["games"] if item.get("status") in shown)
+            for previous in store.closed_sessions(course)
+        )
+        selection = build_training_session(
+            course["entry"]["profile"],
+            session_number=number,
+            course_sessions=course_sessions,
+            states=states,
+            history=ctx.runtime.game_history_store.for_user(user_id),
+            available_codes=implemented_game_codes(),
+        )
+        if not selection["games"]:
+            raise HTTPException(status_code=409, detail="Не удалось подобрать ни одного задания.")
         session = store.open_slot(
             course,
             slot,
+            games=selection["games"],
             states=states,
             level_changes=[entry for entry in log if entry["before_session"] == number],
+            skipped=selection["skipped"],
         )
         return JSONResponse(_course_payload(course, session))
 
