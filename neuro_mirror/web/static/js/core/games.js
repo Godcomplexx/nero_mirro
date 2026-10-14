@@ -63,10 +63,22 @@ export async function mountGame(
     // задания ({ course_session, course_position }): уровень, стимульный
     // набор и зерно ядро берёт из сохранённого плана занятия.
     startOptions = null,
+    // Стимульный набор задания курса — из плана занятия; его же ядро
+    // поставит при запуске. В свободной игре набор выбирается случайно,
+    // чтобы не показывать всегда первый.
+    stimulusSet = null,
   } = {},
 ) {
   const catalog = await loadCatalog();
   const definition = catalog.find((item) => sameCode(item.code, gameCode)) || { code: gameCode, title: fallbackTitle };
+  const availableSets = Array.isArray(definition.stimulus_sets) ? definition.stimulus_sets : [];
+  const selectedSet = availableSets.includes(stimulusSet)
+    ? stimulusSet
+    : availableSets.length
+      ? availableSets[Math.floor(Math.random() * availableSets.length)]
+      : "";
+  // The game's own example shows the same set as the task itself
+  const runtimeDefinition = { ...definition, selected_stimulus_set: selectedSet };
   const base = `/api/games/${encodeURIComponent(definition.code)}`;
 
   // Instruction, the self-playing example and a practice round. The games'
@@ -111,9 +123,12 @@ export async function mountGame(
   const gameApi = {
     async start() {
       const options = { method: "POST" };
-      if (startOptions) {
+      // A course task names itself; the core takes level and set from the
+      // plan. A free game asks for the set chosen above.
+      const body = startOptions ? { ...startOptions } : selectedSet ? { stimulus_set: selectedSet } : null;
+      if (body) {
         options.headers = { "Content-Type": "application/json" };
-        options.body = JSON.stringify(startOptions);
+        options.body = JSON.stringify(body);
       }
       previous = await request(`${base}/start`, options);
       return previous;
@@ -149,7 +164,7 @@ export async function mountGame(
   };
 
   container.replaceChildren();
-  const cleanup = await renderer.mount({ container, definition, api: gameApi, close: onClose });
+  const cleanup = await renderer.mount({ container, definition: runtimeDefinition, api: gameApi, close: onClose });
   if (adjust.onMounted) adjust.onMounted(container);
   // The interface example already played, or the person is returning straight
   // to the task: do not stop on the game's own «here will be a GIF» screen.

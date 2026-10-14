@@ -417,6 +417,7 @@ function playOn(stage, game, isCurrent, { onFinished, onClose, onUnavailable, st
     // Задание курса называет себя номером занятия и задания; уровень и
     // стимульный набор ядро берёт из сохранённого плана.
     startOptions,
+    stimulusSet: game.stimulus_set ?? null,
     introStage: model.stage,
     onIntroStage(step) {
       if (isCurrent()) setStage(step);

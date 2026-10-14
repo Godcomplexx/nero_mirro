@@ -8,8 +8,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from neuro_mirror.plugins.games.base import BrowserGamePlugin
+from neuro_mirror.plugins.games.difficulty_config import level_config
 from neuro_mirror.plugins.games.gm15_picture_naming.stimuli import (
-    ITEMS_PER_CATEGORY,
     PICTURE_SETS,
     RECORDING_MS,
 )
@@ -21,6 +21,8 @@ class NamingSession:
     session_id: str
     items: list[dict[str, Any]]
     stimulus_set: str
+    difficulty_level: int
+    difficulty_parameters: dict[str, Any]
     item_index: int = 0
     shown_at_ms: float = field(default_factory=lambda: time.time() * 1000)
     round_events: list[dict[str, Any]] = field(default_factory=list)
@@ -36,17 +38,49 @@ class Gm15PictureNamingPlugin(BrowserGamePlugin):
         self._random = secrets.SystemRandom()
 
     def start_game(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return self._start(stimulus_set=str(payload.get("stimulus_set") or ""))
+        return self._start(
+            stimulus_set=str(payload.get("stimulus_set") or ""),
+            difficulty_level=payload.get("difficulty_level"),
+        )
 
-    def _start(self, *, stimulus_set: str = "") -> dict[str, Any]:
+    def _start(self, *, stimulus_set: str = "", difficulty_level: object = None) -> dict[str, Any]:
+        config = level_config(self.game_code)
+        try:
+            level = int(difficulty_level or config["default_level"])
+        except (TypeError, ValueError):
+            level = int(config["default_level"])
+        available_levels = {int(item["level"]): item for item in config["levels"]}
+        if level not in available_levels:
+            level = int(config["default_level"])
+        parameters = dict(available_levels[level]["parameters"])
         sets_by_name = {category.casefold(): (category, source) for category, source in PICTURE_SETS}
         available = tuple(name for name in self.definition.stimulus_sets if name.casefold() in sets_by_name) or tuple(sets_by_name)
         selected_set = next((name for name in available if name.casefold() == stimulus_set.casefold()), available[0])
-        category, source = sets_by_name[selected_set.casefold()]
-        items = [dict(item, category=category) for item in source]
-        self._random.shuffle(items)
-        items = items[:ITEMS_PER_CATEGORY]
-        session = NamingSession(uuid.uuid4().hex, items, selected_set)
+        remaining_sets = [name for name in available if name != selected_set]
+        self._random.shuffle(remaining_sets)
+        active_sets = [selected_set, *remaining_sets][:int(parameters["category_count"])]
+        queues = {}
+        for set_name in active_sets:
+            category, source = sets_by_name[set_name.casefold()]
+            queues[set_name] = [dict(item, category=category) for item in source]
+            self._random.shuffle(queues[set_name])
+        item_count = int(parameters["items"])
+        switch_every = int(parameters["switch_every"])
+        if switch_every <= 0:
+            set_order = [active_sets[0]] * item_count
+        else:
+            set_order = [
+                active_sets[(index // switch_every) % len(active_sets)]
+                for index in range(item_count)
+            ]
+        items = [queues[set_name].pop() for set_name in set_order]
+        session = NamingSession(
+            uuid.uuid4().hex,
+            items,
+            selected_set,
+            level,
+            parameters,
+        )
         self._sessions[session.session_id] = session
         return self._payload(session)
 
@@ -94,6 +128,8 @@ class Gm15PictureNamingPlugin(BrowserGamePlugin):
             "finished": False,
             "session_id": session.session_id,
             "stimulus_set": session.stimulus_set,
+            "difficulty_level": session.difficulty_level,
+            "difficulty_parameters": dict(session.difficulty_parameters),
             "item_number": session.item_index + 1,
             "item_count": len(session.items),
             "category": item["category"],

@@ -21,22 +21,25 @@ from neuro_mirror.screening.difficulty_policy import (
 
 # ── Соответствие матрице игр ──────────────────────────────────────────────────
 
-MATRIX_GAMES_WITH_LEVELS = {
+# Формы, у которых курс меняет уровень. Это 12 форм с уровнями из «Матрицы
+# игр v5» и с показателем успешности по методике (раздел 7, «Готовность к
+# адаптации»: да). У остальных уровни есть, но предварительные (draft в
+# game_levels.json): игра идёт на них, а курс уровень не меняет.
+ADAPTIVE_FORMS = {
     "GM-01", "GM-02", "GM-03", "GM-04", "GM-06",
     "GM-07", "GM-09", "GM-10", "GM-14", "GM-17", "GM-18", "GM-22",
 }
 
 
-def test_levels_follow_the_game_matrix():
-    """Уровни заданы матрицей игр; здесь их нельзя назначить самовольно."""
+def test_only_forms_ready_for_adaptation_change_level():
+    """Курс меняет уровень только у форм, готовых к адаптации по методике."""
     covered = {game.code for game in GAME_CATALOG if has_levels(game.code)}
-    assert covered == MATRIX_GAMES_WITH_LEVELS
+    assert covered == ADAPTIVE_FORMS
 
 
-def test_every_form_with_levels_has_levels_in_the_catalog():
-    by_code = {game.code: game for game in GAME_CATALOG}
-    for code in MATRIX_GAMES_WITH_LEVELS:
-        assert len(by_code[code].difficulty_levels) == 3, code
+def test_every_form_has_three_levels_in_the_catalog():
+    for game in GAME_CATALOG:
+        assert len(game.difficulty_levels) == 3, game.code
 
 
 # ── Успешность: числитель и знаменатель ───────────────────────────────────────
@@ -204,3 +207,44 @@ def test_a_form_failing_through_mastering_is_marked_hard():
 
 def test_a_form_not_shown_in_mastering_starts_at_the_first_level():
     assert assign_level([]) == FormState()
+
+
+# ── Утверждённые и предварительные уровни ─────────────────────────────────────
+
+def test_every_game_says_where_its_levels_come_from():
+    from neuro_mirror.plugins.games.difficulty_config import level_config
+
+    for game in GAME_CATALOG:
+        assert level_config(game.code)["source"].strip(), game.code
+
+
+def test_levels_missing_in_the_matrix_are_marked_draft():
+    """В матрице у этих форм уровни пустые — значения предварительные."""
+    from neuro_mirror.plugins.games.difficulty_config import level_status
+
+    draft = {game.code for game in GAME_CATALOG if level_status(game.code) == "draft"}
+    assert draft == {
+        "GM-05", "GM-08", "GM-11", "GM-12", "GM-13", "GM-15",
+        "GM-16", "GM-19", "GM-20", "GM-21", "GM-23", "GM-24",
+    }
+
+
+def test_the_course_adapts_only_forms_with_approved_levels():
+    from neuro_mirror.plugins.games.difficulty_config import level_status
+
+    for code in ADAPTIVE_FORMS:
+        assert level_status(code) == "configured", code
+
+
+def test_the_levels_document_matches_the_json():
+    """docs/game-levels.md собирается из game_levels.json и не отстаёт от него."""
+    import importlib.util
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    spec = importlib.util.spec_from_file_location("make_doc", root / "docs" / "make_game_levels_doc.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    current = module.TARGET.read_text(encoding="utf-8")
+    module.main()
+    assert module.TARGET.read_text(encoding="utf-8") == current, "запустите python docs/make_game_levels_doc.py"

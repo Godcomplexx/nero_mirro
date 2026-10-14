@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from neuro_mirror.plugins.games.base import BrowserGamePlugin
-from neuro_mirror.plugins.games.gm10_find_difference.stimuli import SCENES
+from neuro_mirror.plugins.games.gm10_find_difference.stimuli import SCENES_BY_LEVEL, STIMULUS_SET_VERSION
 from neuro_mirror.screening.gm10_scoring import score_gm10
 
 
@@ -29,17 +29,12 @@ class Gm10FindDifferencePlugin(BrowserGamePlugin):
     def start_game(self,payload):
         return self._start(stimulus_set=str(payload.get("stimulus_set") or ""),difficulty_level=payload.get("difficulty_level"))
     def _start(self,*,stimulus_set="",difficulty_level=None):
-        scenes_by_name={str(scene["name"]).casefold():scene for scene in SCENES}
-        available=tuple(name for name in self.definition.stimulus_sets if name.casefold() in scenes_by_name) or tuple(scenes_by_name)
-        requested=next((name for name in available if name.casefold()==stimulus_set.casefold()),available[0])
-        if difficulty_level in (None, ""):
-            selected=requested
-            level=(4,6,9).index(len(scenes_by_name[selected.casefold()]["differences"]))+1
-        else:
-            try:level=min(3,max(1,int(difficulty_level)))
-            except (TypeError,ValueError):level=1
-            selected=available[level-1]
-        session=DifferenceSession(uuid.uuid4().hex,[scenes_by_name[selected.casefold()]],selected,level);self._sessions[session.session_id]=session;return self._payload(session)
+        try:level=min(3,max(1,int(difficulty_level or 1)))
+        except (TypeError,ValueError):level=1
+        available=tuple(self.definition.stimulus_sets)
+        selected=next((name for name in available if name.casefold()==stimulus_set.casefold()),available[level-1])
+        scenes=list(SCENES_BY_LEVEL[level])
+        session=DifferenceSession(uuid.uuid4().hex,scenes,selected,level);self._sessions[session.session_id]=session;return self._payload(session)
     def _answer(self,payload):
         session=self._sessions.get(str(payload.get("session_id") or ""))
         if session is None:return {"ok":False,"message":"Игровая сессия не найдена."}
@@ -57,4 +52,4 @@ class Gm10FindDifferencePlugin(BrowserGamePlugin):
         result=self._payload(session);result.update({"correct":correct,"hit":hit,"scene_complete":scene_complete});return result
     def _payload(self,session):
         scene=session.scenes[session.scene_index]
-        return {"ok":True,"finished":False,"session_id":session.session_id,"stimulus_set":session.stimulus_set,"difficulty_level":session.difficulty_level,"difficulty_parameters":{"differences":len(scene["differences"])},"scene":scene["name"],"scene_number":session.scene_index+1,"scene_count":len(session.scenes),"left":scene["left"],"right":scene["right"],"difference_count":len(scene["differences"]),"found":sorted(session.found)}
+        return {"ok":True,"finished":False,"session_id":session.session_id,"stimulus_set":session.stimulus_set,"stimulus_set_version":STIMULUS_SET_VERSION,"difficulty_level":session.difficulty_level,"difficulty_parameters":{"differences":len(scene["differences"])},"scene":scene["name"],"scene_number":session.scene_index+1,"scene_count":len(session.scenes),"left":scene["left"],"right":scene["right"],"difference_count":len(scene["differences"]),"found":sorted(session.found)}

@@ -60,15 +60,21 @@ def test_gm20_scoring_counts_perseveration_and_rule_violation() -> None:
     assert result["u06_complete"] is True
 
 
-def test_gm20_plugin_switches_after_ten_consecutive_correct_answers() -> None:
+def test_gm20_medium_level_switches_after_ten_consecutive_correct_answers() -> None:
     async def scenario() -> None:
         bus = EventBus()
         plugin = Gm20RuleSortingPlugin(bus)
         plugin._random = _PredictableRandom()  # type: ignore[assignment]
         await plugin.start()
         try:
-            reply = await bus.request(Event(topic=get_game_definition("GM-20").start_request_topic, source="test"))
+            reply = await bus.request(Event(
+                topic=get_game_definition("GM-20").start_request_topic,
+                source="test",
+                payload={"difficulty_level": 2},
+            ))
             session = plugin._sessions[reply["session_id"]]
+            assert session.difficulty_level == 2
+            assert session.rule_block_size == 10
             assert session.active_rule == "color"
 
             for _ in range(10):

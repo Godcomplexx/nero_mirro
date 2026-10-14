@@ -1,4 +1,3 @@
-const TRIAL_SLOT_MS = 6000;
 const SYMBOLS = { star: "★", triangle: "▲", heart: "♥" };
 const TRAINING_MATRIX = [
   { symbol: "star", style: "filled" }, { symbol: "triangle", style: "filled" }, { symbol: "heart", style: "filled" },
@@ -47,11 +46,9 @@ export function mount({ container, definition, api, close }) {
   const sections = [tutorial, training, complete, play, result];
   let state = null;
   let accepting = false;
-  let shownAt = 0;
   let active = true;
   let token = 0;
   let trainingBusy = false;
-  const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
   function showOnly(section) {
     sections.forEach((item) => { item.hidden = item !== section; });
@@ -116,7 +113,6 @@ export function mount({ container, definition, api, close }) {
   function renderTrial(payload) {
     state = payload;
     accepting = true;
-    shownAt = performance.now();
     matrix.replaceChildren(...payload.matrix.map(createElement));
     options.replaceChildren(...payload.options.map((item, index) => createOption(item, index, (_choice, button) => answer(item.id, button))));
     progress.textContent = `Матрица ${payload.trial} из ${payload.trial_count}`;
@@ -130,9 +126,6 @@ export function mount({ container, definition, api, close }) {
     const currentToken = token;
     button.classList.add("is-selected");
     options.querySelectorAll("button").forEach((item) => { item.disabled = true; });
-    const elapsed = performance.now() - shownAt;
-    if (elapsed < TRIAL_SLOT_MS) await delay(TRIAL_SLOT_MS - elapsed);
-    if (!active || currentToken !== token) return;
     try {
       const payload = await api.answer({ session_id: state.session_id, selected_id: selectedId, timestamp_ms: Date.now() });
       if (!active || currentToken !== token) return;

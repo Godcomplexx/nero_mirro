@@ -7,11 +7,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from neuro_mirror.plugins.games.base import BrowserGamePlugin
-from neuro_mirror.plugins.games.gm21_odd_one_out.stimuli import (
-    CATEGORIES,
-    MINIMUM_SESSION_MS,
-    REQUIRED_TRIALS,
-)
+from neuro_mirror.plugins.games.difficulty_config import level_config
+from neuro_mirror.plugins.games.gm21_odd_one_out.stimuli import CATEGORIES
 from neuro_mirror.screening.gm21_scoring import score_gm21
 
 
@@ -20,6 +17,11 @@ class OddOneSession:
     session_id: str
     main_category: str
     stimulus_set: str
+    category_schedule: list[str]
+    difficulty_level: int
+    difficulty_parameters: dict[str, Any]
+    required_trials: int
+    switch_every: int
     started_at_ms: float = field(default_factory=lambda: time.time() * 1000)
     shown_at_ms: float = 0.0
     trial_index: int = 0
@@ -37,18 +39,51 @@ class Gm21OddOneOutPlugin(BrowserGamePlugin):
         self._random = secrets.SystemRandom()
 
     def start_game(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return self._start(stimulus_set=str(payload.get("stimulus_set") or ""))
+        return self._start(
+            stimulus_set=str(payload.get("stimulus_set") or ""),
+            difficulty_level=payload.get("difficulty_level"),
+        )
 
-    def _start(self, *, stimulus_set: str = "") -> dict[str, Any]:
+    def _start(self, *, stimulus_set: str = "", difficulty_level: object = None) -> dict[str, Any]:
+        config = level_config(self.game_code)
+        try:
+            level = int(difficulty_level or config["default_level"])
+        except (TypeError, ValueError):
+            level = int(config["default_level"])
+        available_levels = {int(item["level"]): item for item in config["levels"]}
+        if level not in available_levels:
+            level = int(config["default_level"])
+        parameters = dict(available_levels[level]["parameters"])
+        required_trials = int(parameters["trials"])
+        category_count = int(parameters["category_count"])
+        switch_every = int(parameters["switch_every"])
+
         categories_by_name = {name.casefold(): name for name in CATEGORIES}
         available = tuple(name for name in self.definition.stimulus_sets if name.casefold() in categories_by_name)
-        selected = next((name for name in available if name.casefold() == stimulus_set.casefold()), available[0])
-        session = OddOneSession(uuid.uuid4().hex, categories_by_name[selected.casefold()], selected)
+        requested = next((name for name in available if name.casefold() == stimulus_set.casefold()), None)
+        selected = requested or self._random.choice(available)
+        first_category = categories_by_name[selected.casefold()]
+        other_categories = [name for name in CATEGORIES if name != first_category]
+        selected_categories = [first_category]
+        selected_categories.extend(self._random.sample(other_categories, category_count - 1))
+        session = OddOneSession(
+            uuid.uuid4().hex,
+            first_category,
+            selected,
+            selected_categories,
+            level,
+            parameters,
+            required_trials,
+            switch_every,
+        )
         self._sessions[session.session_id] = session
         return self._prepare_trial(session)
 
     def _prepare_trial(self, session: OddOneSession) -> dict[str, Any]:
         category_names = list(CATEGORIES)
+        if session.switch_every > 0:
+            block_index = session.trial_index // session.switch_every
+            session.main_category = session.category_schedule[block_index % len(session.category_schedule)]
         main_category = session.main_category
         odd_category = self._random.choice([name for name in category_names if name != main_category])
         main_items = self._random.sample(list(CATEGORIES[main_category]), 3)
@@ -98,7 +133,7 @@ class Gm21OddOneOutPlugin(BrowserGamePlugin):
         )
         session.trial_index += 1
         elapsed_ms = now_ms - session.started_at_ms
-        if session.trial_index >= REQUIRED_TRIALS and elapsed_ms >= MINIMUM_SESSION_MS:
+        if session.trial_index >= session.required_trials:
             events = list(session.round_events)
             self._sessions.pop(session.session_id, None)
             return {
@@ -106,7 +141,7 @@ class Gm21OddOneOutPlugin(BrowserGamePlugin):
                 "finished": True,
                 "correct": correct,
                 "events": events,
-                "metrics": score_gm21(events, elapsed_ms),
+                "metrics": score_gm21(events, elapsed_ms, expected_trial_count=session.required_trials),
             }
         result = self._prepare_trial(session)
         result["previous_correct"] = correct
@@ -119,9 +154,11 @@ class Gm21OddOneOutPlugin(BrowserGamePlugin):
             "finished": False,
             "session_id": session.session_id,
             "stimulus_set": session.stimulus_set,
+            "difficulty_level": session.difficulty_level,
+            "difficulty_parameters": dict(session.difficulty_parameters),
             "trial_number": session.trial_index + 1,
-            "required_trials": REQUIRED_TRIALS,
-            "bonus": session.trial_index >= REQUIRED_TRIALS,
+            "required_trials": session.required_trials,
+            "bonus": False,
             "choices": [
                 {"id": choice["id"], "image": choice["image"]}
                 for choice in session.current_trial["choices"]

@@ -9,7 +9,8 @@ from typing import Any
 from neuro_mirror.plugins.games.base import BrowserGamePlugin
 from neuro_mirror.plugins.games.gm18_puzzle.stimuli import (
     BONUS_PUZZLE,
-    PUZZLES,
+    GRID_BY_LEVEL,
+    PUZZLES_BY_LEVEL,
 )
 from neuro_mirror.screening.gm18_scoring import score_gm18
 
@@ -61,17 +62,15 @@ class Gm18PuzzlePlugin(BrowserGamePlugin):
     def _start(self, *, stimulus_set: str = "", difficulty_level: object = None) -> dict[str, Any]:
         try: level = min(3, max(1, int(difficulty_level or 1)))
         except (TypeError, ValueError): level = 1
-        puzzles_by_set = {
-            "пейзаж": PUZZLES[0],
-            "натюрморт или интерьер": PUZZLES[1],
-            "портрет": PUZZLES[2],
-        }
-        available = tuple(name for name in self.definition.stimulus_sets if name in puzzles_by_set) or tuple(puzzles_by_set)
+        available = tuple(self.definition.stimulus_sets)
         selected = stimulus_set if stimulus_set in available else available[0]
-        source = puzzles_by_set[selected]
-        rows, columns = ((2, 3), (3, 4), (4, 5))[level - 1]
-        puzzle = {**source, "rows": rows, "columns": columns}
-        session = PuzzleSession(uuid.uuid4().hex, [puzzle], selected, level)
+        rows, columns = GRID_BY_LEVEL[level]
+        puzzles = [
+            {**source, "rows": rows, "columns": columns}
+            for source in PUZZLES_BY_LEVEL[level]
+        ]
+        self._random.shuffle(puzzles)
+        session = PuzzleSession(uuid.uuid4().hex, puzzles, selected, level)
         self._sessions[session.session_id] = session
         return self._prepare_round(session)
 
@@ -149,7 +148,10 @@ class Gm18PuzzlePlugin(BrowserGamePlugin):
             "session_id": session.session_id,
             "stimulus_set": session.stimulus_set,
             "difficulty_level": session.difficulty_level,
-            "difficulty_parameters": {"pieces": puzzle["rows"] * puzzle["columns"]},
+            "difficulty_parameters": {
+                "pieces": puzzle["rows"] * puzzle["columns"],
+                "puzzles": len(session.puzzles),
+            },
             "round_number": session.round_index + 1,
             "required_rounds": len(session.puzzles),
             "bonus": session.round_index >= len(session.puzzles),

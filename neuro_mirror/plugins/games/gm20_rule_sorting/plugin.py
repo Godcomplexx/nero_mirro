@@ -7,13 +7,12 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from neuro_mirror.plugins.games.base import BrowserGamePlugin
+from neuro_mirror.plugins.games.difficulty_config import level_config
 from neuro_mirror.plugins.games.gm20_rule_sorting.stimuli import (
     COLORS,
     REFERENCES,
-    RULE_BLOCK_SIZE,
     RULES,
     SHAPES,
-    TRIAL_COUNT,
 )
 from neuro_mirror.screening.gm20_scoring import score_gm20_trials
 
@@ -23,6 +22,10 @@ class RuleSortingSession:
     session_id: str
     active_rule: str
     rule_schedule: list[str]
+    difficulty_level: int
+    difficulty_parameters: dict[str, Any]
+    trial_count: int
+    rule_block_size: int
     trial_index: int = 0
     consecutive_correct: int = 0
     previous_rule: str | None = None
@@ -44,8 +47,25 @@ class Gm20RuleSortingPlugin(BrowserGamePlugin):
         self._sessions: dict[str, RuleSortingSession] = {}
         self._random = secrets.SystemRandom()
 
-    def _start_session(self) -> dict[str, Any]:
-        block_count = TRIAL_COUNT // RULE_BLOCK_SIZE
+    def start_game(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._start_session(difficulty_level=payload.get("difficulty_level"))
+
+    def _start_session(self, *, difficulty_level: object = None) -> dict[str, Any]:
+        config = level_config(self.game_code)
+        try:
+            level = int(difficulty_level or config["default_level"])
+        except (TypeError, ValueError):
+            level = int(config["default_level"])
+        available_levels = {int(item["level"]): item for item in config["levels"]}
+        if level not in available_levels:
+            level = int(config["default_level"])
+        parameters = dict(available_levels[level]["parameters"])
+        trial_count = int(parameters["trials"])
+        rule_block_size = int(parameters["rule_block_size"])
+        if trial_count <= 0 or rule_block_size <= 0 or trial_count % rule_block_size:
+            raise RuntimeError("GM-20: число карточек должно делиться на размер блока правил")
+
+        block_count = trial_count // rule_block_size
         remaining = {rule: block_count // len(RULES) for rule in RULES}
         for rule in RULES[: block_count % len(RULES)]:
             remaining[rule] += 1
@@ -68,6 +88,10 @@ class Gm20RuleSortingPlugin(BrowserGamePlugin):
             session_id=uuid.uuid4().hex,
             active_rule=rule_schedule[0],
             rule_schedule=rule_schedule,
+            difficulty_level=level,
+            difficulty_parameters=parameters,
+            trial_count=trial_count,
+            rule_block_size=rule_block_size,
         )
         self._sessions[session.session_id] = session
         return self._prepare_trial(session)
@@ -94,7 +118,9 @@ class Gm20RuleSortingPlugin(BrowserGamePlugin):
             "finished": False,
             "session_id": session.session_id,
             "trial": session.trial_index + 1,
-            "trial_count": TRIAL_COUNT,
+            "trial_count": session.trial_count,
+            "difficulty_level": session.difficulty_level,
+            "difficulty_parameters": dict(session.difficulty_parameters),
             "references": REFERENCES,
             "stimulus": stimulus,
         }
@@ -135,17 +161,17 @@ class Gm20RuleSortingPlugin(BrowserGamePlugin):
         session.trials_since_switch += 1
 
         if (
-            session.trial_index % RULE_BLOCK_SIZE == 0
-            and session.trial_index < TRIAL_COUNT
+            session.trial_index % session.rule_block_size == 0
+            and session.trial_index < session.trial_count
         ):
             old_rule = session.active_rule
-            block_index = session.trial_index // RULE_BLOCK_SIZE
+            block_index = session.trial_index // session.rule_block_size
             session.active_rule = session.rule_schedule[block_index]
             session.previous_rule = old_rule
             session.consecutive_correct = 0
             session.trials_since_switch = 1
 
-        if session.trial_index >= TRIAL_COUNT:
+        if session.trial_index >= session.trial_count:
             self._sessions.pop(session_id, None)
             return {
                 "ok": True,

@@ -328,6 +328,12 @@ def create_app() -> FastAPI:
             [item.to_public_dict(implemented=item.code in implemented) for item in all_game_definitions()]
         )
 
+    @app.get("/api/games/levels")
+    async def game_levels() -> JSONResponse:
+        from neuro_mirror.plugins.games.difficulty_config import public_game_level_config
+
+        return JSONResponse(public_game_level_config())
+
     @app.get("/api/questionnaires/san")
     async def san_questions() -> JSONResponse:
         """Вопросы опросника самочувствия.

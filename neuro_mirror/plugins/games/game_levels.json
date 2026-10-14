@@ -1,0 +1,247 @@
+{
+  "schema_version": 1,
+  "games": {
+    "GM-01": {
+      "status": "configured",
+      "source": "Матрица игр v5 от 08.09.2026, лист «Тестовые формы»",
+      "default_level": 1,
+      "levels": [
+        {"level": 1, "label": "Простой", "parameters": {"grid": "5×2, два раза", "pair_counts": [5, 5]}},
+        {"level": 2, "label": "Средний", "parameters": {"grid": "5×4", "pair_counts": [10]}},
+        {"level": 3, "label": "Сложный", "parameters": {"grid": "6×4", "pair_counts": [12]}}
+      ]
+    },
+    "GM-02": {
+      "status": "configured",
+      "source": "Матрица игр v5 от 08.09.2026, лист «Тестовые формы»",
+      "default_level": 1,
+      "levels": [
+        {"level": 1, "label": "Простой", "parameters": {"cycles": 10}},
+        {"level": 2, "label": "Средний", "parameters": {"cycles": 15}},
+        {"level": 3, "label": "Сложный", "parameters": {"cycles": 20}}
+      ]
+    },
+    "GM-03": {
+      "status": "configured",
+      "source": "Матрица игр v5 от 08.09.2026, лист «Тестовые формы»",
+      "default_level": 1,
+      "levels": [
+        {"level": 1, "label": "Простой", "parameters": {"missing_items": 5}},
+        {"level": 2, "label": "Средний", "parameters": {"missing_items": 7}},
+        {"level": 3, "label": "Сложный", "parameters": {"missing_items": 10}}
+      ]
+    },
+    "GM-04": {
+      "status": "configured",
+      "source": "Матрица игр v5 от 08.09.2026, лист «Тестовые формы»",
+      "default_level": 1,
+      "levels": [
+        {"level": 1, "label": "Простой", "parameters": {"grid_size": 4, "target_range": [3, 5]}},
+        {"level": 2, "label": "Средний", "parameters": {"grid_size": 8, "target_range": [4, 7]}},
+        {"level": 3, "label": "Сложный", "parameters": {"grid_size": 10, "target_range": [6, 10]}}
+      ]
+    },
+    "GM-05": {
+      "status": "draft",
+      "source": "Предварительные значения для апробации: в «Матрице игр v5» не заданы. Использовать до утверждения методистами",
+      "default_level": 1,
+      "levels": [
+        {"level": 1, "label": "Простой", "parameters": {"target_words": 4, "choice_words": 8, "study_ms": 6000}},
+        {"level": 2, "label": "Средний", "parameters": {"target_words": 6, "choice_words": 12, "study_ms": 7000}},
+        {"level": 3, "label": "Сложный", "parameters": {"target_words": 8, "choice_words": 16, "study_ms": 8000}}
+      ]
+    },
+    "GM-06": {
+      "status": "configured",
+      "source": "Матрица игр v5 от 08.09.2026, лист «Тестовые формы»",
+      "default_level": 1,
+      "levels": [
+        {"level": 1, "label": "Простой", "parameters": {"cycles": 10}},
+        {"level": 2, "label": "Средний", "parameters": {"cycles": 15}},
+        {"level": 3, "label": "Сложный", "parameters": {"cycles": 20}}
+      ]
+    },
+    "GM-07": {
+      "status": "configured",
+      "source": "Матрица игр v5 от 08.09.2026, лист «Тестовые формы»",
+      "note": "Игра работает на сетках 4×4, 8×8, 10×10 (16, 64, 100 объектов); в матрице — 10, 15, 20 объектов. Расхождение — уточнить у методистов.",
+      "default_level": 1,
+      "levels": [
+        {"level": 1, "label": "Простой", "parameters": {"grid_size": 4, "object_count": 16, "target_present_range": [3, 5]}},
+        {"level": 2, "label": "Средний", "parameters": {"grid_size": 8, "object_count": 64, "target_present_range": [4, 7]}},
+        {"level": 3, "label": "Сложный", "parameters": {"grid_size": 10, "object_count": 100, "target_present_range": [6, 10]}}
+      ]
+    },
+    "GM-08": {
+      "status": "draft",
+      "source": "Предварительные значения для апробации: в «Матрице игр v5» не заданы. Использовать до утверждения методистами",
+      "default_level": 1,
+      "levels": [
+        {"level": 1, "label": "Простой", "parameters": {"display_ms": 1200, "trial_slot_ms": 1800}},
+        {"level": 2, "label": "Средний", "parameters": {"display_ms": 900, "trial_slot_ms": 1500}},
+        {"level": 3, "label": "Сложный", "parameters": {"display_ms": 650, "trial_slot_ms": 1200}}
+      ]
+    },
+    "GM-09": {
+      "status": "configured",
+      "source": "Матрица игр v5 от 08.09.2026, лист «Тестовые формы»",
+      "default_level": 1,
+      "levels": [
+        {"level": 1, "label": "Простой", "parameters": {"tracked_objects": 2, "movement_ms": 4200}},
+        {"level": 2, "label": "Средний", "parameters": {"tracked_objects": 3, "movement_ms": 4200}},
+        {"level": 3, "label": "Сложный", "parameters": {"tracked_objects": 5, "movement_ms": 4200}}
+      ]
+    },
+    "GM-10": {
+      "status": "configured",
+      "source": "Матрица игр v5 от 08.09.2026, лист «Тестовые формы»",
+      "note": "Сцена уровня 1 «Детская площадка» содержит 6 отличий при диапазоне 4–5 — поправить сцену или диапазон.",
+      "default_level": 1,
+      "levels": [
+        {"level": 1, "label": "Простой", "parameters": {"scene_count": 5, "difference_range": [4, 5]}},
+        {"level": 2, "label": "Средний", "parameters": {"scene_count": 4, "difference_range": [6, 7]}},
+        {"level": 3, "label": "Сложный", "parameters": {"scene_count": 3, "difference_range": [9, 9]}}
+      ]
+    },
+    "GM-11": {
+      "status": "draft",
+      "source": "Предварительные значения для апробации: в «Матрице игр v5» не заданы. Использовать до утверждения методистами",
+      "default_level": 1,
+      "levels": [
+        {"level": 1, "label": "Простой", "parameters": {"block_correct_counts": [5], "operation_switches": 0}},
+        {"level": 2, "label": "Средний", "parameters": {"block_correct_counts": [5, 5], "operation_switches": 1}},
+        {"level": 3, "label": "Сложный", "parameters": {"block_correct_counts": [3, 2, 3, 2], "operation_switches": 3}}
+      ]
+    },
+    "GM-12": {
+      "status": "draft",
+      "source": "Предварительные значения для апробации: в «Матрице игр v5» не заданы. Использовать до утверждения методистами",
+      "default_level": 1,
+      "levels": [
+        {"level": 1, "label": "Простой", "parameters": {"category_count": 1, "switch_every": 0, "trials": 30}},
+        {"level": 2, "label": "Средний", "parameters": {"category_count": 2, "switch_every": 15, "trials": 30}},
+        {"level": 3, "label": "Сложный", "parameters": {"category_count": 3, "switch_every": 1, "trials": 30}}
+      ]
+    },
+    "GM-13": {
+      "status": "draft",
+      "source": "Предварительные значения для апробации: в «Матрице игр v5» не заданы. Использовать до утверждения методистами",
+      "default_level": 1,
+      "levels": [
+        {"level": 1, "label": "Простой", "parameters": {"category_count": 1, "block_duration_ms": 20000}},
+        {"level": 2, "label": "Средний", "parameters": {"category_count": 2, "block_duration_ms": 20000}},
+        {"level": 3, "label": "Сложный", "parameters": {"category_count": 3, "block_duration_ms": 20000}}
+      ]
+    },
+    "GM-14": {
+      "status": "configured",
+      "source": "Матрица игр v5 от 08.09.2026, лист «Тестовые формы»",
+      "default_level": 1,
+      "levels": [
+        {"level": 1, "label": "Простой", "parameters": {"letter_range": [3, 4]}},
+        {"level": 2, "label": "Средний", "parameters": {"letter_range": [4, 8]}},
+        {"level": 3, "label": "Сложный", "parameters": {"letter_range": [6, 12]}}
+      ]
+    },
+    "GM-15": {
+      "status": "draft",
+      "source": "Предварительные значения для апробации: в «Матрице игр v5» не заданы. Использовать до утверждения методистами",
+      "default_level": 1,
+      "levels": [
+        {"level": 1, "label": "Простой", "parameters": {"category_count": 1, "switch_every": 0, "items": 30}},
+        {"level": 2, "label": "Средний", "parameters": {"category_count": 2, "switch_every": 15, "items": 30}},
+        {"level": 3, "label": "Сложный", "parameters": {"category_count": 3, "switch_every": 1, "items": 30}}
+      ]
+    },
+    "GM-16": {
+      "status": "draft",
+      "source": "Предварительные значения для апробации: в «Матрице игр v5» не заданы. Использовать до утверждения методистами",
+      "default_level": 1,
+      "levels": [
+        {"level": 1, "label": "Простой", "parameters": {"letters": ["П", "С", "К", "О", "В", "Р"], "max_recording_ms": 300000}},
+        {"level": 2, "label": "Средний", "parameters": {"letters": ["М", "Б", "Д", "Т", "Н", "Г", "З", "И", "А", "У", "Л"], "max_recording_ms": 300000}},
+        {"level": 3, "label": "Сложный", "parameters": {"letters": ["Ф", "Ш", "Ч", "Э", "Х", "Ж", "Ц"], "max_recording_ms": 300000}}
+      ]
+    },
+    "GM-17": {
+      "status": "configured",
+      "source": "Матрица игр v5 от 08.09.2026, лист «Тестовые формы»",
+      "default_level": 1,
+      "levels": [
+        {"level": 1, "label": "Простой", "parameters": {"choices": 2, "trials": 30}},
+        {"level": 2, "label": "Средний", "parameters": {"choices": 3, "trials": 30}},
+        {"level": 3, "label": "Сложный", "parameters": {"choices": 4, "trials": 30}}
+      ]
+    },
+    "GM-18": {
+      "status": "configured",
+      "source": "Матрица игр v5 от 08.09.2026, лист «Тестовые формы»",
+      "default_level": 1,
+      "levels": [
+        {"level": 1, "label": "Простой", "parameters": {"pieces": 6, "grid": "3×2", "puzzles": 5}},
+        {"level": 2, "label": "Средний", "parameters": {"pieces": 12, "grid": "4×3", "puzzles": 4}},
+        {"level": 3, "label": "Сложный", "parameters": {"pieces": 20, "grid": "5×4", "puzzles": 3}}
+      ]
+    },
+    "GM-19": {
+      "status": "draft",
+      "source": "Предварительные значения для апробации: в «Матрице игр v5» не заданы. Использовать до утверждения методистами",
+      "default_level": 1,
+      "levels": [
+        {"level": 1, "label": "Простой", "parameters": {"size": 7, "mazes": 6, "minimum_shortest_steps": 18}},
+        {"level": 2, "label": "Средний", "parameters": {"size": 9, "mazes": 6, "minimum_shortest_steps": 32}},
+        {"level": 3, "label": "Сложный", "parameters": {"size": 11, "mazes": 6, "minimum_shortest_steps": 48}}
+      ]
+    },
+    "GM-20": {
+      "status": "draft",
+      "source": "Предварительные значения для апробации: в «Матрице игр v5» не заданы. Использовать до утверждения методистами",
+      "default_level": 1,
+      "levels": [
+        {"level": 1, "label": "Простой", "parameters": {"trials": 60, "rule_block_size": 20, "rule_switches": 2}},
+        {"level": 2, "label": "Средний", "parameters": {"trials": 60, "rule_block_size": 10, "rule_switches": 5}},
+        {"level": 3, "label": "Сложный", "parameters": {"trials": 60, "rule_block_size": 5, "rule_switches": 11}}
+      ]
+    },
+    "GM-21": {
+      "status": "draft",
+      "source": "Предварительные значения для апробации: в «Матрице игр v5» не заданы. Использовать до утверждения методистами",
+      "default_level": 1,
+      "levels": [
+        {"level": 1, "label": "Простой", "parameters": {"trials": 30, "category_count": 1, "switch_every": 0, "category_switches": 0}},
+        {"level": 2, "label": "Средний", "parameters": {"trials": 30, "category_count": 2, "switch_every": 5, "category_switches": 5}},
+        {"level": 3, "label": "Сложный", "parameters": {"trials": 36, "category_count": 3, "switch_every": 3, "category_switches": 11}}
+      ]
+    },
+    "GM-22": {
+      "status": "configured",
+      "source": "Матрица игр v5 от 08.09.2026, лист «Тестовые формы»",
+      "default_level": 1,
+      "levels": [
+        {"level": 1, "label": "Простой", "parameters": {"elements": 3}},
+        {"level": 2, "label": "Средний", "parameters": {"elements": 5}},
+        {"level": 3, "label": "Сложный", "parameters": {"elements": 7}}
+      ]
+    },
+    "GM-23": {
+      "status": "draft",
+      "source": "Предварительные значения для апробации: в «Матрице игр v5» не заданы. Использовать до утверждения методистами",
+      "default_level": 1,
+      "levels": [
+        {"level": 1, "label": "Простой", "parameters": {"trials": 18, "pattern_mode": "symbol_only", "style_count": 1, "option_count": 3}},
+        {"level": 2, "label": "Средний", "parameters": {"trials": 24, "pattern_mode": "symbol_and_style", "style_count": 2, "option_count": 4}},
+        {"level": 3, "label": "Сложный", "parameters": {"trials": 30, "pattern_mode": "dual_axis", "style_count": 2, "option_count": 6}}
+      ]
+    },
+    "GM-24": {
+      "status": "draft",
+      "source": "Предварительные значения для апробации: в «Матрице игр v5» не заданы. Использовать до утверждения методистами",
+      "default_level": 1,
+      "levels": [
+        {"level": 1, "label": "Простой", "parameters": {"trials": 12, "category_count": 2, "switch_every": 6, "category_switches": 1, "recording_ms": 4500}},
+        {"level": 2, "label": "Средний", "parameters": {"trials": 20, "category_count": 5, "switch_every": 2, "category_switches": 9, "recording_ms": 4500}},
+        {"level": 3, "label": "Сложный", "parameters": {"trials": 28, "category_count": 7, "switch_every": 1, "category_switches": 27, "recording_ms": 4500}}
+      ]
+    }
+  }
+}

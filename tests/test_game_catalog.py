@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from neuro_mirror.plugins.games.catalog import GAME_CATALOG, get_game_definition
+from neuro_mirror.plugins.games.difficulty_config import load_game_level_config
 from neuro_mirror.plugins.games.contracts import (
     Domain,
     GameDefinition,
@@ -52,6 +53,48 @@ def test_catalog_contains_all_spreadsheet_forms() -> None:
     }
     assert get_game_definition("gm19").primary_domain == Domain.ABSTRACTION
     assert get_game_definition("gm14_word_builder").primary_domain == Domain.SPEECH
+
+
+def test_json_difficulty_config_covers_catalog_and_drives_levels() -> None:
+    document = load_game_level_config()
+    assert set(document["games"]) == {item.code for item in GAME_CATALOG}
+    assert document["games"]["GM-10"]["levels"][0]["parameters"]["scene_count"] == 5
+    assert get_game_definition("GM-18").difficulty_levels[2].parameters == {
+        "pieces": 20,
+        "grid": "5×4",
+        "puzzles": 3,
+    }
+    assert get_game_definition("GM-19").difficulty_levels[2].parameters == {
+        "size": 11,
+        "mazes": 6,
+        "minimum_shortest_steps": 48,
+    }
+    assert get_game_definition("GM-08").difficulty_levels[2].parameters == {
+        "display_ms": 650,
+        "trial_slot_ms": 1200,
+    }
+    assert get_game_definition("GM-11").difficulty_levels[2].parameters == {
+        "block_correct_counts": [3, 2, 3, 2],
+        "operation_switches": 3,
+    }
+    assert get_game_definition("GM-12").difficulty_levels[2].parameters == {
+        "category_count": 3,
+        "switch_every": 1,
+        "trials": 30,
+    }
+    assert get_game_definition("GM-13").difficulty_levels[2].parameters == {
+        "category_count": 3,
+        "block_duration_ms": 20_000,
+    }
+    assert get_game_definition("GM-15").difficulty_levels[2].parameters == {
+        "category_count": 3,
+        "switch_every": 1,
+        "items": 30,
+    }
+    assert get_game_definition("GM-16").difficulty_levels[2].parameters == {
+        "letters": ["Ф", "Ш", "Ч", "Э", "Х", "Ж", "Ц"],
+        "max_recording_ms": 300_000,
+    }
 
 
 def test_plugin_can_define_a_game_outside_initial_catalog() -> None:
