@@ -1,8 +1,5 @@
 """Image categories and session settings for GM-21."""
 
-MINIMUM_SESSION_MS = 60_000
-REQUIRED_TRIALS = 12
-
 CATEGORIES = {
     "Животные": (
         ("Кошка", "cat.png"),

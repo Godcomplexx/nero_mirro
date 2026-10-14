@@ -172,8 +172,24 @@
         {"level": 3, "label": "Сложный", "parameters": {"size": 11, "mazes": 6, "minimum_shortest_steps": 48}}
       ]
     },
-    "GM-20": {"default_level": 1, "status": "not_configured", "levels": []},
-    "GM-21": {"default_level": 1, "status": "not_configured", "levels": []},
+    "GM-20": {
+      "default_level": 1,
+      "status": "configured",
+      "levels": [
+        {"level": 1, "label": "Простой", "parameters": {"trials": 60, "rule_block_size": 20, "rule_switches": 2}},
+        {"level": 2, "label": "Средний", "parameters": {"trials": 60, "rule_block_size": 10, "rule_switches": 5}},
+        {"level": 3, "label": "Сложный", "parameters": {"trials": 60, "rule_block_size": 5, "rule_switches": 11}}
+      ]
+    },
+    "GM-21": {
+      "default_level": 1,
+      "status": "configured",
+      "levels": [
+        {"level": 1, "label": "Простой", "parameters": {"trials": 30, "category_count": 1, "switch_every": 0, "category_switches": 0}},
+        {"level": 2, "label": "Средний", "parameters": {"trials": 30, "category_count": 2, "switch_every": 5, "category_switches": 5}},
+        {"level": 3, "label": "Сложный", "parameters": {"trials": 36, "category_count": 3, "switch_every": 3, "category_switches": 11}}
+      ]
+    },
     "GM-22": {
       "default_level": 1,
       "status": "configured",
@@ -183,7 +199,23 @@
         {"level": 3, "label": "Сложный", "parameters": {"elements": 7}}
       ]
     },
-    "GM-23": {"default_level": 1, "status": "not_configured", "levels": []},
-    "GM-24": {"default_level": 1, "status": "not_configured", "levels": []}
+    "GM-23": {
+      "default_level": 1,
+      "status": "configured",
+      "levels": [
+        {"level": 1, "label": "Простой", "parameters": {"trials": 18, "pattern_mode": "symbol_only", "style_count": 1, "option_count": 3}},
+        {"level": 2, "label": "Средний", "parameters": {"trials": 24, "pattern_mode": "symbol_and_style", "style_count": 2, "option_count": 4}},
+        {"level": 3, "label": "Сложный", "parameters": {"trials": 30, "pattern_mode": "dual_axis", "style_count": 2, "option_count": 6}}
+      ]
+    },
+    "GM-24": {
+      "default_level": 1,
+      "status": "configured",
+      "levels": [
+        {"level": 1, "label": "Простой", "parameters": {"trials": 12, "category_count": 2, "switch_every": 6, "category_switches": 1, "recording_ms": 4500}},
+        {"level": 2, "label": "Средний", "parameters": {"trials": 20, "category_count": 5, "switch_every": 2, "category_switches": 9, "recording_ms": 4500}},
+        {"level": 3, "label": "Сложный", "parameters": {"trials": 28, "category_count": 7, "switch_every": 1, "category_switches": 27, "recording_ms": 4500}}
+      ]
+    }
   }
 }

@@ -1,7 +1,5 @@
 """Category groups and timing for GM-24."""
 
-RECORDING_MS = 4_500
-
 CATEGORY_GROUPS = (
     {
         "category": "Животные",

@@ -317,10 +317,12 @@ def test_gm18_uses_all_puzzle_scenes_for_selected_difficulty() -> None:
 
 def test_gm21_uses_the_selected_main_category() -> None:
     plugin = Gm21OddOneOutPlugin(EventBus())
-    reply = plugin.start_game({"stimulus_set": "инструменты"})
+    reply = plugin.start_game({"stimulus_set": "инструменты", "difficulty_level": 1})
     session = plugin._sessions[reply["session_id"]]
 
     assert reply["stimulus_set"] == "инструменты"
+    assert reply["difficulty_level"] == 1
+    assert reply["required_trials"] == 30
     assert session.main_category == "Инструменты"
     assert session.current_trial["main_category"] == "Инструменты"
     assert sum(choice["category"] == "Инструменты" for choice in session.current_trial["choices"]) == 3
@@ -328,23 +330,28 @@ def test_gm21_uses_the_selected_main_category() -> None:
 
 def test_gm23_uses_the_selected_answer_symbol() -> None:
     plugin = Gm23MatrixReasoningPlugin(EventBus())
-    reply = plugin.start_game({"stimulus_set": "сердце"})
+    reply = plugin.start_game({"stimulus_set": "сердце", "difficulty_level": 1})
     session = plugin._sessions[reply["session_id"]]
     correct = next(option for option in reply["options"] if option["id"] == session.correct_id)
 
     assert reply["stimulus_set"] == "сердце"
+    assert reply["difficulty_level"] == 1
+    assert reply["trial_count"] == 18
+    assert len(reply["options"]) == 3
     assert correct["symbol"] == "heart"
     assert all((4 + offset) % 3 == 2 for offset in session.offsets)
 
 
-def test_gm24_uses_only_the_selected_category() -> None:
+def test_gm24_uses_selected_category_first_and_applies_difficulty() -> None:
     plugin = Gm24CategoryNamingPlugin(EventBus())
-    reply = plugin.start_game({"stimulus_set": "транспорт"})
+    reply = plugin.start_game({"stimulus_set": "транспорт", "difficulty_level": 1})
     session = plugin._sessions[reply["session_id"]]
 
     assert reply["stimulus_set"] == "транспорт"
-    assert reply["trial_count"] == 2
-    assert {trial["category"] for trial in session.trials} == {"Транспорт"}
+    assert reply["difficulty_level"] == 1
+    assert reply["trial_count"] == 12
+    assert session.trials[0]["category"] == "Транспорт"
+    assert len({trial["category"] for trial in session.trials}) == 2
 
 
 async def _run_plugin(plugin, start_topic, answer_topic, answer_builder, expected: int) -> dict:
@@ -398,7 +405,7 @@ def test_new_game_plugins_complete() -> None:
         await _run_plugin(
             Gm23MatrixReasoningPlugin(bus), get_game_definition("GM-23").start_request_topic, get_game_definition("GM-23").answer_request_topic,
             lambda plugin, reply: {"session_id": reply["session_id"],
-                                   "selected_id": plugin._sessions[reply["session_id"]].correct_id, "timestamp_ms": 1}, 10,
+                                   "selected_id": plugin._sessions[reply["session_id"]].correct_id, "timestamp_ms": 1}, 18,
         )
 
         def maze_answer(plugin, reply):

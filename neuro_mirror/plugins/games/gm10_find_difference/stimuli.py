@@ -1,6 +1,6 @@
 """Image pairs and normalized answer regions for GM-10."""
 
-STIMULUS_SET_VERSION = "3"
+STIMULUS_SET_VERSION = "4"
 
 SCENES_BY_LEVEL = {
     1: (
@@ -9,7 +9,7 @@ SCENES_BY_LEVEL = {
         {"name": "Кухня", "left": "kitchen_easy_01_a.png", "right": "kitchen_easy_01_b.png", "radius": .075,
          "differences": ((.10,.30),(.75,.31),(.53,.58),(.86,.28))},
         {"name": "Детская площадка", "left": "playground_easy_02_a.png", "right": "playground_easy_02_b.png", "radius": .075,
-         "differences": ((.67,.14),(.39,.56),(.68,.83),(.62,.59),(.31,.42))},
+         "differences": ((.67,.14),(.39,.56),(.68,.83),(.62,.59),(.31,.42),(.82,.55))},
         {"name": "Спальня", "left": "bedroom_easy_03_a.png", "right": "bedroom_easy_03_b.png", "radius": .075,
          "differences": ((.29,.12),(.08,.34),(.39,.34),(.14,.61))},
         {"name": "Сад", "left": "garden_easy_04_a.png", "right": "garden_easy_04_b.png", "radius": .075,
