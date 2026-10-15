@@ -266,8 +266,14 @@ def summarize_speech_metrics(tasks: list[dict[str, Any]]) -> dict[str, Any]:
     duration = sum(float(value or 0) for value in durations)
     active = sum(float(item.get("active_speech_seconds") or 0) for item in metrics)
     words = int(textual["word_count"])
+    # Незаконченность — свойство отдельного ответа: у склеенного текста
+    # проверялся бы только конец последнего ответа
+    unfinished = sum(
+        analyze_text(transcript)["unfinished_utterances"]["count"] for transcript in transcripts
+    )
     textual.update(
         {
+            "unfinished_utterances": {"count": unfinished, "detected": unfinished > 0},
             "duration_seconds": round(duration, 3) if has_acoustics else None,
             "active_speech_seconds": round(active, 3) if has_acoustics else None,
             "words_per_minute": (

@@ -147,3 +147,19 @@ def test_moca_audio_saving_parameter_can_disable_copy() -> None:
     )
 
     dataset_store.store_answer_audio.assert_not_called()
+
+
+def test_the_summary_counts_unfinished_answers_one_by_one() -> None:
+    """Склеенный текст проверял бы только конец последнего ответа."""
+    from neuro_mirror.screening.speech_metrics import summarize_speech_metrics
+
+    tasks = [
+        {"transcript": "лицо бархат и"},
+        {"transcript": "я знаю что"},
+        {"transcript": "лицо бархат церковь фиалка красный"},
+    ]
+    summary = summarize_speech_metrics(tasks)
+    assert summary["unfinished_utterances"] == {"count": 2, "detected": True}
+
+    finished = summarize_speech_metrics([{"transcript": "лицо бархат"}, {"transcript": "транспорт"}])
+    assert finished["unfinished_utterances"] == {"count": 0, "detected": False}
