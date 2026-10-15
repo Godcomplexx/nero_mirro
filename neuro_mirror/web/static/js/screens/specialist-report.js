@@ -138,6 +138,54 @@ function qualityBlock(quality) {
   return wrap;
 }
 
+// Methodology 8: MoCA change by total and domain; HADS change as context
+function changeText(change) {
+  if (change == null) return "—";
+  if (change === 0) return "без изменений";
+  return change > 0 ? `+${change}` : `−${Math.abs(change)}`;
+}
+
+function fromTo(before, after, change) {
+  return `${dash(before)} → ${dash(after)} (${changeText(change)})`;
+}
+
+function dynamicsSection(data) {
+  if (!data || (!data.moca && !data.hads)) {
+    return section("Динамика", el("p", "nm-panel-text", "Для динамики нужны хотя бы два прохождения теста."));
+  }
+  const children = [];
+  const moca = data.moca;
+  if (moca) {
+    children.push(
+      el("h4", "nm-spec-subtitle", `Аудио-MoCA: ${formatDate(moca.from.stored_at)} → ${formatDate(moca.to.stored_at)}`),
+      line("Сумма", fromTo(moca.from.score, moca.to.score, moca.total_change)),
+      table(
+        ["Домен", "Было", "Стало", "Изменение"],
+        (moca.domains || []).map((row) => [row.domain, row.from, row.to, changeText(row.change)]),
+      ),
+    );
+    if (!moca.comparable) {
+      const box = el("div", "nm-spec-quality nm-spec-quality-limited");
+      box.appendChild(line("Сопоставимость", "ограничена"));
+      const list = el("ul", "nm-spec-reasons");
+      for (const note of moca.comparability_notes || []) list.appendChild(el("li", null, note));
+      box.appendChild(list);
+      children.push(box);
+    }
+  }
+  const hads = data.hads;
+  if (hads) {
+    children.push(
+      el("h4", "nm-spec-subtitle", `HADS: ${formatDate(hads.from.stored_at)} → ${formatDate(hads.to.stored_at)}`),
+      line("Тревога", fromTo(hads.anxiety.from, hads.anxiety.to, hads.anxiety.change)),
+      line("Депрессия", fromTo(hads.depression.from, hads.depression.to, hads.depression.change)),
+      el("p", "nm-status-line", hads.note),
+    );
+  }
+  children.push(el("p", "nm-status-line", data.note));
+  return section("Динамика", ...children);
+}
+
 function mocaSection(entries) {
   if (!entries.length) return section("Когнитивный тест (MoCA)", el("p", "nm-panel-text", "Тест ещё не проходили."));
   const cards = entries.map((entry, index) => {
@@ -345,6 +393,7 @@ function buildReport(report, onClosed) {
     panel,
     head,
     el("p", "nm-status-line", `Сформирован: ${formatDate(report.generated_at)}. Режим закрывается сам через 15 минут без действий.`),
+    dynamicsSection(report.dynamics),
     mocaSection(report.moca || []),
     hadsSection(report.hads || []),
     screeningSection(report.screening || []),

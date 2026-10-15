@@ -20,6 +20,7 @@ from copy import deepcopy
 from typing import Any
 
 from neuro_mirror.screening.data_quality import assess
+from neuro_mirror.screening.dynamics import dynamics
 
 # Поля записи, которые видит пользователь.
 USER_FIELDS = frozenset({
@@ -279,5 +280,7 @@ def specialist_report(
         "san": san,
         "training": _training_entry(course, levels or {}, level_changes or []),
         "journal": _journal(sessions, journal_limit),
+        # Раздел 8 методологии: разница MoCA и контекст HADS
+        "dynamics": dynamics(items, entry_session_id=((course or {}).get("entry") or {}).get("session_id")),
         "speech_note": SPEECH_RESEARCH_NOTE,
     }
