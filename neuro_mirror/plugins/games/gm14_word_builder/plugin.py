@@ -22,6 +22,7 @@ class WordBuilderSession:
     shown_at_ms: float = 0.0
     current_attempts: list[dict[str, Any]] = field(default_factory=list)
     completed_words: list[dict[str, Any]] = field(default_factory=list)
+    rng: Any = None
 
 
 class Gm14WordBuilderPlugin(BrowserGamePlugin):
@@ -36,17 +37,22 @@ class Gm14WordBuilderPlugin(BrowserGamePlugin):
         self._random = secrets.SystemRandom()
 
     def start_game(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return self._start_session(stimulus_set=str(payload.get("stimulus_set") or ""), difficulty_level=payload.get("difficulty_level"))
+        return self._start_session(
+            stimulus_set=str(payload.get("stimulus_set") or ""),
+            difficulty_level=payload.get("difficulty_level"),
+            rng=self._session_random(payload),
+        )
 
-    def _start_session(self, *, stimulus_set: str = "", difficulty_level: object = None) -> dict[str, Any]:
+    def _start_session(self, *, stimulus_set: str = "", difficulty_level: object = None, rng: Any = None) -> dict[str, Any]:
+        rng = rng or self._random
         try: level = min(3, max(1, int(difficulty_level or 1)))
         except (TypeError, ValueError): level = 1
         letter_range = ((3, 4), (4, 8), (6, 12))[level - 1]
         available = tuple(name for name in self.definition.stimulus_sets if name in WORD_SETS) or tuple(WORD_SETS)
         selected = stimulus_set if stimulus_set in available else available[0]
         words = [word for word in WORD_SETS[selected] if letter_range[0] <= len(word) <= letter_range[1]]
-        self._random.shuffle(words)
-        session = WordBuilderSession(uuid.uuid4().hex, words, selected, level, letter_range)
+        rng.shuffle(words)
+        session = WordBuilderSession(uuid.uuid4().hex, words, selected, level, letter_range, rng=rng)
         self._sessions[session.session_id] = session
         return self._word_payload(session)
 
@@ -54,7 +60,7 @@ class Gm14WordBuilderPlugin(BrowserGamePlugin):
         target = session.words[session.word_index]
         letters = list(target)
         for _ in range(8):
-            self._random.shuffle(letters)
+            session.rng.shuffle(letters)
             if "".join(letters) != target:
                 break
         if len(letters) > 1 and "".join(letters) == target:
@@ -75,6 +81,14 @@ class Gm14WordBuilderPlugin(BrowserGamePlugin):
                 for index, letter in enumerate(letters)
             ],
         }
+
+    def _resume(self, session: WordBuilderSession, paused_ms: float) -> dict[str, Any]:
+        """Прерванное слово собирается заново: его попытки не оцениваются."""
+        session.current_attempts = []
+        return self._word_payload(session)
+
+    def _trial_number(self, session: WordBuilderSession) -> int:
+        return session.word_index + 1
 
     def _check_answer(self, payload: dict[str, Any]) -> dict[str, Any]:
         session_id = str(payload.get("session_id") or "")

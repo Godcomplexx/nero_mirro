@@ -19,6 +19,13 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
+from neuro_mirror.screening.course_report import (
+    TRAINING_NOTE,
+    course_summary,
+    moca_analogs,
+    notifications,
+    session_report,
+)
 from neuro_mirror.screening.data_quality import assess
 from neuro_mirror.screening.dynamics import dynamics
 
@@ -187,12 +194,18 @@ def _san_entry(item: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _training_entry(course: dict[str, Any] | None, levels: dict[str, Any], log: list[dict[str, Any]]) -> dict[str, Any] | None:
+def _training_entry(
+    course: dict[str, Any] | None,
+    levels: dict[str, Any],
+    log: list[dict[str, Any]],
+    san: list[dict[str, Any]] | None = None,
+) -> dict[str, Any] | None:
     if course is None:
         return None
     sessions = []
     for session in course.get("sessions") or []:
         games = session.get("games") or []
+        planned = session.get("status") == "planned"
         sessions.append({
             "number": session.get("number"),
             "stage": session.get("stage"),
@@ -218,7 +231,9 @@ def _training_entry(course: dict[str, Any] | None, levels: dict[str, Any], log: 
                     "flags": deepcopy(game.get("flags") or []),
                 }
                 for game in games
-            ] if session.get("status") != "planned" else [],
+            ] if not planned else [],
+            # Отчёт о занятии (методика, 8.2)
+            "report": None if planned else session_report(session, san or [], str(course.get("course_id") or "")),
         })
     return {
         "course_id": course.get("course_id"),
@@ -229,7 +244,11 @@ def _training_entry(course: dict[str, Any] | None, levels: dict[str, Any], log: 
         "sessions": sessions,
         "levels": deepcopy(levels),
         "level_changes": deepcopy(log),
-        "note": "Тренировочная динамика отражает выполнение упражнений, а не изменение когнитивного статуса.",
+        "hold": deepcopy(course.get("hold")),
+        "red_flags": deepcopy(course.get("red_flags") or []),
+        # Отчёт о курсе (методика, 8.3)
+        "summary": course_summary(course),
+        "note": TRAINING_NOTE,
     }
 
 
@@ -278,9 +297,16 @@ def specialist_report(
         "hads": hads,
         "screening": screening,
         "san": san,
-        "training": _training_entry(course, levels or {}, level_changes or []),
+        "training": _training_entry(course, levels or {}, level_changes or [], san),
         "journal": _journal(sessions, journal_limit),
-        # Раздел 8 методологии: разница MoCA и контекст HADS
-        "dynamics": dynamics(items, entry_session_id=((course or {}).get("entry") or {}).get("session_id")),
+        # Уведомления по курсу (методика курса, раздел 9)
+        "notifications": notifications(course, levels or {}),
+        # Раздел 8 методологии: разница MoCA и контекст HADS; оговорка об
+        # эффекте научения по формам-аналогам аудио-MoCA (методика курса, 8.3)
+        "dynamics": dynamics(
+            items,
+            entry_session_id=((course or {}).get("entry") or {}).get("session_id"),
+            moca_analogs=moca_analogs(course) if course else None,
+        ),
         "speech_note": SPEECH_RESEARCH_NOTE,
     }

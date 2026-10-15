@@ -280,3 +280,13 @@
   padding-left: 1.25rem;
   font-size: var(--nm-font-body);
 }
+
+/* Notifications of the training course (methodology, section 9): urgent ones
+   are marked by a word, not by colour alone */
+.nm-spec-notices {
+  margin-bottom: 0.75rem;
+}
+
+.nm-spec-notice-urgent {
+  font-weight: 600;
+}

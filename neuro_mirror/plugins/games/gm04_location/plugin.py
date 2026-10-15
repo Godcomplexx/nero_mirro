@@ -36,16 +36,20 @@ class Gm04LocationPlugin(BrowserGamePlugin):
         self._random = secrets.SystemRandom()
 
     def start_game(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return self._start(difficulty_level=payload.get("difficulty_level"))
+        return self._start(
+            difficulty_level=payload.get("difficulty_level"),
+            rng=self._session_random(payload),
+        )
 
-    def _start(self, *, difficulty_level: object = None) -> dict[str, Any]:
+    def _start(self, *, difficulty_level: object = None, rng: Any = None) -> dict[str, Any]:
+        rng = rng or self._random
         try:
             level = min(3, max(1, int(difficulty_level or 1)))
         except (TypeError, ValueError):
             level = 1
         grid_size, minimum, maximum = ((4, 3, 5), (8, 4, 7), (10, 6, 10))[level - 1]
         patterns = [
-            sorted(self._random.sample(range(grid_size ** 2), self._random.randint(minimum, maximum)))
+            sorted(rng.sample(range(grid_size ** 2), rng.randint(minimum, maximum)))
             for _ in range(ROUNDS)
         ]
         session = PatternSession(uuid.uuid4().hex, patterns, level, grid_size, (minimum, maximum))
@@ -88,6 +92,15 @@ class Gm04LocationPlugin(BrowserGamePlugin):
         result = self._payload(session)
         result.update({"correct": event["correct"], "previous_targets": targets, "previous_selected": selected})
         return result
+
+    def _resume(self, session: PatternSession, paused_ms: float) -> dict[str, Any]:
+        """Прерванный раунд начинается с нового показа клеток (4.5, п. 5)."""
+        session.phase = "study"
+        session.shown_ms = time.time() * 1000
+        return self._payload(session)
+
+    def _trial_number(self, session: PatternSession) -> int:
+        return session.round_index + 1
 
     def _payload(self, session: PatternSession) -> dict[str, Any]:
         return {

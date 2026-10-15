@@ -34,6 +34,7 @@ class RuleSortingSession:
     current_matches: dict[str, str] = field(default_factory=dict)
     shown_at_ms: float = 0.0
     trials: list[dict[str, Any]] = field(default_factory=list)
+    rng: Any = None
 
 
 class Gm20RuleSortingPlugin(BrowserGamePlugin):
@@ -48,9 +49,13 @@ class Gm20RuleSortingPlugin(BrowserGamePlugin):
         self._random = secrets.SystemRandom()
 
     def start_game(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return self._start_session(difficulty_level=payload.get("difficulty_level"))
+        return self._start_session(
+            difficulty_level=payload.get("difficulty_level"),
+            rng=self._session_random(payload),
+        )
 
-    def _start_session(self, *, difficulty_level: object = None) -> dict[str, Any]:
+    def _start_session(self, *, difficulty_level: object = None, rng: Any = None) -> dict[str, Any]:
+        rng = rng or self._random
         config = level_config(self.game_code)
         try:
             level = int(difficulty_level or config["default_level"])
@@ -81,7 +86,7 @@ class Gm20RuleSortingPlugin(BrowserGamePlugin):
                 rule for rule in available
                 if remaining[rule] == highest_remaining
             ]
-            selected_rule = self._random.choice(candidates)
+            selected_rule = rng.choice(candidates)
             rule_schedule.append(selected_rule)
             remaining[selected_rule] -= 1
         session = RuleSortingSession(
@@ -92,13 +97,14 @@ class Gm20RuleSortingPlugin(BrowserGamePlugin):
             difficulty_parameters=parameters,
             trial_count=trial_count,
             rule_block_size=rule_block_size,
+            rng=rng,
         )
         self._sessions[session.session_id] = session
         return self._prepare_trial(session)
 
     def _prepare_trial(self, session: RuleSortingSession) -> dict[str, Any]:
         match_indexes = list(range(4))
-        self._random.shuffle(match_indexes)
+        session.rng.shuffle(match_indexes)
         color_index, shape_index, count_index = match_indexes[:3]
         stimulus = {
             "color": COLORS[color_index],
@@ -112,6 +118,9 @@ class Gm20RuleSortingPlugin(BrowserGamePlugin):
         }
         session.current_stimulus = stimulus
         session.current_matches = matches
+        return self._trial_payload(session)
+
+    def _trial_payload(self, session: RuleSortingSession) -> dict[str, Any]:
         session.shown_at_ms = time.time() * 1000
         return {
             "ok": True,
@@ -122,8 +131,15 @@ class Gm20RuleSortingPlugin(BrowserGamePlugin):
             "difficulty_level": session.difficulty_level,
             "difficulty_parameters": dict(session.difficulty_parameters),
             "references": REFERENCES,
-            "stimulus": stimulus,
+            "stimulus": session.current_stimulus,
         }
+
+    def _resume(self, session: RuleSortingSession, paused_ms: float) -> dict[str, Any]:
+        """Прерванная карточка показывается снова (4.5, п. 5)."""
+        return self._trial_payload(session)
+
+    def _trial_number(self, session: RuleSortingSession) -> int:
+        return session.trial_index + 1
 
     def _check_answer(self, payload: dict[str, Any]) -> dict[str, Any]:
         session_id = str(payload.get("session_id") or "")

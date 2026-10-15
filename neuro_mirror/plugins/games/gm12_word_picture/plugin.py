@@ -13,6 +13,7 @@ class PictureSession:
     difficulty_level: int = 1; difficulty_parameters: dict[str, Any] = field(default_factory=dict)
     shown_at_ms: float = 0.0
     choices: list[str] = field(default_factory=list); trials: list[dict[str, Any]] = field(default_factory=list)
+    rng: Any = None
 
 class Gm12WordPicturePlugin(BrowserGamePlugin):
     plugin_name = "gm12_word_picture"
@@ -23,8 +24,10 @@ class Gm12WordPicturePlugin(BrowserGamePlugin):
         return self._start(
             stimulus_set=str(payload.get("stimulus_set") or ""),
             difficulty_level=payload.get("difficulty_level"),
+            rng=self._session_random(payload),
         )
-    def _start(self, *, stimulus_set="", difficulty_level=None):
+    def _start(self, *, stimulus_set="", difficulty_level=None, rng=None):
+        rng = rng or self._random
         config = level_config(self.game_code)
         try:
             level = int(difficulty_level or config["default_level"])
@@ -40,7 +43,7 @@ class Gm12WordPicturePlugin(BrowserGamePlugin):
         ordered_categories = [selected] + [name for name in available if name != selected]
         active_categories = ordered_categories[:int(parameters["category_count"])]
         queues = {category: [item for item in ITEMS if item[0] == category] for category in active_categories}
-        for queue in queues.values(): self._random.shuffle(queue)
+        for queue in queues.values(): rng.shuffle(queue)
         trial_count = int(parameters["trials"])
         switch_every = int(parameters["switch_every"])
         if switch_every <= 0:
@@ -58,19 +61,29 @@ class Gm12WordPicturePlugin(BrowserGamePlugin):
             selected,
             difficulty_level=level,
             difficulty_parameters=parameters,
+            rng=rng,
         )
         self._sessions[session.session_id] = session
         return self._payload(session)
     def _payload(self, session):
         category, word, picture = session.order[session.index]
-        pool = [item for item in DISTRACTORS[category] if item != word]; self._random.shuffle(pool)
-        session.choices = [word] + pool[:3]; self._random.shuffle(session.choices); session.shown_at_ms = time.time() * 1000
+        pool = [item for item in DISTRACTORS[category] if item != word]; session.rng.shuffle(pool)
+        session.choices = [word] + pool[:3]; session.rng.shuffle(session.choices)
+        return self._trial_payload(session)
+    def _trial_payload(self, session):
+        category, word, picture = session.order[session.index]
+        session.shown_at_ms = time.time() * 1000
         return {"ok": True, "finished": False, "session_id": session.session_id, "trial": session.index + 1,
                 "trial_count": len(session.order),
                 "stimulus_set": session.stimulus_set,
                 "difficulty_level": session.difficulty_level,
                 "difficulty_parameters": dict(session.difficulty_parameters),
                 "category": category, "picture": picture, "choices": session.choices}
+    def _resume(self, session, paused_ms):
+        """Прерванная картинка показывается снова с теми же вариантами."""
+        return self._trial_payload(session)
+    def _trial_number(self, session):
+        return session.index + 1
     def _answer(self, payload):
         session = self._sessions.get(str(payload.get("session_id") or ""))
         if session is None: return {"ok": False, "message": "Игровая сессия не найдена."}

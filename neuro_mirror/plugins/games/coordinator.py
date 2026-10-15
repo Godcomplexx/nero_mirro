@@ -121,6 +121,9 @@ class GameSessionCoordinator(ProcessorPlugin):
                 success=counted or success(definition.code, metrics),
                 counted=counted is not None,
                 metrics=metrics,
+                u06_status=payload.get("u06_status"),
+                end_reason=payload.get("end_reason"),
+                time_limit_ms=payload.get("time_limit_ms"),
             )
         completed = self.session_store.complete(persistent_session_id, result) or {}
         result["session_status"] = completed.get("status", "completed")

@@ -16,6 +16,15 @@
 * ``abandoned`` — начато и брошено: пользователь завершил занятие или перешёл
   к другому заданию. Нулём не считается и в адаптацию не входит (6.2);
 * ``not_presented`` — занятие закончилось раньше, чем задание показали.
+
+У брошенного задания записывается причина (6.3): код и подпись из
+``training_safety``. Облегчённая альтернатива прерванного задания (6.3)
+встаёт в план сразу за ним: у неё ``alternative_for`` — номер прерванного
+задания, а у прерванного ``replaced_by`` — номер альтернативы. Уровень
+альтернативы временный: её прохождение в адаптацию не входит.
+
+Красный флаг (раздел 9) приостанавливает курс (``hold``): новое занятие не
+открывается, пока специалист не снимет приостановку.
 """
 from __future__ import annotations
 
@@ -62,6 +71,10 @@ class TrainingCourseStore:
 
     # ---- Чтение ----
 
+    @staticmethod
+    def is_alternative(item: dict[str, Any]) -> bool:
+        return item.get("alternative_for") is not None
+
     def latest_course(self, user_id: str) -> dict[str, Any] | None:
         # Курс без общего состава («plan») записан первой версией, где формы
         # подбирались заново к каждому занятию. Он остаётся в файле, но не
@@ -101,8 +114,10 @@ class TrainingCourseStore:
         """Прохождения курса в порядке показа — основа уровней форм."""
         result: list[CoursePass] = []
         for session in course["sessions"]:
-            for item in sorted(session["games"], key=lambda row: row["position"]):
-                if item.get("status") != ITEM_DONE:
+            for item in session["games"]:
+                # Облегчённая альтернатива идёт на временном уровне и в
+                # адаптацию не входит (6.3)
+                if item.get("status") != ITEM_DONE or TrainingCourseStore.is_alternative(item):
                     continue
                 counted = item.get("success") if item.get("counted") else None
                 result.append(
@@ -150,6 +165,8 @@ class TrainingCourseStore:
             "entry": {"session_id": entry_session_id, "profile": list(profile)},
             "plan": dict(plan),
             "sessions": sessions,
+            "red_flags": [],
+            "hold": None,
         }
         self._courses.append(course)
         self._save()
@@ -164,6 +181,7 @@ class TrainingCourseStore:
         states: dict[str, FormState],
         level_changes: list[dict[str, Any]],
         skipped: list[dict[str, str]] | None = None,
+        order: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Открыть занятие: записать подобранные формы с уровнями и наборами.
 
@@ -181,6 +199,9 @@ class TrainingCourseStore:
             status=SESSION_IN_PROGRESS,
             opened_at=_now(),
             level_changes=list(level_changes),
+            # Порядок заданий: зерно, нарушения желательных правил,
+            # закреплённые первое и последнее задания (4.4)
+            order=order,
         )
         self._save()
         return slot
@@ -219,6 +240,62 @@ class TrainingCourseStore:
         self._save()
         return item
 
+    def resume_item(self, *, user_id: str, session_number: int, position: int, game_session_id: str) -> dict[str, Any]:
+        """Задание, которое продолжается после паузы с прерванной пробы (4.5, п. 5).
+
+        Продолжается только начатое задание этого занятия с той же игровой
+        сессией; попыткой оно не считается.
+        """
+        session = self.open_session(user_id)
+        if session is None or int(session["number"]) != int(session_number):
+            raise CourseError("Это занятие уже завершено. Откройте тренировку заново.")
+        item = self._item(session, position)
+        if item is None or item["status"] != ITEM_STARTED or item.get("game_session_id") != game_session_id:
+            raise CourseError("Это задание не продолжить с места паузы.")
+        item["resumed"] = int(item.get("resumed") or 0) + 1
+        self._save()
+        return item
+
+    def interrupt_item(self, user_id: str, *, position: int, reason: dict[str, Any]) -> dict[str, Any]:
+        """Прервать задание с записанной причиной (6.3, п. 1).
+
+        Задание получает статус ``abandoned``: нулём оно не считается и в
+        адаптацию не входит.
+        """
+        session = self.open_session(user_id)
+        if session is None:
+            raise CourseError("Открытого занятия нет.")
+        item = self._item(session, position)
+        if item is None or item["status"] in (ITEM_DONE, ITEM_ABANDONED, ITEM_NOT_PRESENTED):
+            raise CourseError("Это задание уже закончено.")
+        item.update(status=ITEM_ABANDONED, finished_at=_now(), interruption_reason=dict(reason))
+        self._end_pause(session, "прерывание задания")
+        self._save()
+        return item
+
+    def add_alternative(self, user_id: str, *, position: int, alternative: dict[str, Any]) -> dict[str, Any]:
+        """Поставить облегчённую альтернативу сразу за прерванным заданием (6.3, п. 3)."""
+        session = self.open_session(user_id)
+        if session is None:
+            raise CourseError("Открытого занятия нет.")
+        original = self._item(session, position)
+        if original is None or original["status"] != ITEM_ABANDONED:
+            raise CourseError("Альтернатива ставится только вместо прерванного задания.")
+        number = max(int(row["position"]) for row in session["games"]) + 1
+        item = {
+            **alternative,
+            "position": number,
+            "alternative_for": int(position),
+            "status": ITEM_PENDING,
+            "attempts": 0,
+            "game_session_id": None,
+        }
+        original["replaced_by"] = number
+        index = session["games"].index(original)
+        session["games"].insert(index + 1, item)
+        self._save()
+        return item
+
     def attach_game_session(self, *, user_id: str, session_number: int, position: int, game_session_id: str) -> None:
         session = self.open_session(user_id)
         if session is None or int(session["number"]) != int(session_number):
@@ -238,6 +315,9 @@ class TrainingCourseStore:
         success: Success | None,
         counted: bool,
         metrics: dict[str, Any],
+        u06_status: str | None = None,
+        end_reason: str | None = None,
+        time_limit_ms: float | None = None,
     ) -> bool:
         """Дописать исход задания. Возвращает, относилась ли игра к курсу."""
         for course in reversed(self._courses):
@@ -254,35 +334,59 @@ class TrainingCourseStore:
                         finished_at=_now(),
                         completion_status=completion_status,
                         technical_validity=technical_validity,
+                        u06_status=u06_status,
+                        end_reason=end_reason,
+                        time_limit_ms=time_limit_ms,
                         success=success.to_dict() if success else None,
-                        counted=counted,
+                        counted=counted and not self.is_alternative(item),
                         metrics=dict(metrics),
                     )
-                    if all(row["status"] == ITEM_DONE for row in session["games"]):
+                    if self._all_settled(session):
                         self._close(course, session, SESSION_COMPLETED, reason="все задания выполнены")
                     self._save()
                     return True
         return False
 
-    def finish_session(self, user_id: str, *, reason: str) -> dict[str, Any] | None:
-        """Завершить открытое занятие, в том числе досрочно (4.5, п. 6)."""
+    def finish_session(
+        self, user_id: str, *, reason: str, interruption: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        """Завершить открытое занятие, в том числе досрочно (4.5, п. 6).
+
+        ``interruption`` — причина прерывания (6.3): она записывается
+        заданию, брошенному при завершении.
+        """
         course = self.latest_course(user_id)
         session = self.open_session(user_id)
         if course is None or session is None:
             return None
-        complete = all(row["status"] == ITEM_DONE for row in session["games"])
-        self._close(course, session, SESSION_COMPLETED if complete else SESSION_INCOMPLETE, reason=reason)
+        complete = self._all_settled(session)
+        if interruption:
+            session["interruption"] = dict(interruption)
+        self._close(
+            course,
+            session,
+            SESSION_COMPLETED if complete else SESSION_INCOMPLETE,
+            reason=reason,
+            interruption=interruption,
+        )
         self._save()
         return session
 
-    def pause(self, user_id: str, *, position: int | None) -> dict[str, Any]:
+    def pause(self, user_id: str, *, position: int | None, trial: int | None = None) -> dict[str, Any]:
+        """Отметить паузу: в каком задании и на какой пробе (4.5, п. 8)."""
         session = self.open_session(user_id)
         if session is None:
             raise CourseError("Открытого занятия нет.")
         pauses = session["pauses"]
         if pauses and pauses[-1].get("ended_at") is None:
             return pauses[-1]
-        record = {"position": position, "paused_at": _now(), "ended_at": None, "ended_by": None}
+        record = {
+            "position": position,
+            "trial": trial,
+            "paused_at": _now(),
+            "ended_at": None,
+            "ended_by": None,
+        }
         pauses.append(record)
         self._save()
         return record
@@ -295,15 +399,82 @@ class TrainingCourseStore:
         self._save()
         return record
 
+    # ---- Красные флаги (раздел 9) ----
+
+    def note_pre_check(self, user_id: str, *, new_symptoms: bool) -> dict[str, Any]:
+        """Ответ на вопрос о новых симптомах перед занятием."""
+        session = self.open_session(user_id)
+        if session is None:
+            raise CourseError("Открытого занятия нет.")
+        session["pre_check"] = {"at": _now(), "new_symptoms": bool(new_symptoms)}
+        self._save()
+        return session["pre_check"]
+
+    def raise_red_flag(self, user_id: str, *, source: str, detail: str) -> dict[str, Any]:
+        """Красный флаг: курс приостанавливается до решения специалиста."""
+        course = self.latest_course(user_id)
+        if course is None:
+            raise CourseError("Курса нет.")
+        session = self.open_session(user_id)
+        record = {
+            "at": _now(),
+            "source": source,
+            "detail": detail,
+            "session_number": int(session["number"]) if session else None,
+        }
+        course.setdefault("red_flags", []).append(record)
+        course["hold"] = {"since": record["at"], "reason": detail, "released_at": None}
+        self._save()
+        return record
+
+    def release_hold(self, user_id: str, *, note: str = "") -> dict[str, Any] | None:
+        """Специалист снимает приостановку курса."""
+        course = self.latest_course(user_id)
+        if course is None or not course.get("hold"):
+            return None
+        hold = course["hold"]
+        course.setdefault("holds", []).append({**hold, "released_at": _now(), "note": note})
+        course["hold"] = None
+        self._save()
+        return course["holds"][-1]
+
     # ---- Служебное ----
 
-    def _close(self, course: dict[str, Any], session: dict[str, Any], status: str, *, reason: str) -> None:
+    @staticmethod
+    def _item(session: dict[str, Any], position: int) -> dict[str, Any] | None:
+        return next((row for row in session["games"] if int(row["position"]) == int(position)), None)
+
+    @staticmethod
+    def _all_settled(session: dict[str, Any]) -> bool:
+        """Все задания выполнены; прерванное, заменённое выполненной
+        альтернативой, тоже считается закрытым."""
+        by_position = {int(row["position"]): row for row in session["games"]}
+        for item in session["games"]:
+            if item["status"] == ITEM_DONE:
+                continue
+            replacement = by_position.get(int(item.get("replaced_by") or 0))
+            if item["status"] == ITEM_ABANDONED and replacement and replacement["status"] == ITEM_DONE:
+                continue
+            return False
+        return True
+
+    def _close(
+        self,
+        course: dict[str, Any],
+        session: dict[str, Any],
+        status: str,
+        *,
+        reason: str,
+        interruption: dict[str, Any] | None = None,
+    ) -> None:
         moment = _now()
         self._end_pause(session, "завершение занятия")
         for item in session["games"]:
             if item["status"] == ITEM_STARTED:
                 item["status"] = ITEM_ABANDONED
                 item["finished_at"] = moment
+                if interruption:
+                    item["interruption_reason"] = dict(interruption)
             elif item["status"] == ITEM_PENDING:
                 item["status"] = ITEM_NOT_PRESENTED
         session.update(status=status, finished_at=moment, end_reason=reason)

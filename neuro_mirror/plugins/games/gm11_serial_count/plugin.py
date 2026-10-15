@@ -135,6 +135,14 @@ class Gm11SerialCountPlugin(BrowserGamePlugin):
         result.update({"correct": correct, "recognized": value, "expected": expected})
         return result
 
+    def _resume(self, session, paused_ms):
+        """Прерванный шаг счёта повторяется с того же числа (4.5, п. 5)."""
+        session.last_answer_ms = time.time() * 1000
+        return self._payload(session)
+
+    def _trial_number(self, session):
+        return len(session.round_events) + 1
+
     def _payload(self, session):
         rule = session.rules[session.rule_index]
         return {

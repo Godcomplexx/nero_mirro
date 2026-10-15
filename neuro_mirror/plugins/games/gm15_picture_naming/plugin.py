@@ -41,9 +41,11 @@ class Gm15PictureNamingPlugin(BrowserGamePlugin):
         return self._start(
             stimulus_set=str(payload.get("stimulus_set") or ""),
             difficulty_level=payload.get("difficulty_level"),
+            rng=self._session_random(payload),
         )
 
-    def _start(self, *, stimulus_set: str = "", difficulty_level: object = None) -> dict[str, Any]:
+    def _start(self, *, stimulus_set: str = "", difficulty_level: object = None, rng: Any = None) -> dict[str, Any]:
+        rng = rng or self._random
         config = level_config(self.game_code)
         try:
             level = int(difficulty_level or config["default_level"])
@@ -57,13 +59,13 @@ class Gm15PictureNamingPlugin(BrowserGamePlugin):
         available = tuple(name for name in self.definition.stimulus_sets if name.casefold() in sets_by_name) or tuple(sets_by_name)
         selected_set = next((name for name in available if name.casefold() == stimulus_set.casefold()), available[0])
         remaining_sets = [name for name in available if name != selected_set]
-        self._random.shuffle(remaining_sets)
+        rng.shuffle(remaining_sets)
         active_sets = [selected_set, *remaining_sets][:int(parameters["category_count"])]
         queues = {}
         for set_name in active_sets:
             category, source = sets_by_name[set_name.casefold()]
             queues[set_name] = [dict(item, category=category) for item in source]
-            self._random.shuffle(queues[set_name])
+            rng.shuffle(queues[set_name])
         item_count = int(parameters["items"])
         switch_every = int(parameters["switch_every"])
         if switch_every <= 0:
@@ -119,6 +121,14 @@ class Gm15PictureNamingPlugin(BrowserGamePlugin):
             }
         session.shown_at_ms = time.time() * 1000
         return self._payload(session)
+
+    def _resume(self, session: NamingSession, paused_ms: float) -> dict[str, Any]:
+        """Прерванное изображение показывается снова (4.5, п. 5)."""
+        session.shown_at_ms = time.time() * 1000
+        return self._payload(session)
+
+    def _trial_number(self, session: NamingSession) -> int:
+        return session.item_index + 1
 
     @staticmethod
     def _payload(session: NamingSession) -> dict[str, Any]:

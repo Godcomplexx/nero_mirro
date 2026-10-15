@@ -6,8 +6,10 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
-from neuro_mirror.plugins.games.base import BrowserGamePlugin
+from neuro_mirror.plugins.games.base import END_TIMEOUT, BrowserGamePlugin
+from neuro_mirror.plugins.games.difficulty_config import time_limit_ms, time_limit_visible
 from neuro_mirror.plugins.games.gm01_pair_cards.stimuli import STIMULI
+from neuro_mirror.plugins.games.task_clock import TaskClock
 from neuro_mirror.screening.gm01_scoring import score_gm01
 
 
@@ -23,6 +25,9 @@ class PairSession:
     matched: set[int] = field(default_factory=set)
     round_events: list[dict[str, Any]] = field(default_factory=list)
     started_ms: float = field(default_factory=lambda: time.time() * 1000)
+    rng: Any = None
+    # Лимит времени задания (методика, раздел 7: «в лимите времени»)
+    clock: TaskClock | None = None
 
 
 class Gm01PairCardsPlugin(BrowserGamePlugin):
@@ -40,9 +45,11 @@ class Gm01PairCardsPlugin(BrowserGamePlugin):
         return self._start(
             stimulus_set=str(payload.get("stimulus_set") or ""),
             difficulty_level=payload.get("difficulty_level"),
+            rng=self._session_random(payload),
         )
 
-    def _start(self, *, stimulus_set: str = "", difficulty_level: object = None) -> dict[str, Any]:
+    def _start(self, *, stimulus_set: str = "", difficulty_level: object = None, rng: Any = None) -> dict[str, Any]:
+        rng = rng or self._random
         try:
             level = min(3, max(1, int(difficulty_level or 1)))
         except (TypeError, ValueError):
@@ -55,12 +62,15 @@ class Gm01PairCardsPlugin(BrowserGamePlugin):
         selected_set = stimulus_set if stimulus_set in available_sets else available_sets[0]
         source = list(STIMULI[selected_set])
         for pair_count in level_boards:
-            chosen = self._random.sample(source, pair_count)
+            chosen = rng.sample(source, pair_count)
             cards = chosen + chosen
-            self._random.shuffle(cards)
+            rng.shuffle(cards)
             boards.append(cards)
         parameters = {"grid": ("5×2, два раза", "5×4", "6×4")[level - 1], "pair_counts": list(level_boards)}
-        session = PairSession(uuid.uuid4().hex, boards, selected_set, level, parameters)
+        limit = time_limit_ms(self.game_code, level)
+        session = PairSession(uuid.uuid4().hex, boards, selected_set, level, parameters, rng=rng)
+        if limit:
+            session.clock = TaskClock(limit)
         self._sessions[session.session_id] = session
         return self._payload(session)
 
@@ -91,6 +101,8 @@ class Gm01PairCardsPlugin(BrowserGamePlugin):
         if len(session.matched) == len(cards):
             session.board_index += 1
             session.matched.clear()
+            if session.clock is not None:
+                session.clock.end_trial()
             if session.board_index == len(session.boards):
                 events = list(session.round_events)
                 self._sessions.pop(session.session_id, None)
@@ -99,6 +111,7 @@ class Gm01PairCardsPlugin(BrowserGamePlugin):
                     "finished": True,
                     "correct": correct,
                     "events": events,
+                    "time_limit_ms": session.clock.limit_ms if session.clock else None,
                     "metrics": score_gm01(
                         events,
                         pair_count=sum(len(board) // 2 for board in session.boards),
@@ -109,8 +122,51 @@ class Gm01PairCardsPlugin(BrowserGamePlugin):
         result.update({"correct": correct, "revealed": [first, index]})
         return result
 
-    def _payload(self, session: PairSession) -> dict[str, Any]:
+    def _resume(self, session: PairSession, paused_ms: float) -> dict[str, Any]:
+        """Доска, на которой нажата пауза, начинается заново (4.5, п. 5).
+
+        Форма памяти: карточки доски перекладываются заново — новое
+        предъявление, — и ходы по прерванной доске не оцениваются.
+        """
+        board = session.board_index + 1
+        session.round_events = [event for event in session.round_events if event["board"] != board]
+        session.matched.clear()
+        session.first_index = None
+        cards = list(session.boards[session.board_index])
+        session.rng.shuffle(cards)
+        session.boards[session.board_index] = cards
+        if session.clock is not None:
+            session.clock.restart_trial()
+        return self._payload(session)
+
+    def _trial_number(self, session: PairSession) -> int:
+        return session.board_index + 1
+
+    def _timeout(self, session: PairSession) -> dict[str, Any]:
+        if session.clock is None or not session.clock.expired():
+            return {"ok": False, "message": "Время задания ещё не вышло."}
+        events = list(session.round_events)
+        self._sessions.pop(session.session_id, None)
         return {
+            "ok": True,
+            "finished": True,
+            "end_reason": END_TIMEOUT,
+            "events": events,
+            "time_limit_ms": session.clock.limit_ms,
+            "metrics": score_gm01(
+                events,
+                pair_count=sum(len(board) // 2 for board in session.boards),
+                completed=False,
+                timed_out=True,
+            ),
+        }
+
+    def _payload(self, session: PairSession) -> dict[str, Any]:
+        clock = session.clock
+        return {
+            "time_limit_ms": clock.limit_ms if clock else None,
+            "time_left_ms": clock.left_ms() if clock else None,
+            "time_visible": time_limit_visible(self.game_code) if clock else False,
             "ok": True,
             "finished": False,
             "session_id": session.session_id,

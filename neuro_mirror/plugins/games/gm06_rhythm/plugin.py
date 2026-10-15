@@ -31,9 +31,13 @@ class Gm06RhythmPlugin(BrowserGamePlugin):
         self._random = secrets.SystemRandom()
 
     def start_game(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return self._start(difficulty_level=payload.get("difficulty_level"))
+        return self._start(
+            difficulty_level=payload.get("difficulty_level"),
+            rng=self._session_random(payload),
+        )
 
-    def _start(self, *, difficulty_level: object = None) -> dict[str, Any]:
+    def _start(self, *, difficulty_level: object = None, rng: Any = None) -> dict[str, Any]:
+        rng = rng or self._random
         try: level = min(3, max(1, int(difficulty_level or 1)))
         except (TypeError, ValueError): level = 1
         round_count = (10, 15, 20)[level - 1]
@@ -41,8 +45,8 @@ class Gm06RhythmPlugin(BrowserGamePlugin):
         for index in range(round_count):
             length = START_LENGTH + index
             rounds.append({
-                "sequence": [self._random.choice(BUTTONS) for _ in range(length)],
-                "intervals": [self._random.choice(INTERVALS_MS) for _ in range(max(0, length - 1))],
+                "sequence": [rng.choice(BUTTONS) for _ in range(length)],
+                "intervals": [rng.choice(INTERVALS_MS) for _ in range(max(0, length - 1))],
             })
         session = RhythmSession(uuid.uuid4().hex, rounds, level)
         self._sessions[session.session_id] = session
@@ -84,6 +88,13 @@ class Gm06RhythmPlugin(BrowserGamePlugin):
         result = self._payload(session)
         result["correct"] = event["correct"]
         return result
+
+    def _resume(self, session: RhythmSession, paused_ms: float) -> dict[str, Any]:
+        """Прерванный раунд проигрывается заново (4.5, п. 5)."""
+        return self._payload(session)
+
+    def _trial_number(self, session: RhythmSession) -> int:
+        return session.round_index + 1
 
     def _payload(self, session: RhythmSession) -> dict[str, Any]:
         current = session.rounds[session.round_index]

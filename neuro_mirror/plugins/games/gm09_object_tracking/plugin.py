@@ -35,32 +35,38 @@ class Gm09ObjectTrackingPlugin(BrowserGamePlugin):
         self._random = secrets.SystemRandom()
 
     def start_game(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return self._start(stimulus_set=str(payload.get("stimulus_set") or ""), difficulty_level=payload.get("difficulty_level"))
+        return self._start(
+            stimulus_set=str(payload.get("stimulus_set") or ""),
+            difficulty_level=payload.get("difficulty_level"),
+            rng=self._session_random(payload),
+        )
 
-    def _start(self, *, stimulus_set: str = "", difficulty_level: object = None) -> dict[str, Any]:
+    def _start(self, *, stimulus_set: str = "", difficulty_level: object = None, rng: Any = None) -> dict[str, Any]:
+        rng = rng or self._random
         try: level = min(3, max(1, int(difficulty_level or 1)))
         except (TypeError, ValueError): level = 1
         target_count = (2, 3, 5)[level - 1]
         available = tuple(name for name in self.definition.stimulus_sets if name in STIMULUS_SHAPES) or tuple(STIMULUS_SHAPES)
         selected = stimulus_set if stimulus_set in available else available[0]
         shape = STIMULUS_SHAPES[selected]
-        rounds = [self._make_round(index, shape, target_count) for index in range(ROUNDS)]
+        rounds = [self._make_round(rng, shape, target_count) for _ in range(ROUNDS)]
         session = TrackingSession(uuid.uuid4().hex, rounds, selected, level, target_count)
         self._sessions[session.session_id] = session
         return self._payload(session)
 
-    def _make_round(self, index: int, shape: str, target_count: int) -> dict[str, Any]:
-        starts = self._positions(OBJECT_COUNT)
-        ends = self._positions(OBJECT_COUNT)
+    def _make_round(self, rng: Any, shape: str, target_count: int) -> dict[str, Any]:
+        starts = self._positions(rng, OBJECT_COUNT)
+        ends = self._positions(rng, OBJECT_COUNT)
         objects = [
             {"id": f"object-{number}", "start": starts[number], "end": ends[number]}
             for number in range(OBJECT_COUNT)
         ]
-        targets = self._random.sample([item["id"] for item in objects], target_count)
+        targets = rng.sample([item["id"] for item in objects], target_count)
         return {"objects": objects, "targets": targets, "shape": shape}
 
-    def _positions(self, count: int) -> list[list[float]]:
-        cells = self._random.sample(range(24), count)
+    @staticmethod
+    def _positions(rng: Any, count: int) -> list[list[float]]:
+        cells = rng.sample(range(24), count)
         return [[8 + (cell % 6) * 16.5, 12 + (cell // 6) * 24] for cell in cells]
 
     def _answer(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -90,6 +96,14 @@ class Gm09ObjectTrackingPlugin(BrowserGamePlugin):
         result = self._payload(session)
         result["correct"] = event["correct"]
         return result
+
+    def _resume(self, session: TrackingSession, paused_ms: float) -> dict[str, Any]:
+        """Прерванный раунд показывается заново — с показа целей (4.5, п. 5)."""
+        session.shown_ms = time.time() * 1000
+        return self._payload(session)
+
+    def _trial_number(self, session: TrackingSession) -> int:
+        return session.round_index + 1
 
     def _payload(self, session: TrackingSession) -> dict[str, Any]:
         current = session.rounds[session.round_index]

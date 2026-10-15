@@ -37,9 +37,11 @@ class Gm13CategoriesPlugin(BrowserGamePlugin):
         return self._start(
             stimulus_set=str(payload.get("stimulus_set") or ""),
             difficulty_level=payload.get("difficulty_level"),
+            rng=self._session_random(payload),
         )
 
-    def _start(self, *, stimulus_set: str = "", difficulty_level: object = None) -> dict[str, Any]:
+    def _start(self, *, stimulus_set: str = "", difficulty_level: object = None, rng: Any = None) -> dict[str, Any]:
+        rng = rng or self._random
         config = level_config(self.game_code)
         try:
             level = int(difficulty_level or config["default_level"])
@@ -52,9 +54,9 @@ class Gm13CategoriesPlugin(BrowserGamePlugin):
         categories_by_name = {str(item["name"]).casefold(): item for item in CATEGORIES}
         available = tuple(name for name in self.definition.stimulus_sets if name.casefold() in categories_by_name) or tuple(categories_by_name)
         requested = next((name for name in available if name.casefold() == stimulus_set.casefold()), None)
-        selected = requested or self._random.choice(available)
+        selected = requested or rng.choice(available)
         remaining_names = [name for name in available if name != selected]
-        self._random.shuffle(remaining_names)
+        rng.shuffle(remaining_names)
         ordered_names = [selected] + remaining_names
         categories = [
             categories_by_name[name.casefold()]
@@ -108,6 +110,14 @@ class Gm13CategoriesPlugin(BrowserGamePlugin):
             }
         session.shown_at_ms = time.time() * 1000
         return self._payload(session)
+
+    def _resume(self, session: CategorySession, paused_ms: float) -> dict[str, Any]:
+        """Прерванный блок категории начинается заново (4.5, п. 5)."""
+        session.shown_at_ms = time.time() * 1000
+        return self._payload(session)
+
+    def _trial_number(self, session: CategorySession) -> int:
+        return session.category_index + 1
 
     @staticmethod
     def _payload(session: CategorySession) -> dict[str, Any]:

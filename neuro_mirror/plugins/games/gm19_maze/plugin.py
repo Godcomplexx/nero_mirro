@@ -14,7 +14,7 @@ class Gm19MazePlugin(BrowserGamePlugin):
     plugin_name="gm19_maze"
     game_code="GM-19"
     def __init__(self,bus):super().__init__(bus);self._sessions={};self._random=secrets.SystemRandom()
-    def _generate_once(self,size):
+    def _generate_once(self,size,rng):
         walls=[[{"n":True,"e":True,"s":True,"w":True} for _ in range(size)] for _ in range(size)]
         visited={(0,0)};stack=[(0,0)]
         while stack:
@@ -23,12 +23,12 @@ class Gm19MazePlugin(BrowserGamePlugin):
                 nx,ny=x+dx,y+dy
                 if 0<=nx<size and 0<=ny<size and (nx,ny) not in visited:options.append((nx,ny,d,opp))
             if not options:stack.pop();continue
-            nx,ny,d,opp=self._random.choice(options);walls[y][x][d]=False;walls[ny][nx][opp]=False;visited.add((nx,ny));stack.append((nx,ny))
+            nx,ny,d,opp=rng.choice(options);walls[y][x][d]=False;walls[ny][nx][opp]=False;visited.add((nx,ny));stack.append((nx,ny))
         return {"size":size,"walls":walls,"start":[0,0],"finish":[size-1,size-1],"shortest_steps":self._shortest(walls,size)}
-    def _generate(self,size,minimum_shortest_steps):
+    def _generate(self,size,minimum_shortest_steps,rng):
         best=None
         for _ in range(100):
-            maze=self._generate_once(size)
+            maze=self._generate_once(size,rng)
             if best is None or maze["shortest_steps"]>best["shortest_steps"]:best=maze
             if maze["shortest_steps"]>=minimum_shortest_steps:return maze
         return best
@@ -42,15 +42,21 @@ class Gm19MazePlugin(BrowserGamePlugin):
                 if not walls[y][x][d] and (nx,ny) not in seen:seen.add((nx,ny));queue.append(((nx,ny),dist+1))
         return 0
     def start_game(self,payload):
-        return self._start(difficulty_level=payload.get("difficulty_level"))
-    def _start(self,*,difficulty_level=None):
+        return self._start(difficulty_level=payload.get("difficulty_level"),rng=self._session_random(payload))
+    def _start(self,*,difficulty_level=None,rng=None):
+        rng=rng or self._random
         config=level_config(self.game_code)
         try:level=int(difficulty_level or config["default_level"])
         except (TypeError,ValueError):level=int(config["default_level"])
         available={int(item["level"]):item for item in config["levels"]}
         if level not in available:level=int(config["default_level"])
         parameters=dict(available[level]["parameters"]);size=int(parameters["size"]);count=int(parameters["mazes"]);minimum=int(parameters["minimum_shortest_steps"])
-        s=MazeSession(uuid.uuid4().hex,[self._generate(size,minimum) for _ in range(count)],level,parameters);self._sessions[s.session_id]=s;return self._payload(s)
+        s=MazeSession(uuid.uuid4().hex,[self._generate(size,minimum,rng) for _ in range(count)],level,parameters);self._sessions[s.session_id]=s;return self._payload(s)
+    def _resume(self,s,paused_ms):
+        """Прерванный лабиринт проходится заново (4.5, п. 5)."""
+        return self._payload(s)
+    def _trial_number(self,s):
+        return s.index+1
     def _payload(self,s):
         s.shown_at_ms=time.time()*1000;m=s.mazes[s.index]
         return {"ok":True,"finished":False,"session_id":s.session_id,"maze":s.index+1,"maze_count":len(s.mazes),

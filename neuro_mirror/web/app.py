@@ -65,10 +65,19 @@ from neuro_mirror.screening.difficulty_policy import describe
 from neuro_mirror.screening.training_course import (
     COURSE_SESSIONS,
     form_states,
+    order_seed,
+    recent_success,
+    slot_items,
     stage_for,
 )
 from neuro_mirror.screening.training_plan import plan_session
-from neuro_mirror.screening.training_session import build_training_session
+from neuro_mirror.screening.training_safety import (
+    RED_FLAG_QUESTION,
+    RED_FLAG_USER_TEXT,
+    interruption_reasons,
+    reason_for,
+)
+from neuro_mirror.screening.training_session import build_training_session, lighter_alternative
 from neuro_mirror.plugins.ui.web_plugin import WebUIPlugin, WebUIStateStore
 from neuro_mirror.plugins.user_progress.plugin import UserProgressPlugin
 from neuro_mirror.version import APP_VERSION, SCENARIO_VERSIONS
@@ -140,11 +149,33 @@ class SpecialistPinIn(BaseModel):
 
 class TrainingFinishIn(BaseModel):
     reason: str = ""
+    # Причина прерывания (методика, 6.3) — код из training_safety
+    reason_code: str = ""
 
 
 class TrainingPauseIn(BaseModel):
     # Номер задания занятия, на котором нажата пауза; пусто — между заданиями.
     position: int | None = None
+    # Игра на экране: ядро узнаёт у неё номер прерванной пробы (4.5, п. 8)
+    game_code: str = ""
+    game_session_id: str = ""
+
+
+class TrainingInterruptIn(BaseModel):
+    position: int
+    reason: str
+
+
+class TrainingAlternativeIn(BaseModel):
+    position: int
+
+
+class TrainingPreCheckIn(BaseModel):
+    new_symptoms: bool
+
+
+class HoldReleaseIn(BaseModel):
+    note: str = ""
 
 
 class SanAnswersIn(BaseModel):
@@ -421,9 +452,20 @@ def create_app() -> FastAPI:
             "session_size": len(session["games"]),
             "skipped": session.get("skipped") or [],
             "level_changes": session["level_changes"],
+            "order": session.get("order"),
             "profile": course["entry"]["profile"],
             "source_session_id": course["entry"]["session_id"],
+            # Вопрос о новых симптомах перед занятием и причины прерывания
+            # задания (методика, разделы 9 и 6.3)
+            "pre_check": session.get("pre_check"),
+            "pre_check_question": RED_FLAG_QUESTION,
+            "interruption_reasons": interruption_reasons(),
         }
+
+    def _on_hold(course: dict[str, Any] | None) -> None:
+        """Курс приостановлен красным флагом — занятие не открывается."""
+        if course is not None and course.get("hold"):
+            raise HTTPException(status_code=409, detail=RED_FLAG_USER_TEXT, headers={"X-Course-Hold": "1"})
 
     @app.get("/api/training/session")
     async def training_session() -> JSONResponse:
@@ -445,6 +487,7 @@ def create_app() -> FastAPI:
 
         course = store.latest_course(user_id)
         session = store.open_session(user_id)
+        _on_hold(course)
         if course is not None and session is not None:
             return JSONResponse(_course_payload(course, session))
 
@@ -479,7 +522,8 @@ def create_app() -> FastAPI:
 
         slot = store.next_slot(course)
         number = int(slot["number"])
-        states, log = form_states(store.passes(course), number)
+        passes = store.passes(course)
+        states, log = form_states(passes, number)
         # Формы, показанные в прошлых занятиях: по ним чередуются механики и
         # не повторяется прошлое занятие (методика, раздел 4.4)
         shown = (ITEM_DONE, ITEM_ABANDONED)
@@ -492,6 +536,8 @@ def create_app() -> FastAPI:
             session_number=number,
             course_sessions=course_sessions,
             states=states,
+            recent=recent_success(passes),
+            order_seed=order_seed(user_id, number),
             history=ctx.runtime.game_history_store.for_user(user_id),
             available_codes=implemented_game_codes(),
         )
@@ -504,6 +550,7 @@ def create_app() -> FastAPI:
             states=states,
             level_changes=[entry for entry in log if entry["before_session"] == number],
             skipped=selection["skipped"],
+            order=selection["order"],
         )
         return JSONResponse(_course_payload(course, session))
 
@@ -516,8 +563,20 @@ def create_app() -> FastAPI:
         """
         ctx: WebAppContext = app.state.context
         active = _active_user_or_400()
-        reason = (payload.reason if payload else "").strip() or "пользователь завершил занятие"
-        session = ctx.runtime.training_course_store.finish_session(str(active.get("id") or ""), reason=reason)
+        user_id = str(active.get("id") or "")
+        store = ctx.runtime.training_course_store
+        cause = reason_for(payload.reason_code) if payload else None
+        reason = (payload.reason if payload else "").strip() or (
+            f"пользователь завершил занятие: {cause.label}" if cause else "пользователь завершил занятие"
+        )
+        if cause is not None and cause.red_flag:
+            try:
+                store.raise_red_flag(user_id, source="interruption", detail=cause.label)
+            except CourseError:
+                pass
+        session = store.finish_session(
+            user_id, reason=reason, interruption=cause.to_dict() if cause else None
+        )
         if session is None:
             return JSONResponse({"finished": False})
         done = sum(1 for item in session["games"] if item["status"] == ITEM_DONE)
@@ -527,6 +586,8 @@ def create_app() -> FastAPI:
             "status": session["status"],
             "done": done,
             "total": len(session["games"]),
+            # Красный флаг (раздел 9): что сказать пользователю
+            "message": RED_FLAG_USER_TEXT if cause is not None and cause.red_flag else "",
         })
 
     @app.post("/api/training/session/pause")
@@ -534,9 +595,23 @@ def create_app() -> FastAPI:
         """Отметить паузу в журнале занятия: где нажата и когда."""
         ctx: WebAppContext = app.state.context
         active = _active_user_or_400()
+        trial = None
+        # Игра называет пробу, на которой нажата пауза, и запоминает момент:
+        # время паузы не входит во время задания (4.5, п. 4, 8)
+        if payload and payload.game_code and payload.game_session_id:
+            try:
+                definition = get_available_game_definition(payload.game_code)
+                reply = await _game_reply(
+                    definition.answer_request_topic,
+                    f"web.game.{definition.topic_prefix}",
+                    {"session_id": payload.game_session_id, "action": "pause"},
+                )
+                trial = reply.get("trial")
+            except (KeyError, HTTPException, asyncio.TimeoutError):
+                trial = None
         try:
             record = ctx.runtime.training_course_store.pause(
-                str(active.get("id") or ""), position=payload.position if payload else None
+                str(active.get("id") or ""), position=payload.position if payload else None, trial=trial
             )
         except CourseError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -548,6 +623,113 @@ def create_app() -> FastAPI:
         active = _active_user_or_400()
         record = ctx.runtime.training_course_store.resume(str(active.get("id") or ""))
         return JSONResponse(record or {})
+
+    def _alternative_for(user_id: str, position: int) -> dict[str, Any] | None:
+        """Облегчённая альтернатива прерванного задания (методика, 6.3, п. 3)."""
+        ctx: WebAppContext = app.state.context
+        store = ctx.runtime.training_course_store
+        course = store.latest_course(user_id)
+        session = store.open_session(user_id)
+        if course is None or session is None:
+            return None
+        item = next((row for row in session["games"] if int(row["position"]) == int(position)), None)
+        if item is None:
+            return None
+        states, _ = form_states(store.passes(course), int(session["number"]))
+        return lighter_alternative(
+            item,
+            session["games"],
+            states=states,
+            history=ctx.runtime.game_history_store.for_user(user_id),
+            available_codes=implemented_game_codes(),
+        )
+
+    @app.post("/api/training/session/interrupt")
+    async def interrupt_training_task(payload: TrainingInterruptIn) -> JSONResponse:
+        """Прервать задание с причиной (методика, 6.3).
+
+        При утомлении или плохом самочувствии первым предлагается завершить
+        занятие, иначе — облегчённая альтернатива. Сообщение о новых
+        симптомах — красный флаг (раздел 9): занятие завершается, курс
+        приостанавливается до решения специалиста.
+        """
+        ctx: WebAppContext = app.state.context
+        active = _active_user_or_400()
+        user_id = str(active.get("id") or "")
+        store = ctx.runtime.training_course_store
+        cause = reason_for(payload.reason)
+        if cause is None:
+            raise HTTPException(status_code=400, detail="Укажите причину прерывания задания.")
+        try:
+            store.interrupt_item(user_id, position=payload.position, reason=cause.to_dict())
+        except CourseError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        if cause.red_flag:
+            store.raise_red_flag(user_id, source="interruption", detail=cause.label)
+            session = store.finish_session(
+                user_id, reason=f"красный флаг: {cause.label}", interruption=cause.to_dict()
+            )
+            return JSONResponse({
+                "stopped": True,
+                "message": RED_FLAG_USER_TEXT,
+                "done": sum(1 for item in (session or {}).get("games", []) if item["status"] == ITEM_DONE),
+            })
+        alternative = _alternative_for(user_id, payload.position)
+        return JSONResponse({
+            "stopped": False,
+            "suggest": "finish" if cause.finish_first else "alternative",
+            "alternative": (
+                {key: alternative[key] for key in ("game_code", "title", "difficulty_level")}
+                if alternative else None
+            ),
+        })
+
+    @app.post("/api/training/session/alternative")
+    async def add_training_alternative(payload: TrainingAlternativeIn) -> JSONResponse:
+        """Поставить облегчённую альтернативу сразу за прерванным заданием."""
+        ctx: WebAppContext = app.state.context
+        active = _active_user_or_400()
+        user_id = str(active.get("id") or "")
+        store = ctx.runtime.training_course_store
+        alternative = _alternative_for(user_id, payload.position)
+        if alternative is None:
+            raise HTTPException(status_code=409, detail="Облегчённого варианта для этого задания нет.")
+        session = store.open_session(user_id)
+        level = alternative.pop("difficulty_level")
+        [item] = slot_items([alternative], user_id, int(session["number"]))
+        item.update(difficulty_level=level, flags=[], temporary_level=True)
+        try:
+            store.add_alternative(user_id, position=payload.position, alternative=item)
+        except CourseError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        course = store.latest_course(user_id)
+        return JSONResponse(_course_payload(course, store.open_session(user_id)))
+
+    @app.post("/api/training/session/check")
+    async def training_pre_check(payload: TrainingPreCheckIn) -> JSONResponse:
+        """Вопрос о новых симптомах перед занятием (методика, раздел 9).
+
+        Ответ «да» — красный флаг: занятие не начинается, курс
+        приостанавливается до решения специалиста, пользователю рекомендуется
+        обратиться к врачу. Занятие остаётся открытым и не расходует слот.
+        """
+        ctx: WebAppContext = app.state.context
+        active = _active_user_or_400()
+        user_id = str(active.get("id") or "")
+        store = ctx.runtime.training_course_store
+        try:
+            store.note_pre_check(user_id, new_symptoms=payload.new_symptoms)
+            if payload.new_symptoms:
+                store.raise_red_flag(
+                    user_id,
+                    source="pre_session_check",
+                    detail="перед занятием отмечены новые или внезапные симптомы",
+                )
+        except CourseError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        if payload.new_symptoms:
+            return JSONResponse({"stop": True, "message": RED_FLAG_USER_TEXT})
+        return JSONResponse({"stop": False})
 
     @app.get("/api/training/course")
     async def training_course() -> JSONResponse:
@@ -640,6 +822,43 @@ def create_app() -> FastAPI:
                 position=int(course_position),
                 game_session_id=str(reply["session_id"]),
             )
+        return JSONResponse(reply)
+
+    @app.post("/api/games/{game_code}/resume")
+    async def generic_game_resume(game_code: str, payload: dict[str, Any]) -> JSONResponse:
+        """Продолжить задание после паузы с прерванной пробы (методика, 4.5, п. 5).
+
+        409 — продолжить нельзя (сессии игры нет): интерфейс начинает
+        задание заново обычным стартом.
+        """
+        try:
+            definition = get_available_game_definition(game_code)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        active_user = _active_user_or_400()
+        session_id = str(payload.get("session_id") or "")
+        reply = await app.state.context.runtime.bus.request(
+            Event(
+                topic=definition.answer_request_topic,
+                source=f"web.game.{definition.topic_prefix}",
+                payload={"session_id": session_id, "action": "resume"},
+            )
+        )
+        reply.pop("_reply_to", None)
+        if not reply.get("ok"):
+            raise HTTPException(status_code=409, detail=reply.get("message") or "Задание продолжается с начала.")
+        course_session = payload.get("course_session")
+        course_position = payload.get("course_position")
+        if course_session is not None and course_position is not None:
+            try:
+                app.state.context.runtime.training_course_store.resume_item(
+                    user_id=str(active_user.get("id") or ""),
+                    session_number=int(course_session),
+                    position=int(course_position),
+                    game_session_id=session_id,
+                )
+            except (CourseError, TypeError, ValueError) as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
         return JSONResponse(reply)
 
     @app.post("/api/games/{game_code}/answer")
@@ -866,6 +1085,21 @@ def create_app() -> FastAPI:
         specialist.logout()
         _log.info("выход из режима специалиста")
         return JSONResponse(specialist.status())
+
+    @app.post("/api/specialist/course/release")
+    async def specialist_release_hold(payload: HoldReleaseIn | None = None) -> JSONResponse:
+        """Специалист снимает приостановку курса после красного флага (раздел 9)."""
+        ctx: WebAppContext = app.state.context
+        if not specialist.is_active():
+            raise HTTPException(status_code=403, detail="Действие доступно специалисту после входа по PIN.")
+        active = _active_user_or_400()
+        record = ctx.runtime.training_course_store.release_hold(
+            str(active.get("id") or ""), note=(payload.note if payload else "").strip()
+        )
+        if record is None:
+            raise HTTPException(status_code=409, detail="Курс не приостановлен.")
+        _log.info("специалист снял приостановку курса")
+        return JSONResponse(record)
 
     @app.get("/api/specialist/report")
     async def specialist_report() -> JSONResponse:

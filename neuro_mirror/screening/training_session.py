@@ -13,15 +13,18 @@
 упорядоченный список игр и просто проигрывает его: правило подбора, перевод
 доменов в коды игр и защита от повторов остаются в одном месте.
 
-Домены идут вперемежку, а не блоками: четыре игры на внимание подряд
-утомляют и сводят на нет чередование механик, которое обеспечивает подбор.
+Формы подбираются по доменам вперемежку, а не блоками: так чередование
+механик при подборе сравнивает соседние задания. Окончательный порядок
+решает ``session_order``: из всех порядков подобранных форм — с наименьшим
+взвешенным числом нарушений желательных правил 4.4, с посильными заданиями в
+начале и в конце; нарушения пишутся в план.
 """
 from __future__ import annotations
 
 from typing import Any, Iterable
 
 from neuro_mirror.plugins.games.catalog import GAME_CATALOG
-from neuro_mirror.plugins.games.contracts import Domain, GameDefinition, Modality, ResponseType
+from neuro_mirror.plugins.games.contracts import Domain, GameDefinition
 from neuro_mirror.plugins.games.selector import (
     CourseRanking,
     NoEligibleGameError,
@@ -32,11 +35,12 @@ from neuro_mirror.screening.difficulty_policy import (
     FLAG_CEILING,
     FLAG_HARD,
     FormState,
+    Success,
     adaptation,
     has_levels,
 )
 from neuro_mirror.screening.moca_scoring import MOCA_MODULES
-from neuro_mirror.screening.training_course import stage_for
+from neuro_mirror.screening.session_order import arrange
 from neuro_mirror.screening.training_plan import DEFAULT_SESSION_SIZE, plan_session
 
 # Профиль называет домены по-русски, игры — кодами. Соответствие берётся из
@@ -70,42 +74,14 @@ def order_domains(plan: dict[str, int]) -> list[str]:
     return order
 
 
-def _is_simple_start(definition: GameDefinition) -> bool:
-    """Форма, с которой можно начинать занятие (методика, раздел 5.2, п. 4).
-
-    Клик и только зрительная подача: голосовой ответ, перетаскивание и
-    ведение курсора первыми не ставятся.
-    """
-    return (
-        definition.response_type == ResponseType.CLICK
-        and set(definition.modalities) == {Modality.VISUAL}
-    )
-
-
-def _start_with_simple_form(
-    games: list[dict[str, Any]],
-    definitions: dict[str, GameDefinition],
-) -> None:
-    """Поставить первой простую форму, не ставя рядом два задания домена."""
-    if not games or _is_simple_start(definitions[games[0]["game_code"]]):
-        return
-    for index in range(1, len(games)):
-        if not _is_simple_start(definitions[games[index]["game_code"]]):
-            continue
-        candidate = games[:]
-        candidate[0], candidate[index] = candidate[index], candidate[0]
-        domains = [game["domain"] for game in candidate]
-        if all(left != right for left, right in zip(domains, domains[1:])):
-            games[:] = candidate
-            return
-
-
 def build_training_session(
     profile: Iterable[dict[str, Any]],
     *,
     session_number: int = 1,
     course_sessions: tuple[tuple[str, ...], ...] = (),
     states: dict[str, FormState] | None = None,
+    recent: dict[str, Success] | None = None,
+    order_seed: int = 0,
     history: tuple[Presentation, ...] = (),
     available_codes: frozenset[str] | None = None,
     definitions: tuple[GameDefinition, ...] = GAME_CATALOG,
@@ -114,11 +90,13 @@ def build_training_session(
     """Собрать занятие курса: план по доменам плюс конкретные игры по порядку.
 
     ``course_sessions`` — коды форм, показанных в прошлых занятиях курса, по
-    порядку занятий; ``states`` — уровни и отметки форм перед этим занятием.
+    порядку занятий; ``states`` — уровни и отметки форм перед этим занятием;
+    ``recent`` — последняя учитываемая успешность каждой формы в курсе;
+    ``order_seed`` — зерно, которое решает порядок при равенстве.
     """
     profile = list(profile)
     if not profile:
-        return {"plan": {}, "games": [], "session_size": 0, "skipped": []}
+        return {"plan": {}, "games": [], "session_size": 0, "skipped": [], "order": None}
 
     states = states or {}
     by_code = {item.code: item for item in definitions}
@@ -174,9 +152,14 @@ def build_training_session(
             "reasons": list(decision.reasons),
         })
 
-    # Калибровка начинается с простой формы: клик и зрительная подача (5.2)
-    if stage_for(session_number).id == "calibration":
-        _start_with_simple_form(games, by_code)
+    games, order = arrange(
+        games,
+        by_code,
+        session_number=session_number,
+        seed=order_seed,
+        states=states,
+        recent=recent,
+    )
     for position, game in enumerate(games, start=1):
         game["position"] = position
 
@@ -185,4 +168,64 @@ def build_training_session(
         "games": games,
         "session_size": len(games),
         "skipped": skipped,
+        "order": order,
+    }
+
+
+def lighter_alternative(
+    item: dict[str, Any],
+    session_games: list[dict[str, Any]],
+    *,
+    states: dict[str, FormState] | None = None,
+    history: tuple[Presentation, ...] = (),
+    available_codes: frozenset[str] | None = None,
+    definitions: tuple[GameDefinition, ...] = GAME_CATALOG,
+) -> dict[str, Any] | None:
+    """Облегчённая альтернатива прерванного задания (методика, 6.3, п. 3).
+
+    Та же форма уровнем ниже, если её уровень выше первого; иначе другая
+    форма того же домена, которой ещё не было в занятии, — на уровне 1.
+    Уровень альтернативы временный: в сохранённый уровень формы он не
+    записывается. Возвращает задание без номера и стимульного набора (их
+    ставит курс) или None, если облегчить нечем.
+    """
+    states = states or {}
+    level = item.get("difficulty_level")
+    if isinstance(level, int) and level > 1:
+        return {
+            "domain": item["domain"],
+            "domain_code": item["domain_code"],
+            "game_code": item["game_code"],
+            "title": item["title"],
+            "adaptation": item.get("adaptation") or adaptation(item["game_code"]),
+            "difficulty_level": level - 1,
+            "reasons": ["облегчённая альтернатива: та же форма уровнем ниже"],
+        }
+    by_code = {definition.code: definition for definition in definitions}
+    ranking = CourseRanking(
+        adaptive_codes=frozenset(code for code in by_code if has_levels(code)),
+        discouraged_codes=frozenset(
+            code for code, state in states.items() if state.flags & {FLAG_HARD, FLAG_CEILING}
+        ),
+    )
+    try:
+        decision = select_game(
+            Domain(item["domain_code"]),
+            session_game_codes=frozenset(row["game_code"] for row in session_games),
+            history=history,
+            available_codes=available_codes,
+            definitions=definitions,
+            course=ranking,
+        )
+    except NoEligibleGameError:
+        return None
+    game = decision.game
+    return {
+        "domain": item["domain"],
+        "domain_code": item["domain_code"],
+        "game_code": game.code,
+        "title": game.title,
+        "adaptation": adaptation(game.code),
+        "difficulty_level": 1 if has_levels(game.code) else None,
+        "reasons": ["облегчённая альтернатива: другая форма того же домена", *decision.reasons],
     }

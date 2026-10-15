@@ -112,6 +112,17 @@ class Gm22TowerPlugin(BrowserGamePlugin):
         self._sessions.pop(session.session_id, None)
         return {"ok": True, "finished": True, "events": events, "metrics": score_gm22(events, elapsed_ms, required_levels=1)}
 
+    def _resume(self, session: TowerSession, paused_ms: float) -> dict[str, Any]:
+        """Прерванная башня собирается заново: её ходы не оцениваются."""
+        session.started_at_ms += paused_ms
+        session.round_events = [
+            event for event in session.round_events if event["level"] != session.level_index + 1
+        ]
+        return self._prepare_level(session)
+
+    def _trial_number(self, session: TowerSession) -> int:
+        return session.level_index + 1
+
     def _payload(self, session: TowerSession) -> dict[str, Any]:
         return {
             "ok": True,

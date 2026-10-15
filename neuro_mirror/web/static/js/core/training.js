@@ -38,7 +38,9 @@ async function detailOf(response) {
 //
 // Returns one of
 //   { status: "ready", session }
-//   { status: "locked", message }   — 409: a state, shown as is
+//   { status: "locked", message, hold } — 409: a state, shown as is; `hold`
+//                                    when a red flag paused the course
+//                                    until the specialist decides
 //   { status: "unsupported" }       — the core has no such request yet
 //   { status: "failed", message }
 export async function loadTrainingSession() {
@@ -50,20 +52,23 @@ export async function loadTrainingSession() {
   }
   if (response.ok) return { status: "ready", session: await response.json() };
   const message = await detailOf(response);
-  if (response.status === 409) return { status: "locked", message };
+  if (response.status === 409) {
+    return { status: "locked", message, hold: response.headers.get("X-Course-Hold") === "1" };
+  }
   if (response.status === 404 || response.status === 405) return { status: "unsupported" };
   return { status: "failed", message: message || "Не удалось подобрать занятие. Повторите попытку." };
 }
 
 // The end of a session, normal or early (from the pause screen). A game
-// started and not finished becomes "abandoned" in the core. Returns
-// { finished, status, done, total } or null when the core is unreachable.
-export async function finishTrainingSession(reason) {
+// started and not finished becomes "abandoned" in the core, with the reason
+// the person chose (`reasonCode`, one of session.interruption_reasons).
+// Returns { finished, status, done, total } or null when the core is unreachable.
+export async function finishTrainingSession(reason, reasonCode = "") {
   try {
     const response = await fetch("/api/training/session/finish", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ reason: reason || "" }),
+      body: JSON.stringify({ reason: reason || "", reason_code: reasonCode || "" }),
     });
     return response.ok ? await response.json() : null;
   } catch (_) {
@@ -71,17 +76,47 @@ export async function finishTrainingSession(reason) {
   }
 }
 
-// Pauses go to the session journal; a failed note must not stop the pause.
-export async function notePause(position) {
+// Pauses go to the session journal: which task, which trial of it (the core
+// asks the game) and how long. A failed note must not stop the pause.
+export async function notePause(position, gameCode = "", gameSessionId = "") {
   try {
     await fetch("/api/training/session/pause", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ position }),
+      body: JSON.stringify({ position, game_code: gameCode, game_session_id: gameSessionId }),
     });
   } catch (_) {
     // the pause itself works without the journal
   }
+}
+
+async function postJson(url, body) {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) throw new Error((await detailOf(response)) || "Ядро не ответило. Повторите попытку.");
+  return response.json();
+}
+
+// The task is interrupted with a reason (methodology 6.3). The core answers
+// { stopped, message } for a red flag, otherwise
+// { suggest: "finish" | "alternative", alternative: { title, difficulty_level } | null }.
+export function interruptTask(position, reason) {
+  return postJson("/api/training/session/interrupt", { position, reason });
+}
+
+// The lighter alternative goes right after the interrupted task; the core
+// answers with the session as GET /api/training/session does.
+export function addAlternative(position) {
+  return postJson("/api/training/session/alternative", { position });
+}
+
+// The question about new symptoms before the session (methodology 9).
+// Returns { stop, message }.
+export function sendPreCheck(newSymptoms) {
+  return postJson("/api/training/session/check", { new_symptoms: Boolean(newSymptoms) });
 }
 
 export async function noteResume() {

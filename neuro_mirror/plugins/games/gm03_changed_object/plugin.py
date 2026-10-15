@@ -23,6 +23,7 @@ class LocationSession:
     phase: str = "study"
     shown_ms: float = field(default_factory=lambda: time.time() * 1000)
     round_events: list[dict[str, Any]] = field(default_factory=list)
+    rng: Any = None
 
 
 class Gm03ChangedObjectPlugin(BrowserGamePlugin):
@@ -37,9 +38,14 @@ class Gm03ChangedObjectPlugin(BrowserGamePlugin):
         self._random = secrets.SystemRandom()
 
     def start_game(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return self._start(stimulus_set=str(payload.get("stimulus_set") or ""), difficulty_level=payload.get("difficulty_level"))
+        return self._start(
+            stimulus_set=str(payload.get("stimulus_set") or ""),
+            difficulty_level=payload.get("difficulty_level"),
+            rng=self._session_random(payload),
+        )
 
-    def _start(self, *, stimulus_set: str = "", difficulty_level: object = None) -> dict[str, Any]:
+    def _start(self, *, stimulus_set: str = "", difficulty_level: object = None, rng: Any = None) -> dict[str, Any]:
+        rng = rng or self._random
         try:
             level = min(3, max(1, int(difficulty_level or 1)))
         except (TypeError, ValueError):
@@ -59,12 +65,12 @@ class Gm03ChangedObjectPlugin(BrowserGamePlugin):
         selected_room = rooms_by_set[selected_set.casefold()]
         rooms = []
         for source in (selected_room,):
-            cells = self._random.sample(range(16), missing_items)
+            cells = rng.sample(range(16), missing_items)
             rooms.append({"name": source["name"], "objects": [
                 {"name": name, "symbol": symbol, "cell": cell}
-                for (name, symbol), cell in zip(self._random.sample(list(source["objects"]), missing_items), cells)
+                for (name, symbol), cell in zip(rng.sample(list(source["objects"]), missing_items), cells)
             ]})
-        session = LocationSession(uuid.uuid4().hex, rooms, selected_set, level, missing_items)
+        session = LocationSession(uuid.uuid4().hex, rooms, selected_set, level, missing_items, rng=rng)
         self._sessions[session.session_id] = session
         return self._payload(session)
 
@@ -107,6 +113,20 @@ class Gm03ChangedObjectPlugin(BrowserGamePlugin):
         result = self._payload(session)
         result["correct"] = event["correct"]
         return result
+
+    def _resume(self, session: LocationSession, paused_ms: float) -> dict[str, Any]:
+        """Комната показывается для запоминания заново, ответы по ней
+        прерванной пробы не оцениваются: иначе нарушится интервал
+        запоминания (4.5, п. 5)."""
+        room = session.rooms[session.room_index]["name"]
+        session.round_events = [event for event in session.round_events if event["room"] != room]
+        session.object_index = 0
+        session.phase = "study"
+        session.shown_ms = time.time() * 1000
+        return self._payload(session)
+
+    def _trial_number(self, session: LocationSession) -> int:
+        return session.room_index + 1
 
     def _payload(self, session: LocationSession) -> dict[str, Any]:
         room = session.rooms[session.room_index]

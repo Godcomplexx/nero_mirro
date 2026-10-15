@@ -9,7 +9,14 @@
         {"level": 1, "label": "Простой", "parameters": {"grid": "5×2, два раза", "pair_counts": [5, 5]}},
         {"level": 2, "label": "Средний", "parameters": {"grid": "5×4", "pair_counts": [10]}},
         {"level": 3, "label": "Сложный", "parameters": {"grid": "6×4", "pair_counts": [12]}}
-      ]
+      ],
+      "time_limit": {
+        "status": "draft",
+        "source": "Предложение команды для апробации: в «Матрице игр v5» лимит не задан, в методике (раздел 7) — «лимит времени — утвердить»",
+        "scope": "задание целиком",
+        "seconds": {"1": 240, "2": 240, "3": 300},
+        "visible": false
+      }
     },
     "GM-02": {
       "status": "configured",
@@ -102,7 +109,14 @@
         {"level": 1, "label": "Простой", "parameters": {"scene_count": 5, "difference_range": [4, 5]}},
         {"level": 2, "label": "Средний", "parameters": {"scene_count": 4, "difference_range": [6, 7]}},
         {"level": 3, "label": "Сложный", "parameters": {"scene_count": 3, "difference_range": [9, 9]}}
-      ]
+      ],
+      "time_limit": {
+        "status": "draft",
+        "source": "Предложение команды для апробации: в «Матрице игр v5» лимит не задан, в методике (раздел 7) — «лимит времени — утвердить»",
+        "scope": "задание целиком",
+        "seconds": {"1": 450, "2": 480, "3": 450},
+        "visible": false
+      }
     },
     "GM-11": {
       "status": "draft",

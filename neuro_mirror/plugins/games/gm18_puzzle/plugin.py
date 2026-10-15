@@ -45,6 +45,7 @@ class PuzzleSession:
     # Фрагмент → попал ли он на место первым же перемещением.
     first_moves: dict[int, bool] = field(default_factory=dict)
     round_events: list[dict[str, Any]] = field(default_factory=list)
+    rng: Any = None
 
 
 class Gm18PuzzlePlugin(BrowserGamePlugin):
@@ -57,9 +58,14 @@ class Gm18PuzzlePlugin(BrowserGamePlugin):
         self._random = secrets.SystemRandom()
 
     def start_game(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return self._start(stimulus_set=str(payload.get("stimulus_set") or ""), difficulty_level=payload.get("difficulty_level"))
+        return self._start(
+            stimulus_set=str(payload.get("stimulus_set") or ""),
+            difficulty_level=payload.get("difficulty_level"),
+            rng=self._session_random(payload),
+        )
 
-    def _start(self, *, stimulus_set: str = "", difficulty_level: object = None) -> dict[str, Any]:
+    def _start(self, *, stimulus_set: str = "", difficulty_level: object = None, rng: Any = None) -> dict[str, Any]:
+        rng = rng or self._random
         try: level = min(3, max(1, int(difficulty_level or 1)))
         except (TypeError, ValueError): level = 1
         available = tuple(self.definition.stimulus_sets)
@@ -69,8 +75,8 @@ class Gm18PuzzlePlugin(BrowserGamePlugin):
             {**source, "rows": rows, "columns": columns}
             for source in PUZZLES_BY_LEVEL[level]
         ]
-        self._random.shuffle(puzzles)
-        session = PuzzleSession(uuid.uuid4().hex, puzzles, selected, level)
+        rng.shuffle(puzzles)
+        session = PuzzleSession(uuid.uuid4().hex, puzzles, selected, level, rng=rng)
         self._sessions[session.session_id] = session
         return self._prepare_round(session)
 
@@ -82,7 +88,7 @@ class Gm18PuzzlePlugin(BrowserGamePlugin):
         count = puzzle["rows"] * puzzle["columns"]
         board = list(range(count))
         while board == list(range(count)):
-            self._random.shuffle(board)
+            session.rng.shuffle(board)
         session.board = board
         session.initial_board = list(board)
         session.move_count = 0
@@ -139,6 +145,14 @@ class Gm18PuzzlePlugin(BrowserGamePlugin):
                 "metrics": score_gm18(events, elapsed_ms, required_puzzles=len(session.puzzles)),
             }
         return self._prepare_round(session)
+
+    def _resume(self, session: PuzzleSession, paused_ms: float) -> dict[str, Any]:
+        """Прерванный пазл раскладывается заново: его ходы не оцениваются."""
+        session.started_at_ms += paused_ms
+        return self._prepare_round(session)
+
+    def _trial_number(self, session: PuzzleSession) -> int:
+        return session.round_index + 1
 
     def _payload(self, session: PuzzleSession) -> dict[str, Any]:
         puzzle = self._puzzle(session)

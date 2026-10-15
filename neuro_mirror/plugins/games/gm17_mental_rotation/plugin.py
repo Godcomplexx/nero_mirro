@@ -23,6 +23,7 @@ class RotationSession:
     current_trial: dict[str, Any] = field(default_factory=dict)
     shown_at_ms: float = 0.0
     trials: list[dict[str, Any]] = field(default_factory=list)
+    rng: Any = None
 
 
 class Gm17MentalRotationPlugin(BrowserGamePlugin):
@@ -37,9 +38,14 @@ class Gm17MentalRotationPlugin(BrowserGamePlugin):
         self._random = secrets.SystemRandom()
 
     def start_game(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return self._start_session(stimulus_set=str(payload.get("stimulus_set") or ""), difficulty_level=payload.get("difficulty_level"))
+        return self._start_session(
+            stimulus_set=str(payload.get("stimulus_set") or ""),
+            difficulty_level=payload.get("difficulty_level"),
+            rng=self._session_random(payload),
+        )
 
-    def _start_session(self, *, stimulus_set: str = "", difficulty_level: object = None) -> dict[str, Any]:
+    def _start_session(self, *, stimulus_set: str = "", difficulty_level: object = None, rng: Any = None) -> dict[str, Any]:
+        rng = rng or self._random
         try: level = min(3, max(1, int(difficulty_level or 1)))
         except (TypeError, ValueError): level = 1
         choice_count = (2, 3, 4)[level - 1]
@@ -51,20 +57,20 @@ class Gm17MentalRotationPlugin(BrowserGamePlugin):
         shape_order: list[str] = []
         while len(shape_order) < TRIAL_COUNT:
             cycle = list(keys)
-            self._random.shuffle(cycle)
+            rng.shuffle(cycle)
             if shape_order and cycle[0] == shape_order[-1]:
                 cycle[0], cycle[1] = cycle[1], cycle[0]
             shape_order.extend(cycle)
         shape_order = shape_order[:TRIAL_COUNT]
-        session = RotationSession(uuid.uuid4().hex, shape_order, selected, level, choice_count)
+        session = RotationSession(uuid.uuid4().hex, shape_order, selected, level, choice_count, rng=rng)
         self._sessions[session.session_id] = session
         return self._prepare_trial(session)
 
     def _prepare_trial(self, session: RotationSession) -> dict[str, Any]:
         shape_key = session.shape_order[session.trial_index]
         set_keys = SHAPE_SETS[session.stimulus_set]
-        distractor_keys = self._random.sample([key for key in set_keys if key != shape_key], session.choice_count - 1)
-        correct_rotation = self._random.choice((90, 180, 270))
+        distractor_keys = session.rng.sample([key for key in set_keys if key != shape_key], session.choice_count - 1)
+        correct_rotation = session.rng.choice((90, 180, 270))
         correct_choice_id = uuid.uuid4().hex
         choices = [
             {
@@ -73,8 +79,8 @@ class Gm17MentalRotationPlugin(BrowserGamePlugin):
                 "rotation": correct_rotation,
             },
         ]
-        choices.extend({"id": uuid.uuid4().hex, **shape_payload(key), "rotation": self._random.choice((90, 180, 270))} for key in distractor_keys)
-        self._random.shuffle(choices)
+        choices.extend({"id": uuid.uuid4().hex, **shape_payload(key), "rotation": session.rng.choice((90, 180, 270))} for key in distractor_keys)
+        session.rng.shuffle(choices)
         session.correct_choice_id = correct_choice_id
         session.current_trial = {
             "trial": session.trial_index + 1,
@@ -83,6 +89,9 @@ class Gm17MentalRotationPlugin(BrowserGamePlugin):
             "choices": choices,
             "correct_rotation": correct_rotation,
         }
+        return self._trial_payload(session)
+
+    def _trial_payload(self, session: RotationSession) -> dict[str, Any]:
         session.shown_at_ms = time.time() * 1000
         return {
             "ok": True,
@@ -93,9 +102,16 @@ class Gm17MentalRotationPlugin(BrowserGamePlugin):
             "difficulty_parameters": {"choices": session.choice_count},
             "trial": session.trial_index + 1,
             "trial_count": TRIAL_COUNT,
-            "sample": {**shape_payload(shape_key), "rotation": 0},
-            "choices": choices,
+            "sample": {**shape_payload(session.current_trial["sample_shape"]), "rotation": 0},
+            "choices": session.current_trial["choices"],
         }
+
+    def _resume(self, session: RotationSession, paused_ms: float) -> dict[str, Any]:
+        """Прерванный образец показывается снова с теми же вариантами."""
+        return self._trial_payload(session)
+
+    def _trial_number(self, session: RotationSession) -> int:
+        return session.trial_index + 1
 
     def _check_answer(self, payload: dict[str, Any]) -> dict[str, Any]:
         session_id = str(payload.get("session_id") or "")

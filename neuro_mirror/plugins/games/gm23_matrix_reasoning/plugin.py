@@ -11,20 +11,22 @@ class MatrixSession:
     session_id: str; offsets: list[int]; stimulus_set: str; difficulty_level: int; difficulty_parameters: dict[str, Any]
     pattern_mode: str; style_count: int; option_count: int; index: int = 0; correct_id: str = ""; shown_at_ms: float = 0.0
     current: dict[str, Any] = field(default_factory=dict); trials: list[dict[str, Any]] = field(default_factory=list)
+    rng: Any = None
 class Gm23MatrixReasoningPlugin(BrowserGamePlugin):
     plugin_name = "gm23_matrix_reasoning"
     game_code = "GM-23"
     def __init__(self, bus): super().__init__(bus); self._sessions = {}; self._random = secrets.SystemRandom()
     def start_game(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return self._start(stimulus_set=str(payload.get("stimulus_set") or ""), difficulty_level=payload.get("difficulty_level"))
-    def _start(self, *, stimulus_set: str = "", difficulty_level: object = None):
+        return self._start(stimulus_set=str(payload.get("stimulus_set") or ""), difficulty_level=payload.get("difficulty_level"), rng=self._session_random(payload))
+    def _start(self, *, stimulus_set: str = "", difficulty_level: object = None, rng: Any = None):
+        rng=rng or self._random
         config=level_config(self.game_code)
         try:level=int(difficulty_level or config["default_level"])
         except (TypeError,ValueError):level=int(config["default_level"])
         available_levels={int(item["level"]):item for item in config["levels"]}
         if level not in available_levels:level=int(config["default_level"])
         parameters=dict(available_levels[level]["parameters"]);trial_count=int(parameters["trials"]);mode=str(parameters["pattern_mode"]);style_count=int(parameters["style_count"]);option_count=int(parameters["option_count"])
-        symbol_by_set={"звезда":"star","треугольник":"triangle","сердце":"heart"}; available=tuple(name for name in self.definition.stimulus_sets if name in symbol_by_set); selected=stimulus_set if stimulus_set in available else self._random.choice(available);target_index=SYMBOLS.index(symbol_by_set[selected]);first_offset=target_index if mode=="dual_axis" else (target_index-4)%len(SYMBOLS);offsets=[first_offset+len(SYMBOLS)*index for index in range(trial_count)];self._random.shuffle(offsets);s=MatrixSession(uuid.uuid4().hex,offsets,selected,level,parameters,mode,style_count,option_count);self._sessions[s.session_id]=s;return self._payload(s)
+        symbol_by_set={"звезда":"star","треугольник":"triangle","сердце":"heart"}; available=tuple(name for name in self.definition.stimulus_sets if name in symbol_by_set); selected=stimulus_set if stimulus_set in available else rng.choice(available);target_index=SYMBOLS.index(symbol_by_set[selected]);first_offset=target_index if mode=="dual_axis" else (target_index-4)%len(SYMBOLS);offsets=[first_offset+len(SYMBOLS)*index for index in range(trial_count)];rng.shuffle(offsets);s=MatrixSession(uuid.uuid4().hex,offsets,selected,level,parameters,mode,style_count,option_count,rng=rng);self._sessions[s.session_id]=s;return self._payload(s)
     @staticmethod
     def _cell(mode,r,c,offset):
         if mode=="symbol_only":return {"symbol":SYMBOLS[(r+c+offset)%3],"style":"filled"}
@@ -37,10 +39,18 @@ class Gm23MatrixReasoningPlugin(BrowserGamePlugin):
                 cells.append(None if (r,c)==(2,2) else self._cell(s.pattern_mode,r,c,offset))
         correct=self._cell(s.pattern_mode,2,2,offset)
         combos=[{"symbol":symbol,"style":style} for symbol in SYMBOLS for style in STYLES[:s.style_count] if {"symbol":symbol,"style":style}!=correct]
-        self._random.shuffle(combos); options=[{"id":uuid.uuid4().hex,**correct}]+[{"id":uuid.uuid4().hex,**x} for x in combos[:s.option_count-1]]; self._random.shuffle(options)
+        s.rng.shuffle(combos); options=[{"id":uuid.uuid4().hex,**correct}]+[{"id":uuid.uuid4().hex,**x} for x in combos[:s.option_count-1]]; s.rng.shuffle(options)
         s.correct_id=next(x["id"] for x in options if x["symbol"]==correct["symbol"] and x["style"]==correct["style"])
-        s.current={"matrix":cells,"options":options}; s.shown_at_ms=time.time()*1000
+        s.current={"matrix":cells,"options":options}
+        return self._trial_payload(s)
+    def _trial_payload(self,s):
+        s.shown_at_ms=time.time()*1000
         return {"ok":True,"finished":False,"session_id":s.session_id,"stimulus_set":s.stimulus_set,"difficulty_level":s.difficulty_level,"difficulty_parameters":dict(s.difficulty_parameters),"trial":s.index+1,"trial_count":len(s.offsets),**s.current}
+    def _resume(self,s,paused_ms):
+        """Прерванная матрица показывается снова с теми же вариантами."""
+        return self._trial_payload(s)
+    def _trial_number(self,s):
+        return s.index+1
     def _answer(self,payload):
         s=self._sessions.get(str(payload.get("session_id") or ""))
         if s is None:return {"ok":False,"message":"Игровая сессия не найдена."}

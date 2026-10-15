@@ -10,6 +10,10 @@ Statuses of a game's levels (game_levels.json):
 
 Each game also says where its values come from (``source``) and may carry a
 ``note``. The table of all values is docs/game-levels.md.
+
+A game may also have a time limit (``time_limit``): seconds per level for the
+whole task, its own status and source, and whether the time left is shown on
+screen (``visible``). Without the block the task has no time limit.
 """
 from __future__ import annotations
 
@@ -56,6 +60,17 @@ def load_game_level_config() -> dict[str, Any]:
             raise RuntimeError(f"game_levels.json: {code} помечена как ненастроенная")
         if int(config.get("default_level", 1)) not in (numbers or [1]):
             raise RuntimeError(f"game_levels.json: неверный default_level для {code}")
+        limit = config.get("time_limit")
+        if limit is not None:
+            seconds = limit.get("seconds") if isinstance(limit, dict) else None
+            if (
+                limit.get("status") not in (STATUS_CONFIGURED, STATUS_DRAFT)
+                or not str(limit.get("source") or "").strip()
+                or not isinstance(seconds, dict)
+                or sorted(seconds) != [str(number) for number in numbers]
+                or not all(isinstance(value, int) and value > 0 for value in seconds.values())
+            ):
+                raise RuntimeError(f"game_levels.json: некорректный лимит времени {code}")
     return document
 
 
@@ -83,3 +98,17 @@ def difficulty_levels(game_code: str) -> tuple[DifficultyLevel, ...]:
 def level_status(game_code: str) -> str:
     """Утверждены ли уровни игры: configured, draft или not_configured."""
     return str(level_config(game_code).get("status") or STATUS_NOT_CONFIGURED)
+
+
+def time_limit_ms(game_code: str, level: int) -> int | None:
+    """Лимит времени задания на уровне ``level``, мс; без лимита — None."""
+    limit = level_config(game_code).get("time_limit")
+    if not limit:
+        return None
+    seconds = limit["seconds"].get(str(level))
+    return int(seconds) * 1000 if seconds else None
+
+
+def time_limit_visible(game_code: str) -> bool:
+    """Показывать ли на экране, сколько времени осталось."""
+    return bool((level_config(game_code).get("time_limit") or {}).get("visible"))

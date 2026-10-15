@@ -22,6 +22,7 @@ class WordListSession:
     round_index: int = 0
     shown_at_ms: float = 0.0
     rounds: list[dict[str, Any]] = field(default_factory=list)
+    rng: Any = None
 
 
 class Gm05WordListPlugin(BrowserGamePlugin):
@@ -37,9 +38,11 @@ class Gm05WordListPlugin(BrowserGamePlugin):
         return self._start(
             stimulus_set=str(payload.get("stimulus_set") or ""),
             difficulty_level=payload.get("difficulty_level"),
+            rng=self._session_random(payload),
         )
 
-    def _start(self, *, stimulus_set: str = "", difficulty_level: object = None) -> dict[str, Any]:
+    def _start(self, *, stimulus_set: str = "", difficulty_level: object = None, rng: Any = None) -> dict[str, Any]:
+        rng = rng or self._random
         config = level_config(self.game_code)
         try:
             level = int(difficulty_level or config["default_level"])
@@ -61,13 +64,14 @@ class Gm05WordListPlugin(BrowserGamePlugin):
             available_sets[0],
         )
         category, source = sets_by_name[selected_set.casefold()]
-        words = self._random.sample(list(source), int(parameters["choice_words"]))
+        words = rng.sample(list(source), int(parameters["choice_words"]))
         session = WordListSession(
             uuid.uuid4().hex,
             [(category, words)],
             selected_set,
             level,
             parameters,
+            rng=rng,
         )
         self._sessions[session.session_id] = session
         return self._round_payload(session)
@@ -77,7 +81,7 @@ class Gm05WordListPlugin(BrowserGamePlugin):
         target_count = int(session.difficulty_parameters["target_words"])
         targets, distractors = words[:target_count], words[target_count:]
         choices = targets + distractors
-        self._random.shuffle(choices)
+        session.rng.shuffle(choices)
         session.shown_at_ms = time.time() * 1000
         return {"ok": True, "finished": False, "session_id": session.session_id,
                 "round": session.round_index + 1, "round_count": len(session.sets),
@@ -86,6 +90,13 @@ class Gm05WordListPlugin(BrowserGamePlugin):
                 "difficulty_parameters": dict(session.difficulty_parameters),
                 "category": category, "study_ms": int(session.difficulty_parameters["study_ms"]), "study_words": targets,
                 "choices": choices}
+
+    def _resume(self, session: WordListSession, paused_ms: float) -> dict[str, Any]:
+        """Слова показываются для запоминания заново (4.5, п. 5)."""
+        return self._round_payload(session)
+
+    def _trial_number(self, session: WordListSession) -> int:
+        return session.round_index + 1
 
     def _answer(self, payload: dict[str, Any]) -> dict[str, Any]:
         session = self._sessions.get(str(payload.get("session_id") or ""))

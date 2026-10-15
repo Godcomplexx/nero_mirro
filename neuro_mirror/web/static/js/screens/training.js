@@ -12,7 +12,14 @@
 //
 // A task ends only by itself (done, time or attempts are over): there is no
 // skipping. «Пауза» hides the task; from the pause the user continues — the
-// task starts over, an interrupted trial is not scored — or ends the session.
+// interrupted trial is presented again and is not scored, the trials done
+// before it are kept (methodology 4.5, п. 5) — interrupts the task or ends the
+// session. Interrupting asks for the reason (6.3): with fatigue or feeling
+// unwell the screen first offers to end the session, otherwise a lighter
+// alternative of the task; new or unusual symptoms are a red flag (9) — the
+// session stops and the course waits for the specialist.
+//
+// Before the session, once, the core's question about new symptoms (9).
 //
 // Progress is kept in module state, so leaving the section and coming back
 // returns to the same task of the session; it is also kept for the browser
@@ -30,11 +37,14 @@
 // invent questions.
 
 import {
+  addAlternative,
   finishTrainingSession,
+  interruptTask,
   loadTrainingPlan,
   loadTrainingSession,
   noteResume,
   notePause,
+  sendPreCheck,
 } from "../core/training.js";
 import { loadCatalog, mountGame } from "../core/games.js";
 import { activeUser } from "../core/legacy.js";
@@ -44,7 +54,8 @@ import { createSanSurvey } from "../components/san-survey.js";
 import { notify } from "../components/notify.js";
 
 // loading → locked | overview | legacy | failed;
-// overview → san-before → playing → san-after → done
+// overview → pre-check → san-before → playing → san-after → done;
+// playing → interrupt → playing | san-after | stopped
 const model = {
   phase: "loading",
   userId: "",
@@ -63,6 +74,13 @@ const model = {
   freeGame: null,
   // Step of the game on screen: intro | practice | done | game
   stage: "intro",
+  // The game session of the task on screen: after a pause the task goes on
+  // from its interrupted trial
+  gameSessionId: "",
+  // Interrupting: { mode: "task" | "session", step: "reason" | "suggest", ... }
+  interrupt: null,
+  // The course waits for the specialist (red flag)
+  hold: false,
 };
 
 const PLACE_KEY = "nm-training-place";
@@ -71,11 +89,11 @@ const RESTORABLE = new Set(["overview", "catalog", "free", "san-before", "playin
 function savePlace() {
   try {
     if (!RESTORABLE.has(model.phase)) return;
-    const { phase, userId, session, index, completed, stopped, paused, currentFinished, freeDomain, freeGame, stage } = model;
+    const { phase, userId, session, index, completed, stopped, paused, currentFinished, freeDomain, freeGame, stage, gameSessionId } = model;
     window.sessionStorage.setItem(
       PLACE_KEY,
       JSON.stringify({
-        phase, userId, session, index, completed, stopped, paused, currentFinished, freeDomain, freeGame, stage,
+        phase, userId, session, index, completed, stopped, paused, currentFinished, freeDomain, freeGame, stage, gameSessionId,
       }),
     );
   } catch (_) {
@@ -168,6 +186,7 @@ async function load() {
     model.phase = "overview";
   } else if (result.status === "locked") {
     model.message = result.message;
+    model.hold = Boolean(result.hold);
     model.phase = "locked";
   } else if (result.status === "unsupported") {
     // A core without ready-made sessions: show what it does have — the
@@ -200,9 +219,14 @@ function startSession() {
     finishSession(false);
     return;
   }
-  // A session continued after a break has already had its "before" survey
-  model.phase = doneCount() === 0 ? "san-before" : "playing";
+  // The question about new symptoms comes once per session, before anything
+  model.phase = model.session.pre_check ? afterPreCheck() : "pre-check";
   render();
+}
+
+// A session continued after a break has already had its "before" survey
+function afterPreCheck() {
+  return doneCount() === 0 && !games().some((game) => game.status === "abandoned") ? "san-before" : "playing";
 }
 
 function startGames() {
@@ -210,17 +234,18 @@ function startGames() {
   render();
 }
 
-// The session is over: the core closes it, then the "after" survey
-function finishSession(stopped) {
+// The session is over: the core closes it, then the "after" survey.
+// `reasonCode` — why the person ended it early (methodology 6.3)
+function finishSession(stopped, reasonCode = "") {
   model.phase = "san-after";
   render();
-  endSession(stopped);
+  endSession(stopped, reasonCode);
 }
 
 // The core closes the session; its count of finished tasks is the one shown
-async function endSession(stopped) {
+async function endSession(stopped, reasonCode = "") {
   model.stopped = stopped;
-  const reply = await finishTrainingSession(stopped ? "пользователь завершил занятие" : "");
+  const reply = await finishTrainingSession("", stopped ? reasonCode : "");
   if (reply && reply.finished) model.completed = reply.done;
   if (model.phase === "done") render();
 }
@@ -231,6 +256,7 @@ function advance() {
   dropGame();
   model.currentFinished = false;
   model.currentUnavailable = false;
+  model.gameSessionId = "";
   if (model.index + 1 >= games().length) {
     finishSession(false);
     return;
@@ -240,12 +266,17 @@ function advance() {
   render();
 }
 
-// The pause hides the task: the field is removed, its timers stop with it
+const taskInProgress = () => !model.currentFinished && !model.currentUnavailable && Boolean(games()[model.index]);
+
+// The pause hides the task: the field is removed, its timers stop with it.
+// The core notes which trial was interrupted.
 function pauseSession() {
   if (model.paused) return;
   dropGame();
   model.paused = true;
-  notePause(model.currentFinished ? null : (games()[model.index] || {}).position ?? null);
+  const game = games()[model.index] || {};
+  if (taskInProgress()) notePause(game.position ?? null, game.game_code || "", model.gameSessionId);
+  else notePause(null);
   render();
 }
 
@@ -255,12 +286,104 @@ function resumeSession() {
   render();
 }
 
+// «Завершить занятие» from the pause: the reason is asked first (6.3)
 function endFromPause() {
+  model.interrupt = { mode: "session", step: "reason" };
+  model.phase = "interrupt";
+  render();
+}
+
+// «Прервать задание»: the reason, then what the methodology offers for it
+function interruptFromPause() {
+  model.interrupt = { mode: "task", step: "reason" };
+  model.phase = "interrupt";
+  render();
+}
+
+function backToPause() {
+  model.interrupt = null;
+  model.phase = "playing";
+  render();
+}
+
+function closeSession(reasonCode) {
   if (model.currentFinished) model.completed += 1;
   model.currentFinished = false;
   model.paused = false;
+  model.interrupt = null;
+  model.gameSessionId = "";
   dropGame();
-  finishSession(true);
+  finishSession(true, reasonCode);
+}
+
+function showStopped(message) {
+  model.interrupt = null;
+  model.paused = false;
+  model.gameSessionId = "";
+  model.message = message;
+  model.phase = "stopped";
+  render();
+}
+
+async function chooseReason(reason) {
+  const interrupt = model.interrupt;
+  if (!interrupt) return;
+  if (interrupt.mode === "session") {
+    if (reason.red_flag) {
+      dropGame();
+      const reply = await finishTrainingSession("", reason.code);
+      showStopped((reply && reply.message) || "");
+      return;
+    }
+    closeSession(reason.code);
+    return;
+  }
+  const game = games()[model.index];
+  let reply;
+  try {
+    reply = await interruptTask(game.position, reason.code);
+  } catch (error) {
+    notify(error.message || String(error));
+    return;
+  }
+  dropGame();
+  model.gameSessionId = "";
+  game.status = "abandoned";
+  if (reply.stopped) {
+    showStopped(reply.message);
+    return;
+  }
+  model.interrupt = { mode: "task", step: "suggest", reason, suggest: reply.suggest, alternative: reply.alternative };
+  render();
+}
+
+async function takeAlternative() {
+  const game = games()[model.index];
+  try {
+    model.session = await addAlternative(game.position);
+  } catch (error) {
+    notify(error.message || String(error));
+    return;
+  }
+  model.interrupt = null;
+  model.paused = false;
+  model.currentFinished = false;
+  model.currentUnavailable = false;
+  model.gameSessionId = "";
+  model.index += 1;
+  // The same form one level lower needs no instruction again
+  const next = games()[model.index];
+  model.stage = next && next.game_code === game.game_code ? "game" : "intro";
+  model.phase = "playing";
+  render();
+}
+
+// No alternative and the person wants to go on: the next task
+function skipToNext() {
+  model.interrupt = null;
+  model.paused = false;
+  model.phase = "playing";
+  advance();
 }
 
 // ---- Views --------------------------------------------------------------------
@@ -270,6 +393,12 @@ function buildLocked(text) {
   const icon = el("div", "nm-card-icon");
   icon.innerHTML =
     '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M17 9h-1V7a4 4 0 00-8 0v2H7a2 2 0 00-2 2v9a2 2 0 002 2h10a2 2 0 002-2v-9a2 2 0 00-2-2zm-7-2a2 2 0 014 0v2h-4V7zm2 10a2 2 0 110-4 2 2 0 010 4z"/></svg>';
+  // A red flag paused the course: the core's own words, no test to go to
+  if (model.hold) {
+    panel.append(icon, el("h2", "nm-panel-title", "Тренировки приостановлены"), el("p", "nm-panel-text", text));
+    panel.appendChild(button("В меню", "primary", () => window.nmOpenSection && window.nmOpenSection("home")));
+    return panel;
+  }
   panel.append(
     icon,
     el("h2", "nm-panel-title", "Сначала пройдите когнитивный тест"),
@@ -411,7 +540,12 @@ function showFinish(stage, isCurrent, actions, headingText = "Задание в�
 
 // Puts a game on `stage`; `isCurrent()` tells whether that stage is still the
 // one on screen when an answer from the core arrives.
-function playOn(stage, game, isCurrent, { onFinished, onClose, onUnavailable, startOptions = null }) {
+function playOn(
+  stage,
+  game,
+  isCurrent,
+  { onFinished, onClose, onUnavailable, startOptions = null, resumeSessionId = "", onSessionStarted = () => {} },
+) {
   mountGame(game.game_code, stage, {
     fallbackTitle: game.title,
     // Задание курса называет себя номером занятия и задания; уровень и
@@ -419,11 +553,15 @@ function playOn(stage, game, isCurrent, { onFinished, onClose, onUnavailable, st
     startOptions,
     stimulusSet: game.stimulus_set ?? null,
     introStage: model.stage,
+    resumeSessionId,
+    onSessionStarted(id) {
+      if (isCurrent()) onSessionStarted(id);
+    },
     onIntroStage(step) {
       if (isCurrent()) setStage(step);
     },
-    onFinished() {
-      if (isCurrent()) onFinished();
+    onFinished(reply) {
+      if (isCurrent()) onFinished(reply);
     },
     onClose() {
       if (isCurrent()) onClose();
@@ -561,12 +699,12 @@ function buildFree() {
 
   const current = () => model.phase === "free" && model.freeGame === game && stage.isConnected;
   playOn(stage, game, current, {
-    onFinished() {
+    onFinished(reply) {
       back.className = "nm-btn nm-btn-primary";
       showFinish(stage, current, [
         { label: "Сыграть ещё раз", onClick: () => again.click() },
         { label: "Выбрать другую игру", primary: true, onClick: () => back.click() },
-      ]);
+      ], reply && reply.end_reason === "timeout" ? "Время задания закончилось" : "Задание выполнено");
     },
     onClose: () => back.click(),
   });
@@ -578,18 +716,112 @@ function buildPause() {
   const panel = el("section", "nm-panel nm-training-locked");
   const title = el("h2", "nm-panel-title", "Пауза");
   title.tabIndex = -1;
+  const inTask = taskInProgress();
   panel.append(
     title,
-    el("p", "nm-panel-text", model.currentFinished
-      ? "Отдохните, сколько нужно. Выполненные задания сохранены."
-      : "Задание остановлено. Если продолжить, оно начнётся заново. Выполненные задания сохранены."),
+    el("p", "nm-panel-text", inTask
+      ? "Задание остановлено. Если продолжить, прерванный шаг задания начнётся заново, а уже выполненные шаги сохранятся."
+      : "Отдохните, сколько нужно. Выполненные задания сохранены."),
   );
   const row = el("div", "nm-btn-row");
-  row.append(
-    button("Продолжить", "primary", resumeSession),
-    button("Завершить занятие", "secondary", endFromPause),
-  );
+  row.append(button("Продолжить", "primary", resumeSession));
+  if (inTask) row.append(button("Прервать задание", "secondary", interruptFromPause));
+  row.append(button("Завершить занятие", "secondary", endFromPause));
   panel.appendChild(row);
+  setTimeout(() => title.isConnected && title.focus(), 0);
+  return panel;
+}
+
+// Why the task or the session is interrupted; the reasons are the core's
+function buildInterrupt() {
+  const interrupt = model.interrupt;
+  const panel = el("section", "nm-panel nm-training-locked");
+  if (interrupt.step === "reason") {
+    const title = el("h2", "nm-panel-title", interrupt.mode === "task" ? "Почему вы прерываете задание?" : "Почему вы завершаете занятие?");
+    title.tabIndex = -1;
+    panel.append(title, el("p", "nm-panel-text", "Это поможет подобрать следующие занятия. Выполненные задания сохранены."));
+    const list = el("div", "nm-training-reasons");
+    for (const reason of model.session.interruption_reasons || []) {
+      list.append(button(reason.label, "secondary nm-btn-block", () => chooseReason(reason)));
+    }
+    panel.append(list);
+    const row = el("div", "nm-btn-row");
+    row.append(button("Назад", "secondary", backToPause));
+    panel.append(row);
+    setTimeout(() => title.isConnected && title.focus(), 0);
+    return panel;
+  }
+  // What to do next: methodology 6.3 — fatigue or feeling unwell: ending the
+  // session comes first; otherwise the lighter alternative
+  const alternative = interrupt.alternative;
+  const finishFirst = interrupt.suggest === "finish";
+  const title = el("h2", "nm-panel-title", finishFirst ? "Лучше завершить занятие" : "Можно продолжить с более лёгким заданием");
+  title.tabIndex = -1;
+  panel.append(title);
+  panel.append(el("p", "nm-panel-text", finishFirst
+    ? "Если вы устали или плохо себя чувствуете, лучше завершить занятие. Выполненные задания сохранены, следующее занятие продолжит курс."
+    : alternative
+      ? `Вместо прерванного задания можно выполнить более лёгкое: «${alternative.title}».`
+      : "Более лёгкого варианта для этого задания нет. Можно перейти к следующему заданию или завершить занятие."));
+  const row = el("div", "nm-btn-row");
+  const finish = () => closeSession(interrupt.reason.code);
+  const lighter = alternative ? button("Выполнить более лёгкое задание", finishFirst ? "secondary" : "primary", takeAlternative) : null;
+  const next = !alternative && model.index + 1 < games().length
+    ? button("Перейти к следующему заданию", finishFirst ? "secondary" : "primary", skipToNext)
+    : null;
+  if (finishFirst) row.append(button("Завершить занятие", "primary", finish));
+  if (lighter) row.append(lighter);
+  if (next) row.append(next);
+  if (!finishFirst) row.append(button("Завершить занятие", "secondary", finish));
+  panel.append(row);
+  setTimeout(() => title.isConnected && title.focus(), 0);
+  return panel;
+}
+
+// Red flag (methodology 9): the session stops, the course waits for the specialist
+function buildStopped() {
+  const panel = el("section", "nm-panel nm-training-locked");
+  const title = el("h2", "nm-panel-title", "Тренировка остановлена");
+  title.tabIndex = -1;
+  panel.append(title, el("p", "nm-panel-text", model.message || "Обратитесь, пожалуйста, к врачу."));
+  const row = el("div", "nm-btn-row");
+  row.append(button("В меню", "primary", () => window.nmOpenSection && window.nmOpenSection("home")));
+  panel.append(row);
+  setTimeout(() => title.isConnected && title.focus(), 0);
+  return panel;
+}
+
+// The question about new symptoms before the session (methodology 9). Its
+// wording is the core's (a draft until approved by the methodologists).
+function buildPreCheck() {
+  const question = model.session.pre_check_question || {};
+  const panel = el("section", "nm-panel nm-training-locked");
+  const title = el("h2", "nm-panel-title", "Перед занятием");
+  title.tabIndex = -1;
+  panel.append(title, el("p", "nm-panel-text", question.text || ""));
+  const row = el("div", "nm-btn-row");
+  const answer = async (value, node) => {
+    for (const item of row.querySelectorAll("button")) item.disabled = true;
+    try {
+      const reply = await sendPreCheck(value);
+      if (reply.stop) {
+        showStopped(reply.message);
+        return;
+      }
+      model.session.pre_check = { new_symptoms: false };
+      model.phase = afterPreCheck();
+      render();
+    } catch (error) {
+      notify(error.message || String(error));
+      for (const item of row.querySelectorAll("button")) item.disabled = false;
+      node.focus();
+    }
+  };
+  for (const option of question.options || []) {
+    const node = button(option.label, "secondary", () => answer(option.value, node));
+    row.append(node);
+  }
+  panel.append(row);
   setTimeout(() => title.isConnected && title.focus(), 0);
   return panel;
 }
@@ -632,10 +864,17 @@ function buildPlaying() {
   } else {
     playOn(stage, game, current, {
       startOptions: courseInfo() ? { course_session: courseInfo().session_number, course_position: game.position } : null,
-      onFinished() {
-        model.currentFinished = true;
+      // Back from a pause, another section or a reload: the interrupted trial again
+      resumeSessionId: model.gameSessionId,
+      onSessionStarted(id) {
+        model.gameSessionId = id;
         savePlace();
-        showFinish(stage, current, nextAction);
+      },
+      onFinished(reply) {
+        model.currentFinished = true;
+        model.gameSessionId = "";
+        savePlace();
+        showFinish(stage, current, nextAction, reply && reply.end_reason === "timeout" ? "Время задания закончилось" : "Задание выполнено");
       },
       // A task that does not open is a technical problem, not the user's
       // choice: the session goes on, the core marks it as not presented
@@ -774,8 +1013,11 @@ function render() {
     overview: buildOverview,
     catalog: buildCatalog,
     free: buildFree,
+    "pre-check": buildPreCheck,
     "san-before": () => buildSan("before"),
     playing: buildPlaying,
+    interrupt: buildInterrupt,
+    stopped: buildStopped,
     "san-after": () => buildSan("after"),
     done: buildDone,
   };
@@ -808,7 +1050,7 @@ export const trainingScreen = {
     // asked from the core again (the profile or the test result may have changed)
     const userId = (activeUser() || {}).id || "";
     // Back from another section: the game list or a game stays where it was
-    if (["san-before", "playing", "san-after", "catalog", "free"].includes(model.phase) && model.userId === userId) {
+    if (["pre-check", "san-before", "playing", "interrupt", "san-after", "catalog", "free"].includes(model.phase) && model.userId === userId) {
       render();
       return;
     }
@@ -830,7 +1072,7 @@ export const trainingScreen = {
   leaveWarning() {
     return {
       title: "Занятие ещё не завершено",
-      message: "Если перейти в другой раздел, текущее задание начнётся заново, когда вы вернётесь в «Тренировку».",
+      message: "Если перейти в другой раздел, прерванный шаг задания начнётся заново, когда вы вернётесь в «Тренировку». Выполненные шаги сохранятся.",
     };
   },
 };

@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 
-def score_gm01(attempts: list[dict], *, pair_count: int, completed: bool) -> dict[str, float | int | bool]:
+def score_gm01(
+    attempts: list[dict], *, pair_count: int, completed: bool, timed_out: bool = False,
+) -> dict[str, float | int | bool]:
     minimum = pair_count
     moves = len(attempts)
     errors = sum(not bool(item.get("correct")) for item in attempts)
@@ -18,6 +20,9 @@ def score_gm01(attempts: list[dict], *, pair_count: int, completed: bool) -> dic
         "pair_attempts": moves,
         "u06_complete": bool(completed),
         # Ходов не меньше, чем пар: иначе доска не могла быть собрана, и
-        # запись хода игры неполна.
-        "u06_technically_valid": moves >= minimum if completed else bool(attempts),
+        # запись хода игры неполна. Задание, кончившееся по времени, пригодно
+        # и без ходов: ноль найденных пар — это результат, а не сбой.
+        "u06_technically_valid": (
+            moves >= minimum if completed else bool(attempts) or timed_out
+        ),
     }

@@ -45,9 +45,11 @@ class Gm24CategoryNamingPlugin(BrowserGamePlugin):
         return self._start(
             stimulus_set=str(payload.get("stimulus_set") or ""),
             difficulty_level=payload.get("difficulty_level"),
+            rng=self._session_random(payload),
         )
 
-    def _start(self, *, stimulus_set: str = "", difficulty_level: object = None) -> dict[str, Any]:
+    def _start(self, *, stimulus_set: str = "", difficulty_level: object = None, rng: Any = None) -> dict[str, Any]:
+        rng = rng or self._random
         config = level_config(self.game_code)
         try:
             level = int(difficulty_level or config["default_level"])
@@ -65,16 +67,16 @@ class Gm24CategoryNamingPlugin(BrowserGamePlugin):
         groups_by_name = {item["category"].casefold(): item for item in CATEGORY_GROUPS}
         available = tuple(name for name in self.definition.stimulus_sets if name.casefold() in groups_by_name)
         requested = next((name for name in available if name.casefold() == stimulus_set.casefold()), None)
-        selected = requested or self._random.choice(available)
+        selected = requested or rng.choice(available)
         first_category = groups_by_name[selected.casefold()]["category"]
         other_categories = [item["category"] for item in CATEGORY_GROUPS if item["category"] != first_category]
-        categories = [first_category, *self._random.sample(other_categories, category_count - 1)]
+        categories = [first_category, *rng.sample(other_categories, category_count - 1)]
         word_groups: dict[str, list[tuple[str, ...]]] = {}
         for category in categories:
             source = groups_by_name[category.casefold()]
             category_words = tuple(word for group in source["groups"] for word in group)
             variants = list(combinations(category_words, 3))
-            self._random.shuffle(variants)
+            rng.shuffle(variants)
             word_groups[category] = variants
         used_by_category = {category: 0 for category in categories}
         trials: list[dict[str, Any]] = []
@@ -129,6 +131,14 @@ class Gm24CategoryNamingPlugin(BrowserGamePlugin):
         result = self._payload(session)
         result["previous_correct"] = correct
         return result
+
+    def _resume(self, session: CategoryNamingSession, paused_ms: float) -> dict[str, Any]:
+        """Прерванная тройка слов предъявляется снова (4.5, п. 5)."""
+        session.shown_at_ms = time.time() * 1000
+        return self._payload(session)
+
+    def _trial_number(self, session: CategoryNamingSession) -> int:
+        return session.trial_index + 1
 
     @staticmethod
     def _payload(session: CategoryNamingSession) -> dict[str, Any]:

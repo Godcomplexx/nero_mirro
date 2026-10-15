@@ -23,6 +23,7 @@ class TargetSearchSession:
     current_stimuli: list[dict[str, Any]] = field(default_factory=list)
     shown_at_ms: float = 0.0
     trials: list[dict[str, Any]] = field(default_factory=list)
+    rng: Any = None
 
 
 class Gm07TargetSearchPlugin(BrowserGamePlugin):
@@ -37,9 +38,14 @@ class Gm07TargetSearchPlugin(BrowserGamePlugin):
         self._random = secrets.SystemRandom()
 
     def start_game(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return self._start_session(stimulus_set=str(payload.get("stimulus_set") or ""), difficulty_level=payload.get("difficulty_level"))
+        return self._start_session(
+            stimulus_set=str(payload.get("stimulus_set") or ""),
+            difficulty_level=payload.get("difficulty_level"),
+            rng=self._session_random(payload),
+        )
 
-    def _start_session(self, *, stimulus_set: str = "", difficulty_level: object = None) -> dict[str, Any]:
+    def _start_session(self, *, stimulus_set: str = "", difficulty_level: object = None, rng: Any = None) -> dict[str, Any]:
+        rng = rng or self._random
         try: level = min(3, max(1, int(difficulty_level or 1)))
         except (TypeError, ValueError): level = 1
         grid_size, target_limits = ((4, (3, 5)), (8, (4, 7)), (10, (6, 10)))[level - 1]
@@ -47,9 +53,9 @@ class Gm07TargetSearchPlugin(BrowserGamePlugin):
             set_name for set_name in self.definition.stimulus_sets if set_name in TARGETS
         ) or tuple(TARGETS)
         selected_set = stimulus_set if stimulus_set in available_sets else available_sets[0]
-        present_count = self._random.randint(*target_limits)
+        present_count = rng.randint(*target_limits)
         schedule = [True] * present_count + [False] * (TRIAL_COUNT - present_count)
-        self._random.shuffle(schedule)
+        rng.shuffle(schedule)
         session = TargetSearchSession(
             uuid.uuid4().hex,
             schedule,
@@ -57,6 +63,7 @@ class Gm07TargetSearchPlugin(BrowserGamePlugin):
             dict(TARGETS[selected_set]),
             level,
             grid_size,
+            rng=rng,
         )
         self._sessions[session.session_id] = session
         return self._prepare_trial(session)
@@ -66,13 +73,17 @@ class Gm07TargetSearchPlugin(BrowserGamePlugin):
         object_count = session.grid_size ** 2
         stimuli = [self._make_distractor(session, index) for index in range(object_count)]
         if target_present:
-            target_position = self._random.randrange(object_count)
+            target_position = session.rng.randrange(object_count)
             stimuli[target_position] = {
                 "id": f"s{target_position}",
                 **session.target,
             }
-        self._random.shuffle(stimuli)
+        session.rng.shuffle(stimuli)
         session.current_stimuli = stimuli
+        return self._trial_payload(session)
+
+    def _trial_payload(self, session: TargetSearchSession) -> dict[str, Any]:
+        object_count = session.grid_size ** 2
         session.shown_at_ms = time.time() * 1000
         return {
             "ok": True,
@@ -86,14 +97,21 @@ class Gm07TargetSearchPlugin(BrowserGamePlugin):
             "object_count": object_count,
             "stimulus_set": session.stimulus_set,
             "target": session.target,
-            "stimuli": stimuli,
+            "stimuli": session.current_stimuli,
         }
 
+    def _resume(self, session: TargetSearchSession, paused_ms: float) -> dict[str, Any]:
+        """Прерванный экран показывается снова, время ответа — с нового показа."""
+        return self._trial_payload(session)
+
+    def _trial_number(self, session: TargetSearchSession) -> int:
+        return session.trial_index + 1
+
     def _make_distractor(self, session: TargetSearchSession, index: int) -> dict[str, Any]:
-        color = self._random.choice(("red", "black"))
-        rotation = self._random.choice((0, 90, 180, 270))
+        color = session.rng.choice(("red", "black"))
+        rotation = session.rng.choice((0, 90, 180, 270))
         if color == session.target["color"] and rotation == session.target["rotation"]:
-            rotation = self._random.choice((90, 180, 270))
+            rotation = session.rng.choice((90, 180, 270))
         return {
             "id": f"s{index}",
             "symbol": session.target["symbol"],

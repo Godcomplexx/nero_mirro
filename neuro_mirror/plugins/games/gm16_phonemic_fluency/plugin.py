@@ -32,9 +32,13 @@ class Gm16PhonemicFluencyPlugin(BrowserGamePlugin):
         self._random = secrets.SystemRandom()
 
     def start_game(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return self._start(difficulty_level=payload.get("difficulty_level"))
+        return self._start(
+            difficulty_level=payload.get("difficulty_level"),
+            rng=self._session_random(payload),
+        )
 
-    def _start(self, *, difficulty_level: object = None) -> dict[str, Any]:
+    def _start(self, *, difficulty_level: object = None, rng: Any = None) -> dict[str, Any]:
+        rng = rng or self._random
         config = level_config(self.game_code)
         try:
             level = int(difficulty_level or config["default_level"])
@@ -46,11 +50,23 @@ class Gm16PhonemicFluencyPlugin(BrowserGamePlugin):
         parameters = dict(available_levels[level]["parameters"])
         session = FluencySession(
             uuid.uuid4().hex,
-            self._random.choice(tuple(parameters["letters"])),
+            rng.choice(tuple(parameters["letters"])),
             level,
             parameters,
         )
         self._sessions[session.session_id] = session
+        return self._payload(session)
+
+    def _resume(self, session: FluencySession, paused_ms: float) -> dict[str, Any]:
+        """Прерванная минута начинается заново с той же буквой (4.5, п. 5)."""
+        session.shown_at_ms = time.time() * 1000
+        return self._payload(session)
+
+    def _trial_number(self, session: FluencySession) -> int:
+        return 1
+
+    @staticmethod
+    def _payload(session: FluencySession) -> dict[str, Any]:
         return {
             "ok": True,
             "finished": False,

@@ -120,6 +120,27 @@ def main() -> None:
             f"{levels.get(1, '—')} | {levels.get(2, '—')} | {levels.get(3, '—')} | "
             f"{game.get('note', '')} |"
         )
+    limits = [(code, game["time_limit"]) for code, game in games.items() if game.get("time_limit")]
+    if limits:
+        lines += [
+            "",
+            "## Лимит времени",
+            "",
+            "Лимит считается по активному времени задания: пауза в него не входит, а",
+            "время прерванной пробы после паузы отбрасывается. Когда время вышло,",
+            "задание кончается со статусом `timeout`. Показывать ли оставшееся время",
+            "на экране, задаёт `visible`.",
+            "",
+            "| Код | Статус | Что ограничено | Уровень 1 | Уровень 2 | Уровень 3 | На экране | Источник |",
+            "|---|---|---|---|---|---|---|---|",
+        ]
+        for code, limit in limits:
+            seconds = limit["seconds"]
+            cells = " | ".join(f"{seconds[key]} с" if key in seconds else "—" for key in ("1", "2", "3"))
+            lines.append(
+                f"| {code} | {STATUS.get(limit['status'], limit['status'])} | {limit.get('scope', '')} | "
+                f"{cells} | {'да' if limit.get('visible') else 'нет'} | {limit['source']} |"
+            )
     lines.append("")
     TARGET.write_text("\n".join(lines), encoding="utf-8")
 

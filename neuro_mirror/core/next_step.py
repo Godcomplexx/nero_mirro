@@ -42,6 +42,21 @@ def next_step(
     ``course`` — последний курс пользователя (или None), ``completed_sessions``
     — сколько его занятий уже закрыто.
     """
+    # Красный флаг приостановил курс до решения специалиста («Методика
+    # подбора и оценки тренировочного курса», раздел 9)
+    if course is not None and course.get("hold"):
+        return {
+            "step": "hold",
+            "section": SECTION_TRAINING,
+            "title": "Тренировки приостановлены",
+            "text": (
+                "Обратитесь, пожалуйста, к врачу. Продолжить курс можно после "
+                "того, как специалист снимет приостановку."
+            ),
+            "action": "Открыть тренировку",
+            "reports_note": REPORTS_NOTE,
+        }
+
     if not progress.get("screening_done"):
         return {
             "step": "screening",

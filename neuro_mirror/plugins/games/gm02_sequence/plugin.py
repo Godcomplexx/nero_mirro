@@ -6,7 +6,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
-from neuro_mirror.plugins.games.base import BrowserGamePlugin
+from neuro_mirror.plugins.games.base import END_ATTEMPTS, BrowserGamePlugin
 from neuro_mirror.plugins.games.gm02_sequence.stimuli import GRID_SIZE
 from neuro_mirror.screening.gm02_scoring import score_gm02_attempt, score_gm02_series
 
@@ -20,6 +20,7 @@ class SequenceSession:
     max_rounds: int
     successful_rounds: int = 0
     round_events: list[dict[str, Any]] = field(default_factory=list)
+    rng: Any = None
 
 
 class Gm02SequencePlugin(BrowserGamePlugin):
@@ -33,13 +34,16 @@ class Gm02SequencePlugin(BrowserGamePlugin):
         self._sessions: dict[str, SequenceSession] = {}
         self._random = secrets.SystemRandom()
 
-    def _new_cell(self) -> int:
-        return self._random.randrange(GRID_SIZE * GRID_SIZE)
+    def _new_cell(self, session: SequenceSession) -> int:
+        return session.rng.randrange(GRID_SIZE * GRID_SIZE)
 
     def start_game(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return self._start_session(difficulty_level=payload.get("difficulty_level"))
+        return self._start_session(
+            difficulty_level=payload.get("difficulty_level"),
+            rng=self._session_random(payload),
+        )
 
-    def _start_session(self, *, difficulty_level: object = None) -> dict[str, Any]:
+    def _start_session(self, *, difficulty_level: object = None, rng: Any = None) -> dict[str, Any]:
         try:
             level = min(3, max(1, int(difficulty_level or 1)))
         except (TypeError, ValueError):
@@ -48,11 +52,13 @@ class Gm02SequencePlugin(BrowserGamePlugin):
         session_id = uuid.uuid4().hex
         session = SequenceSession(
             session_id=session_id,
-            sequence=[self._new_cell()],
+            sequence=[],
             started_at_ms=time.time() * 1000,
             difficulty_level=level,
             max_rounds=max_rounds,
+            rng=rng or self._random,
         )
+        session.sequence.append(self._new_cell(session))
         self._sessions[session_id] = session
         return self._round_payload(session)
 
@@ -99,9 +105,11 @@ class Gm02SequencePlugin(BrowserGamePlugin):
         if not correct:
             metrics.update(score_gm02_series(session.round_events))
             self._sessions.pop(session_id, None)
+            # Первая ошибка кончает задание: попытки исчерпаны (6.2)
             return {
                 "ok": True,
                 "finished": True,
+                "end_reason": END_ATTEMPTS,
                 "reason": "error",
                 "metrics": metrics,
                 "events": session.round_events,
@@ -120,8 +128,17 @@ class Gm02SequencePlugin(BrowserGamePlugin):
                 "events": session.round_events,
             }
 
-        session.sequence.append(self._new_cell())
+        session.sequence.append(self._new_cell(session))
         return self._round_payload(session)
+
+    def _resume(self, session: SequenceSession, paused_ms: float) -> dict[str, Any]:
+        """Прерванный раунд показывается заново: та же последовательность
+        проигрывается с начала (новое предъявление, 4.5, п. 5)."""
+        session.started_at_ms += paused_ms
+        return self._round_payload(session)
+
+    def _trial_number(self, session: SequenceSession) -> int:
+        return session.successful_rounds + 1
 
     @staticmethod
     def _round_payload(session: SequenceSession) -> dict[str, Any]:

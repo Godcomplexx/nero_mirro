@@ -5,6 +5,16 @@
 // `mount({ container, definition, api, close })` → optional cleanup). The
 // interface only gives the game a place on the screen and the two requests
 // it plays through: POST /api/games/{code}/start and …/answer.
+//
+// Two things are common to every game and live here, not in the games:
+// – continuing after a pause («Методика подбора и оценки тренировочного
+//   курса» v2, 4.5, п. 5): with `resumeSessionId` the game's start asks the
+//   core to present the interrupted trial again (POST …/resume) instead of
+//   starting the task over; the core answers like a start, so the game draws
+//   it as usual. If the core cannot continue (409), the task starts over;
+// – the time limit of a task (GM-01, GM-10): the core says in every answer
+//   how much time is left (`time_left_ms`); when it runs out, the core is
+//   told so (`action: "timeout"`) and ends the task by its own clock.
 
 import { api } from "./legacy.js";
 import { fitToBox } from "../components/fit-box.js";
@@ -67,6 +77,10 @@ export async function mountGame(
     // поставит при запуске. В свободной игре набор выбирается случайно,
     // чтобы не показывать всегда первый.
     stimulusSet = null,
+    // Игровая сессия, прерванная паузой: продолжить с прерванной пробы
+    resumeSessionId = "",
+    // Ядро открыло игровую сессию (её id нужен, чтобы продолжить после паузы)
+    onSessionStarted = () => {},
   } = {},
 ) {
   const catalog = await loadCatalog();
@@ -112,16 +126,83 @@ export async function mountGame(
   const adjust = adjustmentsFor(definition.code);
   let finished = false;
   let previous = null; // the core's last answer, for adjustments that compare
+  let sessionId = "";
+  let resumeFrom = resumeSessionId || "";
   const request = async (url, options) => {
     try {
       return await api(url, options);
     } catch (error) {
-      onError(error.message || String(error));
+      // After the end (e.g. the time ran out) a late press of the game is
+      // refused by the core; that is not a problem to show
+      if (!finished) onError(error.message || String(error));
       throw error;
     }
   };
+
+  // Time limit of the task: the core's own clock decides, this only asks it
+  let timeTimer = null;
+  let timeBadge = null;
+  const stopTime = () => {
+    if (timeTimer) clearTimeout(timeTimer);
+    timeTimer = null;
+    if (timeBadge) clearInterval(timeBadge.tick);
+  };
+  const showTime = (deadline) => {
+    if (!timeBadge) {
+      timeBadge = document.createElement("p");
+      timeBadge.className = "nm-game-time";
+      timeBadge.setAttribute("aria-live", "off");
+    }
+    if (!timeBadge.isConnected) container.prepend(timeBadge);
+    const draw = () => {
+      const left = Math.max(0, Math.round((deadline - Date.now()) / 1000));
+      timeBadge.textContent = `Осталось времени: ${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`;
+    };
+    draw();
+    timeBadge.tick = setInterval(draw, 1000);
+  };
+  const followTime = (reply) => {
+    stopTime();
+    if (!reply || reply.finished || typeof reply.time_left_ms !== "number") return;
+    const deadline = Date.now() + reply.time_left_ms;
+    if (reply.time_visible) showTime(deadline);
+    timeTimer = setTimeout(async () => {
+      timeTimer = null;
+      if (finished || !sessionId || !container.isConnected) return;
+      try {
+        await gameApi.answer({ session_id: sessionId, action: "timeout" });
+      } catch (_) {
+        // the core keeps the task going if its clock disagrees
+      }
+    }, reply.time_left_ms);
+  };
+
+  const remember = (reply) => {
+    previous = reply;
+    if (reply && reply.session_id && reply.session_id !== sessionId) {
+      sessionId = reply.session_id;
+      onSessionStarted(sessionId);
+    }
+    followTime(reply);
+    return reply;
+  };
+
   const gameApi = {
     async start() {
+      // Back from a pause: the interrupted trial is presented again
+      if (resumeFrom) {
+        const from = resumeFrom;
+        resumeFrom = "";
+        try {
+          return remember(await api(`${base}/resume`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ session_id: from, ...(startOptions || {}) }),
+          }));
+        } catch (_) {
+          // the core cannot continue this task — it starts over below
+        }
+      }
       const options = { method: "POST" };
       // A course task names itself; the core takes level and set from the
       // plan. A free game asks for the set chosen above.
@@ -130,8 +211,7 @@ export async function mountGame(
         options.headers = { "Content-Type": "application/json" };
         options.body = JSON.stringify(body);
       }
-      previous = await request(`${base}/start`, options);
-      return previous;
+      return remember(await request(`${base}/start`, options));
     },
     async answer(payload) {
       // While an answer is on its way (and an adjustment holds it back), the
@@ -154,10 +234,13 @@ export async function mountGame(
       } finally {
         container.classList.remove("nm-game-answering");
       }
-      previous = reply;
+      // An answer that only reports a wrong attempt keeps the trial and its time
+      if (reply && (reply.finished || typeof reply.time_left_ms === "number")) remember(reply);
+      else previous = reply;
       if (reply && reply.finished && !finished) {
         finished = true;
-        onFinished();
+        stopTime();
+        onFinished(reply);
       }
       return reply;
     },
@@ -173,6 +256,7 @@ export async function mountGame(
   const stopFitting =
     adjust.fit === false ? () => {} : fitToBox(container, ".game-stage-new", { maxZoom: startScreenLimit });
   return () => {
+    stopTime();
     stopFitting();
     if (typeof cleanup === "function") {
       try {

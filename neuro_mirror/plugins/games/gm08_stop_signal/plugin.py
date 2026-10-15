@@ -20,8 +20,10 @@ class Gm08StopSignalPlugin(BrowserGamePlugin):
         return self._start(
             stimulus_set=str(payload.get("stimulus_set") or ""),
             difficulty_level=payload.get("difficulty_level"),
+            rng=self._session_random(payload),
         )
-    def _start(self, *, stimulus_set="", difficulty_level=None):
+    def _start(self, *, stimulus_set="", difficulty_level=None, rng=None):
+        rng = rng or self._random
         config = level_config(self.game_code)
         try:
             level = int(difficulty_level or config["default_level"])
@@ -33,7 +35,7 @@ class Gm08StopSignalPlugin(BrowserGamePlugin):
         parameters = dict(available_levels[level]["parameters"])
         available = tuple(name for name in self.definition.stimulus_sets if name in SIGNALS) or tuple(SIGNALS)
         selected = stimulus_set if stimulus_set in available else available[0]
-        schedule = [False] * 30 + [True] * 10; self._random.shuffle(schedule)
+        schedule = [False] * 30 + [True] * 10; rng.shuffle(schedule)
         s = StopSession(
             uuid.uuid4().hex, schedule, selected, SIGNALS[selected], level, parameters
         ); self._sessions[s.session_id] = s; return self._payload(s)
@@ -46,6 +48,11 @@ class Gm08StopSignalPlugin(BrowserGamePlugin):
                 "trial_slot_ms": int(s.difficulty_parameters["trial_slot_ms"]),
                 "stimulus_set": s.stimulus_set,
                 "symbol": s.symbol, "mirrored": s.schedule[s.index]}
+    def _resume(self, s, paused_ms):
+        """Прерванный сигнал предъявляется снова (4.5, п. 5)."""
+        return self._payload(s)
+    def _trial_number(self, s):
+        return s.index + 1
     def _answer(self, payload):
         s = self._sessions.get(str(payload.get("session_id") or ""))
         if s is None: return {"ok": False, "message": "Игровая сессия не найдена."}

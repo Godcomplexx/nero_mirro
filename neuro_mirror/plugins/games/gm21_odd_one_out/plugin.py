@@ -27,6 +27,7 @@ class OddOneSession:
     trial_index: int = 0
     current_trial: dict[str, Any] = field(default_factory=dict)
     round_events: list[dict[str, Any]] = field(default_factory=list)
+    rng: Any = None
 
 
 class Gm21OddOneOutPlugin(BrowserGamePlugin):
@@ -42,9 +43,11 @@ class Gm21OddOneOutPlugin(BrowserGamePlugin):
         return self._start(
             stimulus_set=str(payload.get("stimulus_set") or ""),
             difficulty_level=payload.get("difficulty_level"),
+            rng=self._session_random(payload),
         )
 
-    def _start(self, *, stimulus_set: str = "", difficulty_level: object = None) -> dict[str, Any]:
+    def _start(self, *, stimulus_set: str = "", difficulty_level: object = None, rng: Any = None) -> dict[str, Any]:
+        rng = rng or self._random
         config = level_config(self.game_code)
         try:
             level = int(difficulty_level or config["default_level"])
@@ -61,11 +64,11 @@ class Gm21OddOneOutPlugin(BrowserGamePlugin):
         categories_by_name = {name.casefold(): name for name in CATEGORIES}
         available = tuple(name for name in self.definition.stimulus_sets if name.casefold() in categories_by_name)
         requested = next((name for name in available if name.casefold() == stimulus_set.casefold()), None)
-        selected = requested or self._random.choice(available)
+        selected = requested or rng.choice(available)
         first_category = categories_by_name[selected.casefold()]
         other_categories = [name for name in CATEGORIES if name != first_category]
         selected_categories = [first_category]
-        selected_categories.extend(self._random.sample(other_categories, category_count - 1))
+        selected_categories.extend(rng.sample(other_categories, category_count - 1))
         session = OddOneSession(
             uuid.uuid4().hex,
             first_category,
@@ -75,6 +78,7 @@ class Gm21OddOneOutPlugin(BrowserGamePlugin):
             parameters,
             required_trials,
             switch_every,
+            rng=rng,
         )
         self._sessions[session.session_id] = session
         return self._prepare_trial(session)
@@ -85,9 +89,9 @@ class Gm21OddOneOutPlugin(BrowserGamePlugin):
             block_index = session.trial_index // session.switch_every
             session.main_category = session.category_schedule[block_index % len(session.category_schedule)]
         main_category = session.main_category
-        odd_category = self._random.choice([name for name in category_names if name != main_category])
-        main_items = self._random.sample(list(CATEGORIES[main_category]), 3)
-        odd_item = self._random.choice(CATEGORIES[odd_category])
+        odd_category = session.rng.choice([name for name in category_names if name != main_category])
+        main_items = session.rng.sample(list(CATEGORIES[main_category]), 3)
+        odd_item = session.rng.choice(CATEGORIES[odd_category])
         choices = [
             {"id": uuid.uuid4().hex, "name": name, "image": image, "category": main_category}
             for name, image in main_items
@@ -99,7 +103,7 @@ class Gm21OddOneOutPlugin(BrowserGamePlugin):
             "category": odd_category,
         }
         choices.append(odd_choice)
-        self._random.shuffle(choices)
+        session.rng.shuffle(choices)
         session.current_trial = {
             "main_category": main_category,
             "odd_category": odd_category,
@@ -146,6 +150,15 @@ class Gm21OddOneOutPlugin(BrowserGamePlugin):
         result = self._prepare_trial(session)
         result["previous_correct"] = correct
         return result
+
+    def _resume(self, session: OddOneSession, paused_ms: float) -> dict[str, Any]:
+        """Прерванный набор картинок показывается снова (4.5, п. 5)."""
+        session.started_at_ms += paused_ms
+        session.shown_at_ms = time.time() * 1000
+        return self._payload(session)
+
+    def _trial_number(self, session: OddOneSession) -> int:
+        return session.trial_index + 1
 
     @staticmethod
     def _payload(session: OddOneSession) -> dict[str, Any]:

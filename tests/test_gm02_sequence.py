@@ -52,7 +52,7 @@ def test_gm02_plugin_stops_on_first_incorrect_round() -> None:
         bus = EventBus()
         plugin = Gm02SequencePlugin(bus)
         generated = iter((3, 7, 1))
-        plugin._new_cell = lambda: next(generated)  # type: ignore[method-assign]
+        plugin._new_cell = lambda session: next(generated)  # type: ignore[method-assign]
         await plugin.start()
         try:
             started = await bus.request(

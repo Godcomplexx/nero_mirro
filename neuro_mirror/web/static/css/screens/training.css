@@ -212,3 +212,11 @@
     gap: 0.5rem;
   }
 }
+
+/* Reasons for interrupting a task or a session (methodology 6.3) */
+.nm-training-reasons {
+  display: grid;
+  gap: 0.625rem;
+  width: min(30rem, 100%);
+  margin: 0.25rem 0 1rem;
+}

@@ -11,8 +11,16 @@
 // itself after a while without requests). This screen only shows them.
 // The PIN is set by the administrator in the environment variable
 // NEURO_MIRROR_SPECIALIST_PIN; it is neither set nor changed from here.
+//
+// Training («Методика подбора и оценки тренировочного курса» v2): the
+// notifications of section 9 come first; the session report (8.2) opens per
+// session; the course report (8.3) shows the level trajectory, the 6th vs
+// 12th session, regularity, the forms that copy the audio-MoCA mechanics and
+// the normalized deficit D. After a red flag the specialist lifts the pause
+// of the course here (POST /api/specialist/course/release).
 
 import { api } from "../core/legacy.js";
+import { confirmDialog } from "../components/confirm-dialog.js";
 import { notify } from "../components/notify.js";
 
 function el(tag, className, text) {
@@ -182,8 +190,54 @@ function dynamicsSection(data) {
       el("p", "nm-status-line", hads.note),
     );
   }
+  if (moca && (moca.learning_notes || []).length) {
+    const box = el("div", "nm-spec-quality nm-spec-quality-limited");
+    box.appendChild(line("Возможен эффект научения", "да"));
+    const list = el("ul", "nm-spec-reasons");
+    for (const note of moca.learning_notes) list.appendChild(el("li", null, note));
+    box.appendChild(list);
+    children.push(box);
+  }
   children.push(el("p", "nm-status-line", data.note));
   return section("Динамика", ...children);
+}
+
+// Methodology of the course, section 9: what the specialist must look at
+function notificationsSection(items, training, onChanged) {
+  if (!items || !items.length) return null;
+  const list = el("ul", "nm-spec-reasons nm-spec-notices");
+  for (const item of items) {
+    const row = el("li", item.urgent ? "nm-spec-notice-urgent" : null);
+    row.append(el("strong", null, item.urgent ? "Срочно. " : ""), document.createTextNode(item.text));
+    list.appendChild(row);
+  }
+  const box = el("div", "nm-spec-quality nm-spec-quality-limited");
+  box.appendChild(list);
+  if (training && training.hold) {
+    const release = button("Снять приостановку курса", "secondary", async () => {
+      const confirmed = await confirmDialog({
+        title: "Снять приостановку курса?",
+        message: "Пользователь сможет продолжить курс тренировок.",
+        confirmLabel: "Снять",
+        cancelLabel: "Оставить",
+      });
+      if (!confirmed) return;
+      release.disabled = true;
+      try {
+        await api("/api/specialist/course/release", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ note: "" }),
+        });
+        onChanged();
+      } catch (error) {
+        notify(error.message || String(error));
+        release.disabled = false;
+      }
+    });
+    box.appendChild(release);
+  }
+  return section("Уведомления", box);
 }
 
 function mocaSection(entries) {
@@ -277,6 +331,145 @@ function sanSection(entries) {
 }
 
 const SESSION_STATUS = { planned: "запланировано", in_progress: "идёт", completed: "выполнено", incomplete: "завершено досрочно" };
+const U06_LABELS = {
+  completed_success: "выполнено",
+  completed_unsuccessful: "попытки исчерпаны",
+  timeout: "лимит времени",
+  technical_invalid: "техническая проблема",
+  undetermined: "не определено",
+  abandoned: "прервано",
+};
+const ITEM_STATUS = { pending: "не начато", started: "начато", done: "пройдено", abandoned: "прервано", not_presented: "не показано" };
+
+const percent = (success) => (success && success.total ? `${Math.round((success.correct / success.total) * 100)}%` : null);
+const successText = (success) => (success ? `${success.correct} из ${success.total} (${percent(success)})` : null);
+
+function duration(seconds) {
+  if (seconds == null) return null;
+  const whole = Math.round(seconds);
+  return whole >= 60 ? `${Math.floor(whole / 60)} мин ${whole % 60} с` : `${whole} с`;
+}
+
+function earlyText(early) {
+  if (!early) return "лимита нет";
+  return early.early ? `да, лимит ${duration(early.limit_seconds)}` : `нет, лимит ${duration(early.limit_seconds)}`;
+}
+
+function sanText(entry) {
+  if (!entry) return "не заполнено";
+  const parts = (entry.groups || []).map((group) => `${group.group} ${group.mean}`);
+  return parts.length ? parts.join(", ") : "заполнено";
+}
+
+// Methodology 8.2: one session in detail
+function sessionDetails(session) {
+  const report = session.report;
+  if (!report) return null;
+  const rows = report.games.map((game) => [
+    game.alternative_for ? `${game.position} (вместо ${game.alternative_for})` : game.position,
+    `${game.game_code} ${game.title || ""}`,
+    game.difficulty_level == null ? "без адаптации" : `${game.difficulty_level}${game.temporary_level ? " (временно)" : ""}`,
+    game.stimulus_set ? `${game.stimulus_set} (№ ${game.stimulus_set_number})` : null,
+    successText(game.success),
+    U06_LABELS[game.u06_status] || ITEM_STATUS[game.status] || game.status,
+    duration(game.active_seconds),
+    earlyText(game.early_completion),
+    game.interruption_reason,
+  ]);
+  const children = [
+    table(["№", "Форма", "Уровень", "Набор", "Успешность", "Статус", "Время", "Досрочно", "Причина прерывания"], rows),
+    line("Паузы", report.pause_count ? `${report.pause_count}, всего ${duration(report.pause_seconds)}` : "не было"),
+  ];
+  if (report.pauses.length) {
+    children.push(table(
+      ["Задание", "Проба", "Длительность", "Чем закончилась"],
+      report.pauses.map((pause) => [pause.position ?? "между заданиями", pause.trial, duration(pause.seconds), pause.ended_by]),
+    ));
+  }
+  children.push(
+    line("Самочувствие до занятия", sanText(report.san_before)),
+    line("Самочувствие после занятия", sanText(report.san_after)),
+  );
+  if (report.pre_check) {
+    children.push(line("Новые симптомы перед занятием", report.pre_check.new_symptoms ? "да" : "нет"));
+  }
+  if (report.interruption) children.push(line("Занятие прервано", report.interruption));
+  const order = report.order;
+  if (order) {
+    const fixed = [order.first, order.last].filter(Boolean).map((item) => `${item.game_code} — ${item.reason}`);
+    if (fixed.length) children.push(line("Закреплено", fixed.join("; ")));
+    const violations = order.violations || [];
+    children.push(line("Нарушений желательных правил порядка", `${violations.length}, взвешенная сумма ${order.cost}`));
+    if (violations.length) {
+      children.push(table(["Правило", "Задания", "Подробно"], violations.map((item) => [item.text, item.positions.join(", "), item.detail])));
+    }
+    for (const note of order.not_checked || []) children.push(el("p", "nm-status-line", `Не проверяется: ${note}`));
+  }
+  return details(`Занятие ${session.number}: ${SESSION_STATUS[session.status] || session.status}`, ...children);
+}
+
+// Methodology 8.3: the course as a whole
+function courseSummary(summary) {
+  if (!summary) return [];
+  const children = [];
+  const sessions = Array.from({ length: 12 }, (_, i) => i + 1);
+  const trajectory = summary.trajectory || [];
+  if (trajectory.length) {
+    children.push(el("h4", "nm-spec-subtitle", "Траектория уровня по формам"));
+    children.push(table(
+      ["Форма", ...sessions.map(String)],
+      trajectory.map((form) => {
+        const cells = sessions.map((number) => {
+          const point = (form.points || []).find((item) => item.session === number);
+          if (!point) return null;
+          if (point.status === "abandoned") return "прервано";
+          const level = point.level == null ? "б/а" : `ур. ${point.level}${point.temporary_level ? "*" : ""}`;
+          return point.rate == null ? level : `${level} · ${Math.round(point.rate * 100)}%`;
+        });
+        return [`${form.game_code} ${form.title}`, ...cells];
+      }),
+    ));
+    children.push(el("p", "nm-status-line", "б/а — без адаптации; * — временный уровень облегчённой альтернативы."));
+  }
+  const compare = summary.compare_6_12 || { rows: [], not_comparable: [] };
+  children.push(el("h4", "nm-spec-subtitle", "Сравнение 6-го и 12-го занятий"));
+  if (compare.rows.length) {
+    children.push(table(
+      ["Форма", "Уровень", "6-е занятие", "12-е занятие"],
+      compare.rows.map((row) => [`${row.game_code} ${row.title}`, row.level, successText(row.session_6), successText(row.session_12)]),
+    ));
+  } else {
+    children.push(el("p", "nm-panel-text", "Сопоставимых прохождений пока нет: сравниваются только формы на одном уровне и на наборе 3."));
+  }
+  if (compare.not_comparable.length) {
+    children.push(details(
+      "Формы без сравнения",
+      table(["Форма", "Почему"], compare.not_comparable.map((row) => [`${row.game_code} ${row.title}`, row.reason])),
+    ));
+  }
+  const reg = summary.regularity || {};
+  children.push(
+    el("h4", "nm-spec-subtitle", "Регулярность"),
+    line("Занятий выполнено", reg.completed),
+    line("Неполных", reg.incomplete),
+    line("Впереди", (reg.planned || 0) + (reg.in_progress || 0)),
+    line("Прерванных заданий", reg.interrupted_tasks),
+    line("Облегчённых альтернатив", reg.alternatives),
+    line("Пауз", reg.pauses ? `${reg.pauses}, всего ${duration(reg.pause_seconds)}` : 0),
+  );
+  children.push(
+    el("h4", "nm-spec-subtitle", "Формы с механикой аудио-MoCA"),
+    table(["Форма", "Домен", "Пройдено раз"], (summary.moca_analogs || []).map((row) => [`${row.game_code} ${row.title}`, row.domain, row.passes])),
+    el("p", "nm-status-line", "Разные стимулы снижают, но не снимают эффект научения: при росте баллов этих доменов на выходном скрининге нужна оговорка."),
+  );
+  if ((summary.deficit || []).length) {
+    children.push(
+      el("h4", "nm-spec-subtitle", "Нормированный дефицит D на входе"),
+      table(["Домен", "Балл", "Максимум", "D"], summary.deficit.map((row) => [row.domain, row.score, row.max_score, row.deficit])),
+    );
+  }
+  return children;
+}
 
 function trainingSection(course) {
   if (!course) return section("Тренировки", el("p", "nm-panel-text", "Курс тренировок ещё не начат."));
@@ -290,6 +483,10 @@ function trainingSection(course) {
         session.status === "planned" ? null : `${session.done} из ${session.total}`, session.status === "planned" ? null : session.pauses]),
     ),
   ];
+  for (const session of course.sessions || []) {
+    const block = sessionDetails(session);
+    if (block) children.push(block);
+  }
   if (levels.length) children.push(el("h4", "nm-spec-subtitle", "Уровни форм"), table(["Форма", "Уровень", "Отметки"], levels));
   if ((course.level_changes || []).length) {
     children.push(details(
@@ -301,6 +498,7 @@ function trainingSection(course) {
       ),
     ));
   }
+  children.push(...courseSummary(course.summary));
   children.push(el("p", "nm-status-line", course.note));
   return section("Тренировки", ...children);
 }
@@ -376,7 +574,7 @@ function buildAccess(status, onOpened) {
   return panel;
 }
 
-function buildReport(report, onClosed) {
+function buildReport(report, onClosed, onChanged) {
   const panel = el("section", "nm-panel nm-spec-report");
   const head = el("div", "nm-spec-head");
   head.append(
@@ -393,6 +591,7 @@ function buildReport(report, onClosed) {
     panel,
     head,
     el("p", "nm-status-line", `Сформирован: ${formatDate(report.generated_at)}. Режим закрывается сам через 15 минут без действий.`),
+    notificationsSection(report.notifications, report.training, onChanged),
     dynamicsSection(report.dynamics),
     mocaSection(report.moca || []),
     hadsSection(report.hads || []),
@@ -425,7 +624,7 @@ export function buildSpecialistTab() {
     }
     try {
       const report = await api("/api/specialist/report");
-      host.replaceChildren(buildReport(report, refresh));
+      host.replaceChildren(buildReport(report, refresh, refresh));
     } catch (error) {
       // The mode closed meanwhile (idle timeout): ask for the PIN again
       host.replaceChildren(buildAccess({ configured: true, active: false }, refresh));

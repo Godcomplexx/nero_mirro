@@ -102,6 +102,11 @@ def randomization_seed(user_id: str, game_code: str, session_number: int) -> int
     return int(digest[:8], 16)
 
 
+def order_seed(user_id: str, session_number: int) -> int:
+    """Зерно порядка заданий занятия: решает между равными порядками (4.4)."""
+    return randomization_seed(user_id, "порядок", session_number)
+
+
 @dataclass(frozen=True, slots=True)
 class CoursePass:
     """Прохождение формы в курсе; ``result`` пуст, если оно не учитывается."""
@@ -170,6 +175,16 @@ def form_states(
                 "success": item.result.to_dict(),
             })
     return states, log
+
+
+def recent_success(passes: Iterable[CoursePass]) -> dict[str, Success]:
+    """Последняя учитываемая успешность каждой формы — «недавняя
+    успешность» правила о посильных заданиях (4.4)."""
+    recent: dict[str, Success] = {}
+    for item in passes:
+        if item.result is not None:
+            recent[item.game_code] = item.result
+    return recent
 
 
 def _state_fields(state: FormState) -> dict[str, Any]:
