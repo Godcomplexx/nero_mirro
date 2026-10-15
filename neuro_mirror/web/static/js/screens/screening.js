@@ -11,7 +11,8 @@
 // coming back (deck: navigation must not reset progress) shows where the
 // scenario is; server snapshots are followed even while it is not mounted.
 
-import { api, cameraStream, cameraVideo, isCameraActive, log, unlockAudio } from "../core/legacy.js";
+import { api, cameraStream, cameraVideo, isCameraActive, log, unlockAudio, userConsents } from "../core/legacy.js";
+import { requestConsent } from "../components/consent-request.js";
 import { createSessionCheck } from "../core/session-check.js";
 import { createSanSurvey } from "../components/san-survey.js";
 import { loadSanQuestionnaire, saveSanAnswers } from "../core/questionnaires.js";
@@ -20,6 +21,14 @@ import { renderCheckList } from "../components/check-list.js";
 import { createHadsView } from "../components/hads-test.js";
 
 const STEPS = ["Проверка оборудования", "Видеоанализ", "Самочувствие"];
+
+// Video analysis films the face: without the profile's video consent the
+// camera is never switched on, and the screen asks for the consent instead
+const videoAllowed = () => userConsents().video === true;
+
+async function askVideoConsent() {
+  if (await requestConsent("video")) resetToStart();
+}
 
 const RPPG_SECONDS = 20;
 const RPPG_FPS = 15;
@@ -423,6 +432,15 @@ function renderSide() {
 
   // idle / checking / ready
   side.append(el("h2", "nm-panel-title", "Видеоанализ"));
+  if (!videoAllowed()) {
+    side.append(
+      el("p", "nm-panel-text", "Для видеоанализа камера снимает лицо и по нему измеряет пульс. В вашем профиле нет согласия на запись и обработку видео, поэтому камера не включается."),
+      el("div", "nm-side-actions"),
+    );
+    side.lastChild.append(button("Дать согласие на видео", "primary nm-btn-block", askVideoConsent));
+    side.append(el("p", "nm-panel-text nm-optional-text", "Без этого согласия скрининг пройти нельзя. Отозвать его можно в разделе «Устройства, согласия и сведения о программе»."));
+    return;
+  }
   side.append(el("p", "nm-panel-text nm-optional-text", "Смотрите в камеру и сохраняйте спокойное выражение лица."));
   // Actions before the instruction list: at the large interface scale the
   // main action must stay visible without scrolling
@@ -460,6 +478,9 @@ function attachCamera() {
   if (refs.video.srcObject !== stream) refs.video.srcObject = stream;
   const on = Boolean(stream && isCameraActive());
   refs.videoOverlay.hidden = on;
+  refs.videoOverlay.textContent = videoAllowed()
+    ? "Камера выключена. Нажмите «Проверить оборудование»."
+    : "Камера не используется: нет согласия на видео.";
   refs.videoCaption.textContent = on ? "Камера активна" : "Камера выключена";
 }
 

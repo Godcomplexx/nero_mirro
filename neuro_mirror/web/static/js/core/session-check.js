@@ -144,7 +144,7 @@ export function createSessionCheck(scenario, { onItem = () => {}, onStatus = () 
         setItem(
           "face",
           "fail",
-          "Проверка лица не запустилась. Перезапустите приложение, затем нажмите «Проверить снова»."
+          "Проверка лица не запустилась. Перезапустите приложение, затем нажмите «Проверить оборудование ещё раз»."
         );
         return;
       }
@@ -156,7 +156,7 @@ export function createSessionCheck(scenario, { onItem = () => {}, onStatus = () 
       setItem(
         "face",
         "fail",
-        advice || "Проверка лица не запустилась. Перезапустите приложение, затем нажмите «Проверить снова»."
+        advice || "Проверка лица не запустилась. Перезапустите приложение, затем нажмите «Проверить оборудование ещё раз»."
       );
     } else if (data.face_detected && data.brightness_ok && data.face_close_enough) {
       setItem("face", "ok", advice || "Лицо видно, света достаточно");
@@ -265,7 +265,7 @@ export function createSessionCheck(scenario, { onItem = () => {}, onStatus = () 
     if (failedRequired.length > 0) {
       return {
         canStart: false,
-        message: "Исправьте отмеченное красным и нажмите «Проверить снова».",
+        message: "Исправьте отмеченное красным и нажмите «Проверить оборудование ещё раз».",
       };
     }
     if (anyFail) {

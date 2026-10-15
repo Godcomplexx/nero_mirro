@@ -8,8 +8,17 @@
   display: grid;
   place-items: center;
   padding: 1.5rem;
+  /* The window stands in the middle of the work area (right of the menu,
+     below the header), over the screen it belongs to — not in the middle of
+     the whole window, where it sat askew on the screen's content */
+  padding-top: calc(var(--nm-header-h) + 1.5rem);
+  padding-left: calc(var(--nm-sidebar-w) + 1.5rem);
   background: rgba(15, 31, 56, 0.55);
   font-family: var(--nm-font);
+}
+
+body[data-nm-sidebar-collapsed="true"] .nm-dialog-backdrop {
+  padding-left: calc(var(--nm-sidebar-w-collapsed) + 1.5rem);
 }
 
 .nm-dialog {

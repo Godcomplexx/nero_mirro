@@ -47,6 +47,42 @@
   background: #fef2f2;
   color: var(--nm-text);
   box-shadow: 0 0.5rem 1.5rem rgba(15, 31, 56, 0.18);
+  animation: nm-notice-in 250ms ease-out;
+}
+
+/* A notice slides down into place and fades in; leaving, it fades out
+   upwards while its height closes, so the ones below glide up
+   (js/components/notify.js: dismiss, LEAVE_MS) */
+@keyframes nm-notice-in {
+  from {
+    opacity: 0;
+    transform: translateY(-0.75rem);
+  }
+}
+
+.nm-notice.is-leaving {
+  overflow: hidden;
+  height: 0 !important;
+  margin-bottom: -0.5rem; /* takes the list's gap away with it */
+  padding-top: 0;
+  padding-bottom: 0;
+  border-top-width: 0;
+  border-bottom-width: 0;
+  opacity: 0;
+  transform: translateY(-0.75rem);
+  pointer-events: none;
+  transition: height 250ms ease-in, margin-bottom 250ms ease-in, padding 250ms ease-in,
+    border-width 250ms ease-in, opacity 200ms ease-in, transform 250ms ease-in;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nm-notice {
+    animation: none;
+  }
+
+  .nm-notice.is-leaving {
+    transition: none;
+  }
 }
 
 .nm-notice[data-kind="info"] {

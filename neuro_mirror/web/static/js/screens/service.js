@@ -17,6 +17,7 @@
 import { activeUser, api, appConfig, setActiveUser } from "../core/legacy.js";
 import { confirmDialog } from "../components/confirm-dialog.js";
 import { notify } from "../components/notify.js";
+import { requestConsent } from "../components/consent-request.js";
 
 const devicesForm = document.getElementById("devices-form");
 
@@ -39,23 +40,27 @@ function el(tag, className, text) {
 async function changeConsent(item, given, list) {
   const user = activeUser();
   if (!user) return;
-  if (!given) {
-    const confirmed = await confirmDialog({
-      title: `Отозвать согласие «${item.title}»?`,
-      message: item.withdrawNote || "Согласие можно будет дать снова здесь же.",
-      confirmLabel: "Отозвать",
-      cancelLabel: "Оставить",
-    });
-    if (!confirmed) return;
+  // Giving a consent: the same window with its full text as everywhere else
+  if (given) {
+    await requestConsent(item.type, { doneMessage: `Согласие «${item.title}» дано.` });
+    renderConsents(list);
+    return;
   }
+  const confirmed = await confirmDialog({
+    title: `Отозвать согласие «${item.title}»?`,
+    message: item.withdrawNote || "Согласие можно будет дать снова здесь же.",
+    confirmLabel: "Отозвать",
+    cancelLabel: "Оставить",
+  });
+  if (!confirmed) return;
   try {
     const result = await api(`/api/users/${encodeURIComponent(user.id)}/consents`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ consent_type: item.type, given }),
+      body: JSON.stringify({ consent_type: item.type, given: false }),
     });
     if (result && result.user) setActiveUser(result.user);
-    notify(given ? `Согласие «${item.title}» дано.` : `Согласие «${item.title}» отозвано.`, { kind: "info" });
+    notify(`Согласие «${item.title}» отозвано.`, { kind: "info" });
   } catch (error) {
     notify(`Согласие не изменено: ${error.message || error}`);
   }
@@ -99,7 +104,7 @@ function button(label, variant, onClick) {
 }
 
 function buildConsents() {
-  const panel = el("section", "nm-panel nm-service");
+  const panel = el("section", "nm-panel nm-service nm-service-consents");
   const list = el("ul", "nm-consent-list");
   list.setAttribute("aria-live", "polite");
   panel.append(
@@ -107,7 +112,9 @@ function buildConsents() {
     el("p", "nm-panel-text", "Здесь можно отозвать согласие или дать его снова. Уже сохранённые результаты при этом не удаляются."),
     list,
   );
-  renderConsents(list);
+  // Drawn once the panel is on the page: the screen inserts it right after
+  // this returns, and renderConsents skips a list that is not on the page
+  queueMicrotask(() => renderConsents(list));
   if (!consentTexts) {
     api("/api/users")
       .then((data) => {
@@ -125,7 +132,7 @@ export const serviceScreen = {
   mount(container) {
     container.appendChild(el("p", "nm-workarea-subtitle", "Выбор камеры и микрофона, согласия, версия программы"));
 
-    const devices = el("section", "nm-panel nm-service");
+    const devices = el("section", "nm-panel nm-service nm-service-devices");
     devices.append(
       el("h2", "nm-panel-title", "Устройства"),
       el("p", "nm-panel-text", "Выберите камеру и микрофон, которые будет использовать программа, и нажмите «Подтвердить»."),
@@ -133,7 +140,7 @@ export const serviceScreen = {
     if (devicesForm) devices.appendChild(devicesForm);
 
     const version = appConfig().app_version || "—";
-    const about = el("section", "nm-panel nm-service");
+    const about = el("section", "nm-panel nm-service nm-service-about");
     about.append(
       el("h2", "nm-panel-title", "Сведения о программе"),
       el("p", "nm-panel-text", `«Нейро-зеркало», версия ${version}.`),

@@ -287,7 +287,51 @@
   }
 }
 
+/* A narrow work area (the browser at 150-200 %): there is no room beside
+   the screen's own lines for the lifted heading, it lay over the domain tag.
+   The heading becomes the first row of the frame, above the game field. */
+@container workarea (max-width: 60rem) {
+  .nm-workarea:has(.nm-game-host) .nm-training-play-head {
+    max-width: none;
+  }
+
+  .nm-game-host {
+    grid-template-rows: auto minmax(0, 1fr) minmax(3.25rem, auto);
+  }
+
+  .nm-game-host .game-header-new {
+    position: static;
+    height: auto;
+    overflow: visible;
+  }
+}
+
+/* A low window (a laptop at 150-200 %): too little height to fit the game
+   to it — it shrank to the smallest scale and still scrolled inside its
+   field. The game keeps its natural size and the page scrolls instead; a
+   larger interface is what the person asked for. */
+@media (max-height: 620px) {
+  .nm-workarea .nm-game-host {
+    grid-template-rows: none;
+    grid-auto-rows: auto;
+    height: auto;
+  }
+
+  .nm-workarea .nm-game-host .game-stage-new {
+    height: auto !important;
+    overflow: visible !important;
+  }
+}
+
 /* ---- Adjustments for particular games (js/core/game-adjustments.js) ---- */
+
+/* «Найди цель»: the field's width follows the window width (up to 900px) and
+   its cells are square, so in a low window the field grew taller than the
+   room it has, even at the smallest scale. Its width is bound by the window
+   height as well, so the whole square field and «Цели нет» fit. */
+.nm-game-host .gm07-module-play {
+  width: min(900px, 94%, 62vh);
+}
 
 /* «Найди отличие»: the pictures side by side — the field is wide, so each
    picture gets the whole height instead of half of it */
