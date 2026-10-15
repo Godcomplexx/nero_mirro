@@ -447,7 +447,7 @@ def create_app() -> FastAPI:
                 ],
             },
             "status": session["status"],
-            "plan": course["plan"],
+            "plan": session.get("plan") or course["plan"],
             "games": session["games"],
             "session_size": len(session["games"]),
             "skipped": session.get("skipped") or [],
@@ -538,6 +538,7 @@ def create_app() -> FastAPI:
             states=states,
             recent=recent_success(passes),
             order_seed=order_seed(user_id, number),
+            domain_counts=store.domain_counts(course),
             history=ctx.runtime.game_history_store.for_user(user_id),
             available_codes=implemented_game_codes(),
         )
@@ -551,6 +552,7 @@ def create_app() -> FastAPI:
             level_changes=[entry for entry in log if entry["before_session"] == number],
             skipped=selection["skipped"],
             order=selection["order"],
+            plan=selection["plan"],
         )
         return JSONResponse(_course_payload(course, session))
 

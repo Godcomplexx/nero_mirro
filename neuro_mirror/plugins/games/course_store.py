@@ -102,6 +102,15 @@ class TrainingCourseStore:
         ]
 
     @staticmethod
+    def domain_counts(course: dict[str, Any]) -> dict[str, int]:
+        """Плановые задания каждого домена в завершённых занятиях курса (4.2, п. 4)."""
+        counts: dict[str, int] = {}
+        for session in TrainingCourseStore.closed_sessions(course):
+            for domain, count in (session.get("plan") or course.get("plan") or {}).items():
+                counts[domain] = counts.get(domain, 0) + int(count)
+        return counts
+
+    @staticmethod
     def next_slot(course: dict[str, Any]) -> dict[str, Any] | None:
         return next((item for item in course["sessions"] if item.get("status") == SESSION_PLANNED), None)
 
@@ -182,6 +191,7 @@ class TrainingCourseStore:
         level_changes: list[dict[str, Any]],
         skipped: list[dict[str, str]] | None = None,
         order: dict[str, Any] | None = None,
+        plan: dict[str, int] | None = None,
     ) -> dict[str, Any]:
         """Открыть занятие: записать подобранные формы с уровнями и наборами.
 
@@ -202,6 +212,8 @@ class TrainingCourseStore:
             # Порядок заданий: зерно, нарушения желательных правил,
             # закреплённые первое и последнее задания (4.4)
             order=order,
+            # Состав этого занятия: при равенстве отношений он чередуется (4.2)
+            plan=dict(plan) if plan is not None else dict(course.get("plan") or {}),
         )
         self._save()
         return slot

@@ -531,3 +531,44 @@ def test_growth_after_analog_forms_carries_a_learning_note():
 def test_a_held_course_is_the_next_step():
     step = next_step({"screening_done": True, "moca_done": True}, course={"hold": {"since": "x"}})
     assert step["step"] == "hold"
+
+
+# ── Чередование состава при равенстве отношений (4.2, п. 4–5) ────────────────
+
+def zero_profile():
+    return [{"domain": row["domain"], "score": row["max_score"], "max_score": row["max_score"]} for row in PROFILE]
+
+
+def test_without_shortfall_the_first_session_is_three_three_two_two():
+    assert plan_session(zero_profile()) == {"Память": 3, "Внимание": 3, "Речь": 2, "Абстракция": 2}
+
+
+def test_on_a_tie_the_domain_rarer_in_the_course_gets_the_extra_task():
+    earlier = {"Память": 3, "Внимание": 3, "Речь": 2, "Абстракция": 2}
+    assert plan_session(zero_profile(), course_counts=earlier) == {
+        "Память": 2, "Внимание": 2, "Речь": 3, "Абстракция": 3,
+    }
+
+
+def test_a_profile_without_ties_keeps_its_plan_whatever_the_course():
+    """Пример 1 методики (4 / 2 / 2 / 2) от истории курса не зависит."""
+    assert plan_session(PROFILE, course_counts={"Память": 40}) == plan_session(PROFILE)
+
+
+def test_the_domains_with_three_tasks_alternate_from_session_to_session(client):
+    plans = []
+    profile = zero_profile()
+
+    async def request(event, timeout=None):
+        return {"items": [{**moca_report(), "domains": {"moca_domains": profile}}]}
+
+    client.app.state.context.runtime.bus.request = request
+    for _ in range(3):
+        body = client.get("/api/training/session").json()
+        plans.append(body["plan"])
+        client.post("/api/training/session/finish", json={})
+    assert plans[0] == {"Память": 3, "Внимание": 3, "Речь": 2, "Абстракция": 2}
+    assert plans[1] == {"Память": 2, "Внимание": 2, "Речь": 3, "Абстракция": 3}
+    assert plans[2] == plans[0]
+    course = client.get("/api/training/course").json()
+    assert [session["plan"] for session in course["sessions"][:3]] == plans

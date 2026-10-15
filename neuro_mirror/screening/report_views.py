@@ -213,6 +213,7 @@ def _training_entry(
             "opened_at": session.get("opened_at"),
             "finished_at": session.get("finished_at"),
             "end_reason": session.get("end_reason"),
+            "plan": deepcopy(session.get("plan") or {}),
             "done": sum(1 for game in games if game.get("status") == "done"),
             "total": len(games),
             "pauses": len(session.get("pauses") or []),

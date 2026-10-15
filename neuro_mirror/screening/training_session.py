@@ -82,6 +82,7 @@ def build_training_session(
     states: dict[str, FormState] | None = None,
     recent: dict[str, Success] | None = None,
     order_seed: int = 0,
+    domain_counts: dict[str, int] | None = None,
     history: tuple[Presentation, ...] = (),
     available_codes: frozenset[str] | None = None,
     definitions: tuple[GameDefinition, ...] = GAME_CATALOG,
@@ -92,7 +93,9 @@ def build_training_session(
     ``course_sessions`` — коды форм, показанных в прошлых занятиях курса, по
     порядку занятий; ``states`` — уровни и отметки форм перед этим занятием;
     ``recent`` — последняя учитываемая успешность каждой формы в курсе;
-    ``order_seed`` — зерно, которое решает порядок при равенстве.
+    ``order_seed`` — зерно, которое решает порядок при равенстве;
+    ``domain_counts`` — сколько плановых заданий каждого домена было в
+    завершённых занятиях курса: по ним чередуется состав при равенстве (4.2).
     """
     profile = list(profile)
     if not profile:
@@ -100,7 +103,7 @@ def build_training_session(
 
     states = states or {}
     by_code = {item.code: item for item in definitions}
-    plan = plan_session(profile, session_size=session_size)
+    plan = plan_session(profile, session_size=session_size, course_counts=domain_counts)
     mechanic_counts: dict[str, int] = {}
     for session_codes in course_sessions:
         for code in session_codes:
