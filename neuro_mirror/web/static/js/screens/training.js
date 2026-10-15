@@ -1028,6 +1028,19 @@ function render() {
 // After a page reload: back to the place saved for this profile
 async function restore(place) {
   Object.assign(model, place, { currentUnavailable: false });
+  // The saved place belongs to one session of the course. If the core has
+  // closed it meanwhile (it was started on another day — methodology 9), the
+  // place is stale: the session is asked from the core again.
+  if (["overview", "pre-check", "san-before", "playing"].includes(place.phase)) {
+    const fresh = await loadTrainingSession();
+    const was = (place.session && place.session.course) || {};
+    const now = fresh.status === "ready" ? fresh.session.course || {} : null;
+    if (!now || now.course_id !== was.course_id || now.session_number !== was.session_number) {
+      await load();
+      return;
+    }
+    model.session = fresh.session;
+  }
   if (place.phase === "catalog" || place.phase === "free") {
     try {
       model.catalog = (await loadCatalog()).filter((item) => item.implemented);

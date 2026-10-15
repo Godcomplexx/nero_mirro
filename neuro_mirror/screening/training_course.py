@@ -24,6 +24,8 @@ from typing import Any
 from neuro_mirror.plugins.games.catalog import get_game_definition
 from neuro_mirror.plugins.games.contracts import GameDefinition
 from neuro_mirror.screening.difficulty_policy import (
+    FLAG_CEILING,
+    MIN_LEVEL,
     FormState,
     Success,
     apply_pass,
@@ -33,6 +35,10 @@ from neuro_mirror.screening.difficulty_policy import (
 )
 
 COURSE_SESSIONS = 12
+
+# Перерыв в курсе, после которого при первом показе формы уровень не
+# повышается (методика, вопрос 3)
+BREAK_DAYS = 14
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,9 +122,17 @@ class CoursePass:
     result: Success | None
 
 
+def _capped(state: FormState, level: int) -> FormState:
+    """Уровень не выше ``level``; серия и отметка «потолок» сбрасываются."""
+    if state.level <= level:
+        return state
+    return FormState(level=level, flags=state.flags - {FLAG_CEILING})
+
+
 def form_states(
     passes: Iterable[CoursePass],
     session_number: int,
+    breaks: frozenset[int] = frozenset(),
 ) -> tuple[dict[str, FormState], list[dict[str, Any]]]:
     """Уровни форм перед занятием ``session_number`` и журнал переходов.
 
@@ -131,17 +145,20 @@ def form_states(
     * Перед 7-м и далее — переход по итогам каждого учитываемого прохождения
       начиная с 6-го занятия. Форма, которой в занятии не было, уровень не
       меняет.
+    * ``breaks`` — занятия, перед которыми был перерыв в курсе дольше
+      ``BREAK_DAYS`` дней (вопрос 3 методики). При первом показе формы после
+      такого перерыва её уровень не выше, чем при последнем показе до него.
     """
     states: dict[str, FormState] = {}
     log: list[dict[str, Any]] = []
     if session_number <= ASSIGNMENT_BEFORE - 1:
         return states, log
 
-    counted = [item for item in passes if item.result is not None and has_levels(item.game_code)]
+    passes = [item for item in passes if has_levels(item.game_code)]
 
     by_form: dict[str, list[Success]] = {}
-    for item in counted:
-        if item.session_number in ASSIGNMENT_SESSIONS:
+    for item in passes:
+        if item.result is not None and item.session_number in ASSIGNMENT_SESSIONS:
             by_form.setdefault(item.game_code, []).append(item.result)
     for code, results in by_form.items():
         state = assign_level(results)
@@ -159,21 +176,60 @@ def form_states(
             "last_success": results[-1].to_dict(),
         })
 
-    for item in counted:
-        if not ASSIGNMENT_BEFORE <= item.session_number < session_number:
-            continue
-        before = states.get(item.game_code, FormState())
-        after = apply_pass(before, item.result)
-        states[item.game_code] = after
-        if after.level != before.level or after.flags != before.flags:
+    # Уровень, на котором форма показывалась последний раз, и формы, которых
+    # после перерыва ещё не показывали
+    shown_level: dict[str, int] = {}
+    after_break: set[str] = set()
+
+    def cap(code: str, number: int) -> FormState:
+        before = states.get(code, FormState())
+        capped = _capped(before, shown_level[code])
+        if capped != before:
+            states[code] = capped
             log.append({
-                "before_session": item.session_number + 1,
-                "game_code": item.game_code,
-                "kind": "transition",
+                "before_session": number,
+                "game_code": code,
+                "kind": "break",
                 "from_level": before.level,
-                **_state_fields(after),
-                "success": item.result.to_dict(),
+                **_state_fields(capped),
+                "success": None,
             })
+        return capped
+
+    for number in range(1, session_number):
+        if number in breaks:
+            after_break |= set(shown_level)
+        for item in passes:
+            if item.session_number != number:
+                continue
+            code = item.game_code
+            if number < ASSIGNMENT_BEFORE:
+                shown_level[code] = MIN_LEVEL
+                after_break.discard(code)
+                continue
+            before = cap(code, number) if code in after_break else states.get(code, FormState())
+            after_break.discard(code)
+            shown_level[code] = before.level
+            if item.result is None:
+                continue
+            after = apply_pass(before, item.result)
+            states[code] = after
+            if after.level != before.level or after.flags != before.flags:
+                log.append({
+                    "before_session": number + 1,
+                    "game_code": code,
+                    "kind": "transition",
+                    "from_level": before.level,
+                    **_state_fields(after),
+                    "success": item.result.to_dict(),
+                })
+
+    # Перерыв перед этим занятием или раньше, а форму с тех пор не
+    # показывали: в этом занятии она идёт не выше прежнего уровня
+    if session_number in breaks:
+        after_break |= set(shown_level)
+    for code in sorted(after_break):
+        cap(code, session_number)
     return states, log
 
 

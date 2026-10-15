@@ -375,6 +375,21 @@ def notifications(course: dict[str, Any] | None, levels: dict[str, Any] | None =
             "at": hold.get("since"),
             "text": "Курс приостановлен до решения специалиста. Снять приостановку можно в этом отчёте.",
         })
+    entry = course.get("entry") or {}
+    confirmed = {row.get("domain") for row in entry.get("confirmed") or []}
+    for domain in entry.get("low_confidence") or []:
+        if domain in confirmed:
+            continue
+        found.append({
+            "kind": "low_confidence",
+            "urgent": False,
+            "domain": domain,
+            "text": (
+                f"Домен «{domain}»: низкая достоверность входного результата. Пока результат не "
+                "подтверждён, в занятиях у домена только обязательное задание (методика, 4.2, п. 6). "
+                "Прослушайте ответы в отчёте когнитивного теста и подтвердите результат."
+            ),
+        })
     incomplete = [s["number"] for s in course.get("sessions") or [] if s.get("status") == "incomplete"]
     if len(incomplete) > INCOMPLETE_SESSIONS_LIMIT:
         found.append({

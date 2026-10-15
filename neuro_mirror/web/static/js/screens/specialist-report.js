@@ -209,6 +209,31 @@ function notificationsSection(items, training, onChanged) {
   for (const item of items) {
     const row = el("li", item.urgent ? "nm-spec-notice-urgent" : null);
     row.append(el("strong", null, item.urgent ? "Срочно. " : ""), document.createTextNode(item.text));
+    // Methodology 4.2, п. 6: the domain gets its shortfall back once confirmed
+    if (item.kind === "low_confidence") {
+      const confirm = button(`Подтвердить результат: ${item.domain}`, "secondary", async () => {
+        const confirmed = await confirmDialog({
+          title: `Подтвердить результат домена «${item.domain}»?`,
+          message: "С ближайшего занятия домен получит задания по недобору входного теста.",
+          confirmLabel: "Подтвердить",
+          cancelLabel: "Отмена",
+        });
+        if (!confirmed) return;
+        confirm.disabled = true;
+        try {
+          await api("/api/specialist/course/confirm", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ domain: item.domain }),
+          });
+          onChanged();
+        } catch (error) {
+          notify(error.message || String(error));
+          confirm.disabled = false;
+        }
+      });
+      row.append(el("br"), confirm);
+    }
     list.appendChild(row);
   }
   const box = el("div", "nm-spec-quality nm-spec-quality-limited");
@@ -338,6 +363,11 @@ const U06_LABELS = {
   technical_invalid: "техническая проблема",
   undetermined: "не определено",
   abandoned: "прервано",
+};
+const LEVEL_CHANGE_KINDS = {
+  assignment: "присвоение по занятиям 3–5",
+  transition: "по успешности",
+  break: "перерыв больше двух недель",
 };
 const ITEM_STATUS = { pending: "не начато", started: "начато", done: "пройдено", abandoned: "прервано", not_presented: "не показано" };
 
@@ -492,8 +522,9 @@ function trainingSection(course) {
     children.push(details(
       "Переходы уровней",
       table(
-        ["Перед занятием", "Форма", "Было", "Стало", "Успешность"],
+        ["Перед занятием", "Форма", "Было", "Стало", "Почему", "Успешность"],
         course.level_changes.map((change) => [change.before_session, change.game_code, change.from_level, change.to_level,
+          LEVEL_CHANGE_KINDS[change.kind] || change.kind,
           change.success ? `${change.success.correct} из ${change.success.total}` : null]),
       ),
     ));

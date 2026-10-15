@@ -25,18 +25,28 @@
 
 Красный флаг (раздел 9) приостанавливает курс (``hold``): новое занятие не
 открывается, пока специалист не снимет приостановку.
+
+Прерванное занятие (раздел 9, вопрос 4): в тот же день оно продолжается,
+позже — засчитывается как неполное, а следующее собирается заново
+(``close_stale``). Занятие, в котором ни одно задание не начиналось, не
+расходуется: слот собирается заново.
+
+Домен с отметкой «низкая достоверность» во входном скрининге (4.2, п. 6)
+считается без недобора, пока специалист не подтвердит результат
+(``effective_profile``, ``confirm_domain``).
 """
 from __future__ import annotations
 
 import json
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 from neuro_mirror.plugins.games.catalog import get_game_definition
 from neuro_mirror.screening.difficulty_policy import FormState, Success
 from neuro_mirror.screening.training_course import (
+    BREAK_DAYS,
     COURSE_SESSIONS,
     CoursePass,
     apply_levels,
@@ -62,6 +72,18 @@ class CourseError(LookupError):
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def _moment(value: Any) -> datetime | None:
+    try:
+        moment = datetime.fromisoformat(str(value))
+    except (TypeError, ValueError):
+        return None
+    return moment if moment.tzinfo else moment.replace(tzinfo=UTC)
+
+
+# Занятие, закрытое при возврате в другой день (раздел 9)
+STALE_REASON = "занятие не завершено в день начала"
 
 
 class TrainingCourseStore:
@@ -111,6 +133,52 @@ class TrainingCourseStore:
         return counts
 
     @staticmethod
+    def break_sessions(course: dict[str, Any], *, upcoming: int | None = None, now: datetime | None = None) -> frozenset[int]:
+        """Занятия, перед которыми был перерыв дольше ``BREAK_DAYS`` дней (вопрос 3).
+
+        Перерыв — от конца последнего закрытого занятия до открытия
+        следующего; ``upcoming`` — занятие, которое открывается сейчас.
+        """
+        limit = timedelta(days=BREAK_DAYS)
+        found: set[int] = set()
+        last_end: datetime | None = None
+        for session in sorted(course["sessions"], key=lambda row: int(row["number"])):
+            opened = _moment(session.get("opened_at"))
+            if session.get("status") == SESSION_PLANNED or opened is None:
+                break
+            if last_end is not None and opened - last_end > limit:
+                found.add(int(session["number"]))
+            ended = _moment(session.get("finished_at"))
+            if ended is not None:
+                last_end = ended
+        if upcoming is not None and last_end is not None:
+            if (now or datetime.now(UTC)) - last_end > limit:
+                found.add(int(upcoming))
+        return frozenset(found)
+
+    @staticmethod
+    def low_confidence(course: dict[str, Any]) -> list[str]:
+        """Домены с низкой достоверностью, ещё не подтверждённые специалистом."""
+        entry = course.get("entry") or {}
+        confirmed = {row.get("domain") for row in entry.get("confirmed") or []}
+        return [domain for domain in entry.get("low_confidence") or [] if domain not in confirmed]
+
+    @staticmethod
+    def effective_profile(course: dict[str, Any]) -> list[dict[str, Any]]:
+        """Входной профиль для состава занятия (4.2, п. 6).
+
+        Домен с низкой достоверностью до подтверждения специалистом
+        считается с недобором 0 — получает только обязательное задание.
+        """
+        pending = set(TrainingCourseStore.low_confidence(course))
+        profile = []
+        for row in (course.get("entry") or {}).get("profile") or []:
+            if row.get("domain") in pending:
+                row = {**row, "score": row.get("max_score")}
+            profile.append(row)
+        return profile
+
+    @staticmethod
     def next_slot(course: dict[str, Any]) -> dict[str, Any] | None:
         return next((item for item in course["sessions"] if item.get("status") == SESSION_PLANNED), None)
 
@@ -147,6 +215,7 @@ class TrainingCourseStore:
         entry_session_id: str,
         profile: list[dict[str, Any]],
         plan: dict[str, int],
+        low_confidence: list[str] | None = None,
     ) -> dict[str, Any]:
         """Новый курс сразу на 12 занятий.
 
@@ -171,7 +240,13 @@ class TrainingCourseStore:
             "user_id": user_id,
             "created_at": _now(),
             "finished_at": None,
-            "entry": {"session_id": entry_session_id, "profile": list(profile)},
+            "entry": {
+                "session_id": entry_session_id,
+                "profile": list(profile),
+                # Домены с низкой достоверностью во входном скрининге (4.2, п. 6)
+                "low_confidence": list(low_confidence or []),
+                "confirmed": [],
+            },
             "plan": dict(plan),
             "sessions": sessions,
             "red_flags": [],
@@ -408,6 +483,52 @@ class TrainingCourseStore:
         if session is None:
             return None
         record = self._end_pause(session, "продолжение")
+        self._save()
+        return record
+
+    def close_stale(self, user_id: str, *, today: date | None = None) -> dict[str, Any] | None:
+        """Занятие, начатое в другой день, закрыть (раздел 9, вопрос 4).
+
+        Начатое занятие засчитывается как неполное; занятие, в котором ни одно
+        задание не начиналось, возвращается в слот и собирается заново.
+        Возвращает закрытое или сброшенное занятие, иначе None.
+        """
+        session = self.open_session(user_id)
+        course = self.latest_course(user_id)
+        if session is None or course is None:
+            return None
+        opened = _moment(session.get("opened_at"))
+        today = today or datetime.now().astimezone().date()
+        if opened is None or opened.astimezone().date() >= today:
+            return None
+        begun = any(
+            item.get("status") in (ITEM_STARTED, ITEM_DONE, ITEM_ABANDONED)
+            for item in session["games"]
+        )
+        if begun:
+            self._close(course, session, SESSION_INCOMPLETE, reason=STALE_REASON)
+        else:
+            session.update(
+                status=SESSION_PLANNED,
+                games=[],
+                opened_at=None,
+                order=None,
+                plan=None,
+                skipped=[],
+                level_changes=[],
+                pauses=[],
+                pre_check=None,
+            )
+        self._save()
+        return session
+
+    def confirm_domain(self, user_id: str, *, domain: str) -> dict[str, Any]:
+        """Специалист подтверждает результат домена с низкой достоверностью."""
+        course = self.latest_course(user_id)
+        if course is None or domain not in self.low_confidence(course):
+            raise CourseError("Подтверждать нечего: у домена нет отметки «низкая достоверность».")
+        record = {"domain": domain, "at": _now()}
+        course["entry"].setdefault("confirmed", []).append(record)
         self._save()
         return record
 

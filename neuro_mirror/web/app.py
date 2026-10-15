@@ -54,6 +54,7 @@ from neuro_mirror.core.access_journal import (
 from neuro_mirror.core.next_step import next_step
 from neuro_mirror.core.specialist_access import SpecialistAccess, SpecialistAccessError
 from neuro_mirror.screening import report_views
+from neuro_mirror.screening.data_quality import assess
 from neuro_mirror.screening.moca_scoring import cognitive_profile
 from neuro_mirror.screening.san_survey import (
     MOMENTS,
@@ -176,6 +177,10 @@ class TrainingPreCheckIn(BaseModel):
 
 class HoldReleaseIn(BaseModel):
     note: str = ""
+
+
+class DomainConfirmIn(BaseModel):
+    domain: str
 
 
 class SanAnswersIn(BaseModel):
@@ -400,8 +405,9 @@ def create_app() -> FastAPI:
         )
         return JSONResponse(result)
 
-    async def _latest_moca(user_id: str) -> tuple[list[dict[str, Any]], str, str]:
-        """Профиль доменов из последнего результата MoCA: профиль, сессия, время."""
+    async def _latest_moca(user_id: str) -> tuple[list[dict[str, Any]], str, str, list[str]]:
+        """Профиль доменов из последнего результата MoCA: профиль, сессия,
+        время и домены с отметкой «низкая достоверность»."""
         ctx: WebAppContext = app.state.context
         try:
             reply = await ctx.runtime.bus.request(
@@ -420,8 +426,9 @@ def create_app() -> FastAPI:
         for item in items:
             candidate = cognitive_profile(item.get("domains"))
             if candidate:
-                return list(candidate), str(item.get("session_id") or ""), str(item.get("stored_at") or "")
-        return [], "", ""
+                low = assess({**item, "report_type": "moca"})["low_confidence_domains"]
+                return list(candidate), str(item.get("session_id") or ""), str(item.get("stored_at") or ""), list(low)
+        return [], "", "", []
 
     def _moment(value: Any) -> datetime | None:
         try:
@@ -485,6 +492,9 @@ def create_app() -> FastAPI:
         user_id = str(active.get("id") or "")
         store = ctx.runtime.training_course_store
 
+        # Занятие, начатое в другой день, засчитывается неполным, следующее
+        # собирается заново (методика, раздел 9)
+        store.close_stale(user_id)
         course = store.latest_course(user_id)
         session = store.open_session(user_id)
         _on_hold(course)
@@ -492,7 +502,7 @@ def create_app() -> FastAPI:
             return JSONResponse(_course_payload(course, session))
 
         if course is None or store.is_finished(course):
-            profile, entry_session, entry_at = await _latest_moca(user_id)
+            profile, entry_session, entry_at, low_confidence = await _latest_moca(user_id)
             if not profile:
                 raise HTTPException(
                     status_code=409,
@@ -510,7 +520,11 @@ def create_app() -> FastAPI:
                             "его результату начнётся новый курс."
                         ),
                     )
-            plan = plan_session(profile)
+            # Домен с низкой достоверностью — без недобора до подтверждения (4.2, п. 6)
+            plan = plan_session([
+                {**row, "score": row.get("max_score")} if row.get("domain") in low_confidence else row
+                for row in profile
+            ])
             if not plan:
                 raise HTTPException(status_code=409, detail="Не удалось подобрать ни одного задания.")
             course = store.create_course(
@@ -518,12 +532,13 @@ def create_app() -> FastAPI:
                 entry_session_id=entry_session,
                 profile=profile,
                 plan=plan,
+                low_confidence=low_confidence,
             )
 
         slot = store.next_slot(course)
         number = int(slot["number"])
         passes = store.passes(course)
-        states, log = form_states(passes, number)
+        states, log = form_states(passes, number, store.break_sessions(course, upcoming=number))
         # Формы, показанные в прошлых занятиях: по ним чередуются механики и
         # не повторяется прошлое занятие (методика, раздел 4.4)
         shown = (ITEM_DONE, ITEM_ABANDONED)
@@ -532,7 +547,7 @@ def create_app() -> FastAPI:
             for previous in store.closed_sessions(course)
         )
         selection = build_training_session(
-            course["entry"]["profile"],
+            store.effective_profile(course),
             session_number=number,
             course_sessions=course_sessions,
             states=states,
@@ -637,7 +652,7 @@ def create_app() -> FastAPI:
         item = next((row for row in session["games"] if int(row["position"]) == int(position)), None)
         if item is None:
             return None
-        states, _ = form_states(store.passes(course), int(session["number"]))
+        states, _ = form_states(store.passes(course), int(session["number"]), store.break_sessions(course))
         return lighter_alternative(
             item,
             session["games"],
@@ -747,7 +762,9 @@ def create_app() -> FastAPI:
         if course is None:
             raise HTTPException(status_code=404, detail="Курс тренировок ещё не начат.")
         next_number = min(len(store.closed_sessions(course)) + 1, COURSE_SESSIONS)
-        states, log = form_states(store.passes(course), next_number)
+        states, log = form_states(
+            store.passes(course), next_number, store.break_sessions(course, upcoming=next_number)
+        )
         access_journal.record(
             action=VIEW_RESULTS,
             user_id=user_id,
@@ -1103,6 +1120,26 @@ def create_app() -> FastAPI:
         _log.info("специалист снял приостановку курса")
         return JSONResponse(record)
 
+    @app.post("/api/specialist/course/confirm")
+    async def specialist_confirm_domain(payload: DomainConfirmIn) -> JSONResponse:
+        """Специалист подтверждает результат домена с низкой достоверностью.
+
+        С ближайшего занятия домен получает задания по недобору входного
+        скрининга (методика, 4.2, п. 6).
+        """
+        ctx: WebAppContext = app.state.context
+        if not specialist.is_active():
+            raise HTTPException(status_code=403, detail="Действие доступно специалисту после входа по PIN.")
+        active = _active_user_or_400()
+        try:
+            record = ctx.runtime.training_course_store.confirm_domain(
+                str(active.get("id") or ""), domain=payload.domain.strip()
+            )
+        except CourseError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        _log.info("специалист подтвердил результат домена")
+        return JSONResponse(record)
+
     @app.get("/api/specialist/report")
     async def specialist_report() -> JSONResponse:
         """Расширенный отчёт специалиста по активному пользователю.
@@ -1135,7 +1172,9 @@ def create_app() -> FastAPI:
         log: list[dict[str, Any]] = []
         if course is not None:
             next_number = min(len(store.closed_sessions(course)) + 1, COURSE_SESSIONS)
-            states, log = form_states(store.passes(course), next_number)
+            states, log = form_states(
+                store.passes(course), next_number, store.break_sessions(course, upcoming=next_number)
+            )
             levels = {code: describe(state) for code, state in sorted(states.items())}
 
         report = report_views.specialist_report(

@@ -572,3 +572,129 @@ def test_the_domains_with_three_tasks_alternate_from_session_to_session(client):
     assert plans[2] == plans[0]
     course = client.get("/api/training/course").json()
     assert [session["plan"] for session in course["sessions"][:3]] == plans
+
+
+# ── Прерванное занятие в другой день (раздел 9, вопрос 4) ─────────────────────
+
+from datetime import UTC as _UTC, date as _date, datetime as _datetime, timedelta as _timedelta  # noqa: E402
+
+from neuro_mirror.plugins.games.course_store import SESSION_PLANNED, STALE_REASON  # noqa: E402
+from neuro_mirror.screening.training_course import BREAK_DAYS, CoursePass  # noqa: E402
+
+
+def yesterday_iso():
+    return (_datetime.now(_UTC) - _timedelta(days=1, hours=1)).isoformat()
+
+
+def test_a_started_session_is_closed_as_incomplete_on_another_day(tmp_path):
+    store, course = open_course(tmp_path)
+    start(store, 1, "g1")
+    store.open_session("u1")["opened_at"] = yesterday_iso()
+    closed = store.close_stale("u1")
+    assert closed["status"] == SESSION_INCOMPLETE and closed["end_reason"] == STALE_REASON
+    assert closed["games"][0]["status"] == ITEM_ABANDONED
+    assert store.open_session("u1") is None
+
+
+def test_a_session_never_begun_is_assembled_again(tmp_path):
+    store, course = open_course(tmp_path)
+    store.open_session("u1")["opened_at"] = yesterday_iso()
+    reset = store.close_stale("u1")
+    assert reset["status"] == SESSION_PLANNED and reset["games"] == []
+    assert store.next_slot(course)["number"] == 1
+
+
+def test_the_same_day_the_session_goes_on(tmp_path):
+    store, _ = open_course(tmp_path)
+    start(store, 1, "g1")
+    assert store.close_stale("u1") is None
+    assert store.close_stale("u1", today=_date.today() - _timedelta(days=1)) is None
+
+
+def test_on_another_day_the_endpoint_opens_the_next_session(client):
+    started(client)
+    client.store.open_session(client.user_id)["opened_at"] = yesterday_iso()
+    body = client.get("/api/training/session").json()
+    assert body["course"]["session_number"] == 2
+    course = client.get("/api/training/course").json()
+    assert course["sessions"][0]["status"] == "incomplete"
+
+
+# ── Перерыв дольше двух недель (вопрос 3) ─────────────────────────────────────
+
+def pass_(number, code, result):
+    return CoursePass(session_number=number, game_code=code, result=result)
+
+
+def test_after_a_long_break_the_level_is_not_raised_at_the_first_show():
+    history = [pass_(6, "GM-07", Success(9, 10)), pass_(6, "GM-17", Success(10, 10))]
+    plain, _ = form_states(history, 7)
+    assert plain["GM-07"].level == 2
+    capped, log = form_states(history, 7, frozenset({7}))
+    assert capped["GM-07"].level == 1 and capped["GM-17"].level == 1
+    # В журнале — переход по итогам 6-го занятия и следом ограничение перерывом
+    gm07 = [entry["kind"] for entry in log if entry["game_code"] == "GM-07" and entry["before_session"] == 7]
+    assert gm07 == ["transition", "break"]
+
+
+def test_a_form_first_shown_later_after_the_break_is_still_capped():
+    history = [pass_(6, "GM-07", Success(9, 10)), pass_(6, "GM-17", Success(10, 10)),
+               pass_(7, "GM-17", Success(5, 10))]
+    states, _ = form_states(history, 8, frozenset({7}))
+    assert states["GM-07"].level == 1, "GM-07 после перерыва ещё не показывали"
+    # GM-17 показана в 7-м на уровне 1, дальше переходы идут как обычно
+    assert states["GM-17"].level == 1
+
+
+def test_after_the_first_show_the_level_grows_again():
+    history = [pass_(6, "GM-07", Success(9, 10)), pass_(7, "GM-07", Success(9, 10))]
+    states, _ = form_states(history, 8, frozenset({7}))
+    assert states["GM-07"].level == 2
+
+
+def test_the_break_is_measured_between_sessions(tmp_path):
+    store, course = open_course(tmp_path)
+    store.finish_session("u1", reason="тест")
+    long_ago = _datetime.now(_UTC) - _timedelta(days=BREAK_DAYS + 3)
+    course["sessions"][0]["finished_at"] = long_ago.isoformat()
+    assert store.break_sessions(course, upcoming=2) == frozenset({2})
+    course["sessions"][0]["finished_at"] = _datetime.now(_UTC).isoformat()
+    assert store.break_sessions(course, upcoming=2) == frozenset()
+
+
+# ── Низкая достоверность домена (4.2, п. 6) ───────────────────────────────────
+
+def test_a_low_confidence_domain_has_no_shortfall_until_confirmed(tmp_path):
+    store = TrainingCourseStore(tmp_path / "c.json")
+    course = store.create_course(user_id="u1", entry_session_id="m1", profile=PROFILE,
+                                 plan=plan_session(PROFILE), low_confidence=["Память"])
+    assert plan_session(store.effective_profile(course))["Память"] == 1
+    assert [row["kind"] for row in course_report.notifications(course)] == ["low_confidence"]
+    store.confirm_domain("u1", domain="Память")
+    assert plan_session(store.effective_profile(course)) == plan_session(PROFILE)
+    assert course_report.notifications(course) == []
+    with pytest.raises(CourseError):
+        store.confirm_domain("u1", domain="Память")
+
+
+def test_the_course_starts_without_the_shortfall_of_a_low_confidence_domain(client):
+    report = moca_report()
+    report["domains"] = {
+        "moca_domains": PROFILE,
+        "moca_tasks": [
+            {"task_id": f"t{i}", "domain": "Память", "score": 0, "max_score": 1, "transcript": ""}
+            for i in range(2)
+        ],
+    }
+
+    async def request(event, timeout=None):
+        return {"items": [report]}
+
+    client.app.state.context.runtime.bus.request = request
+    body = client.get("/api/training/session").json()
+    assert body["plan"]["Память"] == 1
+    assert client.post("/api/specialist/course/confirm", json={"domain": "Память"}).status_code == 403
+    client.post("/api/specialist/login", json={"pin": "4821"})
+    assert client.post("/api/specialist/course/confirm", json={"domain": "Память"}).status_code == 200
+    client.post("/api/training/session/finish", json={})
+    assert client.get("/api/training/session").json()["plan"] == plan_session(PROFILE)
