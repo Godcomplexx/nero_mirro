@@ -12,30 +12,30 @@
     <!-- Стили: tokens → base → shell → components → screens -->
     <link rel="stylesheet" href="/static/css/tokens.css?v=20260925-fit4" />
     <link rel="stylesheet" href="/static/css/base.css?v=20260925-fit4" />
-    <link rel="stylesheet" href="/static/css/shell.css?v=20261002-logo3" />
+    <link rel="stylesheet" href="/static/css/shell.css?v=20261015-sbscroll" />
     <link rel="stylesheet" href="/static/css/components/placeholder.css?v=20260925-fit4" />
     <link rel="stylesheet" href="/static/css/components/card.css?v=20260925-fit4" />
     <link rel="stylesheet" href="/static/css/components/button.css?v=20260925-fit4" />
     <link rel="stylesheet" href="/static/css/components/stepper.css?v=20260925-fit4" />
-    <link rel="stylesheet" href="/static/css/components/dialog.css?v=20260925-fit4" />
+    <link rel="stylesheet" href="/static/css/components/dialog.css?v=20261015-center" />
     <link rel="stylesheet" href="/static/css/components/san.css?v=20260925-fit4" />
     <link rel="stylesheet" href="/static/css/components/panel.css?v=20260925-fit4" />
     <link rel="stylesheet" href="/static/css/components/check-list.css?v=20260925-fit4" />
     <link rel="stylesheet" href="/static/css/components/progress.css?v=20260925-fit4" />
-    <link rel="stylesheet" href="/static/css/components/notice.css?v=20260930-mirror" />
+    <link rel="stylesheet" href="/static/css/components/notice.css?v=20261015-fade" />
     <link rel="stylesheet" href="/static/css/components/hads.css?v=20260925-fit4" />
     <link rel="stylesheet" href="/static/css/components/moca.css?v=20260925-fit4" />
     <link rel="stylesheet" href="/static/css/components/tabs.css?v=20260925-fit4" />
     <link rel="stylesheet" href="/static/css/components/domain.css?v=20260925-fit4" />
     <link rel="stylesheet" href="/static/css/screens/home.css?v=20260925-fit4" />
-    <link rel="stylesheet" href="/static/css/screens/welcome.css?v=20261002-v3b" />
+    <link rel="stylesheet" href="/static/css/screens/welcome.css?v=20261015-ovx" />
     <link rel="stylesheet" href="/static/css/screens/screening.css?v=20260925-fit5" />
     <link rel="stylesheet" href="/static/css/screens/test.css?v=20260930-mirror" />
     <link rel="stylesheet" href="/static/css/screens/reports.css?v=20260925-fit4" />
-    <link rel="stylesheet" href="/static/css/screens/service.css?v=20260925-fit4" />
+    <link rel="stylesheet" href="/static/css/screens/service.css?v=20261015-fit2" />
     <link rel="stylesheet" href="/static/css/screens/tasks.css?v=20260925-fit4" />
     <link rel="stylesheet" href="/static/css/screens/training.css?v=20260930-free2" />
-    <link rel="stylesheet" href="/static/css/screens/game.css?v=20261002-v3b" />
+    <link rel="stylesheet" href="/static/css/screens/game.css?v=20261015-zoom" />
     <link rel="stylesheet" href="/static/css/screens/practice.css?v=20261001-gm20" />  </head>
   <body data-nm-sidebar-collapsed="true">
     <div class="nm-app">
@@ -177,10 +177,10 @@
                 <span id="consent-text-dataset">Я даю согласие на сохранение аудио- и видеозаписей моего прохождения тестов для формирования исследовательского набора данных.</span>
               </label>
 
-              <p class="user-create-error" id="user-create-error" hidden></p>
+              <p class="user-create-error" id="user-create-error" role="alert" hidden></p>
 
               <div class="user-create-actions">
-                <button type="submit" class="icon-btn primary-btn" id="user-create-submit" disabled><span>Создать и войти</span></button>
+                <button type="submit" class="icon-btn primary-btn" id="user-create-submit"><span>Создать и войти</span></button>
                 <button type="button" class="icon-btn" id="user-create-back" hidden><span>Назад</span></button>
               </div>
             </form>
@@ -189,7 +189,7 @@
       </div>
     </div>
 
-    <script src="/static/app.js?v=20260930-mirror" defer></script>
-    <script type="module" src="/static/js/shell.js?v=20261009-demo"></script>
+    <script src="/static/app.js?v=20261015-kbd" defer></script>
+    <script type="module" src="/static/js/shell.js?v=20261015-kbd"></script>
   </body>
 </html>

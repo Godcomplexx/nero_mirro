@@ -137,6 +137,8 @@ function buildHomeCard(section, locked = Boolean(section.locked)) {
   button.type = "button";
   button.className = "nm-card-action";
   button.textContent = "Открыть →";
+  // Six cards have the same visible button text; a screen reader names it
+  button.setAttribute("aria-label", `Открыть: ${section.label}`);
   if (locked) {
     button.disabled = true;
   } else {

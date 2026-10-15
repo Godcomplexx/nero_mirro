@@ -767,13 +767,48 @@ function showUserCreateError(message) {
   }
 }
 
+// «Создать и войти» stays pressable: a greyed-out button does not say what is
+// missing, so the form says it instead (checkUserCreateForm) when it is pressed
 function syncUserCreateSubmit() {
+  setDisabled(el.userCreateSubmit, false);
   const nameOk = Boolean(el.userNameInput && el.userNameInput.value.trim());
   const consentOk = Boolean(el.userConsentPersonal && el.userConsentPersonal.checked);
-  setDisabled(el.userCreateSubmit, !(nameOk && consentOk));
+  // A field the user has just put right is no longer marked
+  if (nameOk && el.userNameInput) el.userNameInput.removeAttribute("aria-invalid");
+  if (consentOk && el.userConsentPersonal) el.userConsentPersonal.removeAttribute("aria-invalid");
+  if (el.userCreateError && !el.userCreateError.hidden && el.userCreateError.dataset.missing) {
+    const stillMissing = (el.userCreateError.dataset.missing === "name" && !nameOk)
+      || (el.userCreateError.dataset.missing === "consent" && !consentOk);
+    if (!stillMissing) checkUserCreateForm({ focus: false, quietWhenValid: true });
+  }
   if (el.avatarPhotoBtn) {
     setDisabled(el.avatarPhotoBtn, !(el.userConsentVideo && el.userConsentVideo.checked));
   }
+}
+
+// Says what is still missing for a new profile and marks that field.
+// Returns true when the profile can be created.
+function checkUserCreateForm({ focus = true, quietWhenValid = false } = {}) {
+  const nameOk = Boolean(el.userNameInput && el.userNameInput.value.trim());
+  const consentOk = Boolean(el.userConsentPersonal && el.userConsentPersonal.checked);
+  const problems = [];
+  if (!nameOk) problems.push("введите имя");
+  if (!consentOk) problems.push("отметьте согласие на обработку персональных данных — без него профиль создать нельзя");
+  if (el.userNameInput) el.userNameInput.toggleAttribute("aria-invalid", !nameOk);
+  if (el.userConsentPersonal) el.userConsentPersonal.toggleAttribute("aria-invalid", !consentOk);
+  if (!problems.length) {
+    if (el.userCreateError) delete el.userCreateError.dataset.missing;
+    if (quietWhenValid) showUserCreateError("");
+    return true;
+  }
+  const text = `Чтобы создать профиль, ${problems.join(" и ")}.`;
+  showUserCreateError(text.charAt(0).toUpperCase() + text.slice(1));
+  if (el.userCreateError) el.userCreateError.dataset.missing = nameOk ? "consent" : "name";
+  if (focus) {
+    const target = nameOk ? el.userConsentPersonal : el.userNameInput;
+    if (target) target.focus();
+  }
+  return false;
 }
 
 function renderUserGrid(users) {
@@ -806,11 +841,15 @@ function renderUserGrid(users) {
 function renderAvatarPicker() {
   if (!el.avatarPicker) return;
   el.avatarPicker.innerHTML = "";
-  for (const preset of state.userPresets) {
+  // Keyboard: the whole grid is one Tab stop, arrows move inside it
+  el.avatarPicker.setAttribute("role", "group");
+  el.avatarPicker.setAttribute("aria-label", "Аватар");
+  state.userPresets.forEach((preset, index) => {
     const option = document.createElement("button");
     option.type = "button";
     option.className = "avatar-option";
     option.dataset.presetId = preset.id;
+    option.setAttribute("aria-label", `Аватар ${index + 1}`);
     const img = document.createElement("img");
     img.src = preset.url;
     img.alt = "";
@@ -822,18 +861,41 @@ function renderAvatarPicker() {
       highlightSelectedAvatar();
     });
     el.avatarPicker.appendChild(option);
+  });
+  if (!el.avatarPicker.dataset.keysBound) {
+    el.avatarPicker.dataset.keysBound = "1";
+    el.avatarPicker.addEventListener("keydown", moveInAvatarGrid);
   }
   highlightSelectedAvatar();
 }
 
+// Arrow keys between avatars; the row width is read from the layout, so it
+// follows the grid at any window size
+function moveInAvatarGrid(event) {
+  const options = [...el.avatarPicker.querySelectorAll(".avatar-option")];
+  const index = options.indexOf(document.activeElement);
+  if (index < 0) return;
+  const top = options[0].offsetTop;
+  const perRow = Math.max(1, options.filter((option) => option.offsetTop === top).length);
+  const steps = { ArrowRight: 1, ArrowLeft: -1, ArrowDown: perRow, ArrowUp: -perRow, Home: -index, End: options.length - 1 - index };
+  if (!(event.key in steps)) return;
+  event.preventDefault();
+  const next = options[Math.min(options.length - 1, Math.max(0, index + steps[event.key]))];
+  for (const option of options) option.tabIndex = option === next ? 0 : -1;
+  next.focus();
+}
+
 function highlightSelectedAvatar() {
   if (!el.avatarPicker) return;
-  for (const option of el.avatarPicker.querySelectorAll(".avatar-option")) {
-    option.classList.toggle(
-      "selected",
-      !state.userPhotoDataUrl && option.dataset.presetId === state.userSelectedPreset
-    );
+  const options = [...el.avatarPicker.querySelectorAll(".avatar-option")];
+  for (const option of options) {
+    const selected = !state.userPhotoDataUrl && option.dataset.presetId === state.userSelectedPreset;
+    option.classList.toggle("selected", selected);
+    option.setAttribute("aria-pressed", selected ? "true" : "false");
   }
+  // The Tab stop of the grid is the chosen avatar (or the first one)
+  const current = options.find((option) => option.classList.contains("selected")) || options[0];
+  for (const option of options) option.tabIndex = option === current ? 0 : -1;
 }
 
 function resetUserCreateForm() {
@@ -855,6 +917,26 @@ function showUserGateView(view, { allowBack = true } = {}) {
   setHidden(el.userCreateView, view !== "create");
   setHidden(el.userCreateBack, view !== "create" || !allowBack);
   if (view !== "create") stopAvatarCamera();
+  if (el.userGate && !el.userGate.hidden) focusUserGateView(view);
+}
+
+// Keyboard focus goes into the view that has just opened: the first profile
+// or the name field — not left on the button that opened it
+function focusUserGateView(view) {
+  requestAnimationFrame(() => {
+    const target = view === "create"
+      ? el.userNameInput
+      : el.userGrid && el.userGrid.querySelector(".user-card");
+    const fallback = view === "create" ? el.userCreateView : el.userSelectView;
+    (target || fallback || el.userGate).focus();
+  });
+}
+
+// While the profile window is open, the screen under it is out of reach for
+// Tab and screen readers (it is covered, but its buttons were still focusable)
+function setUserGateBackground(covered) {
+  const workarea = document.getElementById("nm-workarea");
+  if (workarea) workarea.inert = covered;
 }
 
 async function openUserGate() {
@@ -871,11 +953,14 @@ async function openUserGate() {
   const hasUsers = Boolean(data.users && data.users.length);
   showUserGateView(hasUsers ? "select" : "create", { allowBack: hasUsers });
   setHidden(el.userGate, false);
+  setUserGateBackground(true);
+  focusUserGateView(hasUsers ? "select" : "create");
 }
 
 function closeUserGate() {
   stopAvatarCamera();
   setHidden(el.userGate, true);
+  setUserGateBackground(false);
 }
 
 async function selectUser(userId) {
@@ -947,6 +1032,7 @@ function captureAvatarPhoto() {
 async function submitUserCreate(event) {
   event.preventDefault();
   const name = el.userNameInput ? el.userNameInput.value.trim() : "";
+  if (!checkUserCreateForm()) return;
   showUserCreateError("");
   setButtonLoading(el.userCreateSubmit, true);
   try {
@@ -1008,6 +1094,13 @@ function bindUserGateEvents() {
   // someone is already signed in — a user must always be selected.
   el.userGate && el.userGate.addEventListener("click", (event) => {
     if (event.target === el.userGate && state.activeUser) closeUserGate();
+  });
+  // Escape closes it the same way (keyboard), and focus returns to the chip
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape" || !el.userGate || el.userGate.hidden || !state.activeUser) return;
+    if (document.querySelector(".nm-dialog")) return;
+    closeUserGate();
+    if (el.userChip) el.userChip.focus();
   });
 }
 
