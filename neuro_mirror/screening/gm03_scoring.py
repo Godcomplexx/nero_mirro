@@ -4,7 +4,9 @@ from __future__ import annotations
 import math
 
 
-def score_gm03(events: list[dict], *, expected_rooms: int) -> dict[str, float | int]:
+def score_gm03(
+    events: list[dict], *, expected_rooms: int, elapsed_ms: float = 0.0
+) -> dict[str, float | int]:
     total = len(events)
     correct = sum(bool(item.get("correct")) for item in events)
     distances = []
@@ -16,6 +18,7 @@ def score_gm03(events: list[dict], *, expected_rooms: int) -> dict[str, float | 
         "u01_correct_action_rate": correct / total if total else 0.0,
         "m04_mean_spatial_error": sum(distances) / total if total else 0.0,
         "u07_error_count": total - correct,
+        "u04_duration_ms": max(0.0, elapsed_ms),
         "u06_complete": total >= max(1, expected_rooms),
         # У каждой пробы должна быть и загаданная, и выбранная клетка: без
         # них расстояние между ними ничего не значит.

@@ -59,9 +59,9 @@
       "default_level": 1,
       "status": "configured",
       "levels": [
-        {"level": 1, "label": "Простой", "parameters": {"grid_size": 4, "object_count": 16, "target_present_range": [3, 5]}},
-        {"level": 2, "label": "Средний", "parameters": {"grid_size": 8, "object_count": 64, "target_present_range": [4, 7]}},
-        {"level": 3, "label": "Сложный", "parameters": {"grid_size": 10, "object_count": 100, "target_present_range": [6, 10]}}
+        {"level": 1, "label": "Простой", "parameters": {"object_count": 10, "grid_columns": 5, "target_present_range": [3, 5]}},
+        {"level": 2, "label": "Средний", "parameters": {"object_count": 15, "grid_columns": 5, "target_present_range": [4, 7]}},
+        {"level": 3, "label": "Сложный", "parameters": {"object_count": 20, "grid_columns": 5, "target_present_range": [6, 10]}}
       ]
     },
     "GM-08": {
@@ -77,17 +77,17 @@
       "default_level": 1,
       "status": "configured",
       "levels": [
-        {"level": 1, "label": "Простой", "parameters": {"tracked_objects": 2, "movement_ms": 4200}},
+        {"level": 1, "label": "Простой", "parameters": {"tracked_objects": 2, "movement_ms": 5000}},
         {"level": 2, "label": "Средний", "parameters": {"tracked_objects": 3, "movement_ms": 4200}},
-        {"level": 3, "label": "Сложный", "parameters": {"tracked_objects": 5, "movement_ms": 4200}}
+        {"level": 3, "label": "Сложный", "parameters": {"tracked_objects": 5, "movement_ms": 3400}}
       ]
     },
     "GM-10": {
       "default_level": 1,
       "status": "configured",
       "levels": [
-        {"level": 1, "label": "Простой", "parameters": {"scene_count": 5, "difference_range": [4, 5]}},
-        {"level": 2, "label": "Средний", "parameters": {"scene_count": 4, "difference_range": [6, 7]}},
+        {"level": 1, "label": "Простой", "parameters": {"scene_count": 4, "difference_range": [4, 4]}},
+        {"level": 2, "label": "Средний", "parameters": {"scene_count": 4, "difference_range": [6, 6]}},
         {"level": 3, "label": "Сложный", "parameters": {"scene_count": 3, "difference_range": [9, 9]}}
       ]
     },
@@ -194,17 +194,17 @@
       "default_level": 1,
       "status": "configured",
       "levels": [
-        {"level": 1, "label": "Простой", "parameters": {"elements": 3}},
-        {"level": 2, "label": "Средний", "parameters": {"elements": 5}},
-        {"level": 3, "label": "Сложный", "parameters": {"elements": 7}}
+        {"level": 1, "label": "Простой", "parameters": {"elements": 3, "rod_count": 3, "ruleset": "classic_hanoi"}},
+        {"level": 2, "label": "Средний", "parameters": {"elements": 5, "rod_count": 3, "ruleset": "classic_hanoi"}},
+        {"level": 3, "label": "Сложный", "parameters": {"elements": 7, "rod_count": 3, "ruleset": "classic_hanoi"}}
       ]
     },
     "GM-23": {
       "default_level": 1,
       "status": "configured",
       "levels": [
-        {"level": 1, "label": "Простой", "parameters": {"trials": 18, "pattern_mode": "symbol_only", "style_count": 1, "option_count": 3}},
-        {"level": 2, "label": "Средний", "parameters": {"trials": 24, "pattern_mode": "symbol_and_style", "style_count": 2, "option_count": 4}},
+        {"level": 1, "label": "Простой", "parameters": {"trials": 18, "pattern_mode": "symbol_only", "style_count": 2, "option_count": 4}},
+        {"level": 2, "label": "Средний", "parameters": {"trials": 24, "pattern_mode": "symbol_and_style", "style_count": 2, "option_count": 5}},
         {"level": 3, "label": "Сложный", "parameters": {"trials": 30, "pattern_mode": "dual_axis", "style_count": 2, "option_count": 6}}
       ]
     },

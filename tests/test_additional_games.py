@@ -53,6 +53,26 @@ def test_gm01_falls_back_to_a_known_stimulus_set() -> None:
     assert reply["stimulus_set"] == plugin.definition.stimulus_sets[0]
 
 
+def test_gm01_accepts_a_complete_pair_in_one_answer() -> None:
+    plugin = Gm01PairCardsPlugin(EventBus())
+    started = plugin.start_game({})
+    cards = started["cards"]
+    first = 0
+    second = next(index for index, card in enumerate(cards[1:], start=1) if card == cards[first])
+
+    reply = plugin.answer_game({
+        "session_id": started["session_id"],
+        "first_index": first,
+        "selected_index": second,
+        "reaction_ms": 10,
+    })
+
+    assert reply["correct"] is True
+    assert reply.get("first_pick") is not True
+    assert first in reply.get("matched", (first, second))
+    assert second in reply.get("matched", (first, second))
+
+
 def test_gm03_uses_only_the_selected_room() -> None:
     plugin = Gm03ChangedObjectPlugin(EventBus())
 
@@ -307,12 +327,41 @@ def test_gm18_uses_all_puzzle_scenes_for_selected_difficulty() -> None:
     assert reply["required_rounds"] == 3
     assert reply["rows"] == 4
     assert reply["columns"] == 5
-    assert reply["difficulty_parameters"] == {"pieces": 20, "puzzles": 3}
+    assert reply["difficulty_parameters"] == {
+        "pieces": 20,
+        "grid": "5×4",
+        "puzzles": 3,
+    }
     assert {puzzle["image"] for puzzle in session.puzzles} == {
         "shop_a.png",
         "station_hard_01_a.png",
         "workshop_hard_02_a.png",
     }
+
+
+def test_gm18_keeps_a_wrong_piece_in_the_pool_and_fixes_a_correct_one() -> None:
+    plugin = Gm18PuzzlePlugin(EventBus())
+    started = plugin.start_game({"difficulty_level": 1})
+    piece = started["pieces"][0]
+    wrong_target = (piece + 1) % len(started["placements"])
+
+    rejected = plugin.answer_game({
+        "session_id": started["session_id"],
+        "piece_id": piece,
+        "target_index": wrong_target,
+    })
+    assert rejected["placement_correct"] is False
+    assert piece in rejected["pieces"]
+    assert rejected["placements"][wrong_target] is None
+
+    accepted = plugin.answer_game({
+        "session_id": started["session_id"],
+        "piece_id": piece,
+        "target_index": piece,
+    })
+    assert accepted["placement_correct"] is True
+    assert piece not in accepted["pieces"]
+    assert accepted["placements"][piece] == piece
 
 
 def test_gm21_uses_the_selected_main_category() -> None:
@@ -337,7 +386,7 @@ def test_gm23_uses_the_selected_answer_symbol() -> None:
     assert reply["stimulus_set"] == "сердце"
     assert reply["difficulty_level"] == 1
     assert reply["trial_count"] == 18
-    assert len(reply["options"]) == 3
+    assert len(reply["options"]) == 4
     assert correct["symbol"] == "heart"
     assert all((4 + offset) % 3 == 2 for offset in session.offsets)
 
@@ -350,6 +399,8 @@ def test_gm24_uses_selected_category_first_and_applies_difficulty() -> None:
     assert reply["stimulus_set"] == "транспорт"
     assert reply["difficulty_level"] == 1
     assert reply["trial_count"] == 12
+    assert len(reply["words"]) == 2
+    assert all(len(trial["words"]) == 2 for trial in session.trials)
     assert session.trials[0]["category"] == "Транспорт"
     assert len({trial["category"] for trial in session.trials}) == 2
 
@@ -399,7 +450,7 @@ def test_new_game_plugins_complete() -> None:
         )
         assert gm12_result["checkpoint"]["next_index"] == gm12_expected
         assert len(gm12_result["report"]["trials"]) == gm12_expected
-        assert all(record["valid"] is None for record in gm12_result["report"]["trials"])
+        assert all(record["valid"] is True for record in gm12_result["report"]["trials"])
 
         bus = EventBus()
         await _run_plugin(

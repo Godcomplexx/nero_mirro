@@ -9,6 +9,13 @@ from neuro_mirror.models.events import Event, Topics
 from neuro_mirror.plugins.games.catalog import get_game_definition
 
 
+# An event reaches the common journal only after the game has accepted and
+# recorded the answer. Unless a game explicitly reports a device/recording
+# failure, such a captured event is technically valid. Keeping this policy
+# here makes the default deliberate and identical for every browser game.
+DEFAULT_CAPTURED_EVENT_VALIDITY = True
+
+
 class BrowserGamePlugin(Plugin):
     """Standard transport shell; a game implements only start and answer logic."""
 
@@ -218,7 +225,7 @@ class BrowserGamePlugin(Plugin):
             "stimulus": stimulus,
             "answer": answer,
             "elapsed_ms": max(0.0, float(elapsed)),
-            "valid": raw.get("valid"),
+            "valid": raw.get("valid", DEFAULT_CAPTURED_EVENT_VALIDITY),
             "correct": raw.get("correct"),
             "raw": raw,
         }

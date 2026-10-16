@@ -9,7 +9,7 @@ def score_gm21(
     events: list[dict[str, Any]],
     elapsed_ms: float,
     *,
-    expected_trial_count: int = 12,
+    expected_trial_count: int,
 ) -> dict[str, float | int | bool]:
     correct_count = sum(bool(event.get("correct")) for event in events)
     reaction_times = [float(event.get("reaction_ms") or 0) for event in events]
@@ -19,4 +19,9 @@ def score_gm21(
         "u07_error_count": len(events) - correct_count,
         "u04_duration_ms": max(0.0, elapsed_ms),
         "u06_complete": len(events) >= expected_trial_count,
+        "u06_technically_valid": bool(events) and all(
+            bool(event.get("selected_id"))
+            and bool(event.get("choices"))
+            for event in events
+        ),
     }

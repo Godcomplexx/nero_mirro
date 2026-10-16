@@ -48,12 +48,52 @@ SUCCESS_RATE_METRICS: dict[str, str] = {
     "GM-05": "m07_target_recognition_rate",
     "GM-06": "m08_series_accuracy",
     "GM-07": "u01_correct_action_rate",
+    "GM-11": "e08_calculation_accuracy",
+    "GM-12": "u01_correct_action_rate",
+    "GM-15": "u01_correct_action_rate",
     "GM-09": "a06_tracking_accuracy",
     "GM-10": "a07_found_difference_rate",
     "GM-14": "u01_first_attempt_word_accuracy",
     "GM-17": "u01_correct_action_rate",
     "GM-18": "u08_completion_rate",
+    "GM-20": "u01_correct_action_rate",
+    "GM-21": "u01_correct_action_rate",
+    "GM-23": "u01_correct_action_rate",
+    "GM-24": "u01_correct_action_rate",
 }
+
+
+def _balanced_inhibition_rate(metrics: dict[str, Any]) -> float | None:
+    """GM-08: одинаково учитывать пропуски Go и ответы на No-Go."""
+    omission = metrics.get("g07_omission_rate")
+    false_alarm = metrics.get("g08_false_alarm_rate")
+    if not isinstance(omission, (int, float)) or not isinstance(false_alarm, (int, float)):
+        return None
+    return 1.0 - (float(omission) + float(false_alarm)) / 2.0
+
+
+def _verbal_fluency_precision(metrics: dict[str, Any]) -> float | None:
+    """GM-13/16: доля уникальных слов, соответствующих заданному правилу.
+
+    Абсолютное число слов сохраняется отдельно: норматив продуктивности для
+    автоматического перехода между уровнями должен быть утверждён после пилота.
+    """
+    valid = metrics.get("l04_valid_word_count")
+    repetitions = metrics.get("l05_repetition_count")
+    errors = metrics.get("l06_category_error_count", metrics.get("l06_rule_error_count"))
+    if not all(isinstance(value, (int, float)) for value in (valid, repetitions, errors)):
+        return None
+    total = float(valid) + float(repetitions) + float(errors)
+    return float(valid) / total if total > 0 else None
+
+
+def _maze_route_rate(metrics: dict[str, Any]) -> float | None:
+    """GM-19: качество пути с небольшим штрафом за каждый выход за границу."""
+    redundancy = metrics.get("v02_path_redundancy")
+    boundary_exits = metrics.get("v03_boundary_exits")
+    if not isinstance(redundancy, (int, float)) or not isinstance(boundary_exits, (int, float)):
+        return None
+    return 1.0 / (1.0 + max(0.0, float(redundancy)) + 0.1 * max(0.0, float(boundary_exits)))
 
 
 def _tower_rate(metrics: dict[str, Any]) -> float | None:
@@ -62,8 +102,8 @@ def _tower_rate(metrics: dict[str, Any]) -> float | None:
     Готовой доли у этой игры нет: успех выражается тем, насколько число ходов
     превысило минимально необходимое.
     """
-    valid = metrics.get("e01_valid_move_count")
-    above = metrics.get("e05_moves_above_minimum")
+    valid = metrics.get("valid_move_count")
+    above = metrics.get("e01_moves_above_optimum")
     if not isinstance(valid, (int, float)) or valid <= 0:
         return None
     if not isinstance(above, (int, float)):
@@ -72,7 +112,13 @@ def _tower_rate(metrics: dict[str, Any]) -> float | None:
 
 
 # Игры, у которых доля считается не одним показателем, а выражением.
-DERIVED_RATES = {"GM-22": _tower_rate}
+DERIVED_RATES = {
+    "GM-08": _balanced_inhibition_rate,
+    "GM-13": _verbal_fluency_precision,
+    "GM-16": _verbal_fluency_precision,
+    "GM-19": _maze_route_rate,
+    "GM-22": _tower_rate,
+}
 
 
 def has_levels(game_code: str) -> bool:

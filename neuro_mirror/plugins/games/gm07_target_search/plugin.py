@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from neuro_mirror.plugins.games.base import BrowserGamePlugin
+from neuro_mirror.plugins.games.difficulty_config import level_config
 from neuro_mirror.plugins.games.gm07_target_search.stimuli import TARGETS, TRIAL_COUNT
 from neuro_mirror.screening.gm07_scoring import score_gm07_trials
 
@@ -18,7 +19,9 @@ class TargetSearchSession:
     stimulus_set: str
     target: dict[str, Any]
     difficulty_level: int
-    grid_size: int
+    object_count: int
+    grid_columns: int
+    difficulty_parameters: dict[str, Any]
     trial_index: int = 0
     current_stimuli: list[dict[str, Any]] = field(default_factory=list)
     shown_at_ms: float = 0.0
@@ -40,9 +43,18 @@ class Gm07TargetSearchPlugin(BrowserGamePlugin):
         return self._start_session(stimulus_set=str(payload.get("stimulus_set") or ""), difficulty_level=payload.get("difficulty_level"))
 
     def _start_session(self, *, stimulus_set: str = "", difficulty_level: object = None) -> dict[str, Any]:
-        try: level = min(3, max(1, int(difficulty_level or 1)))
-        except (TypeError, ValueError): level = 1
-        grid_size, target_limits = ((4, (3, 5)), (8, (4, 7)), (10, (6, 10)))[level - 1]
+        config = level_config(self.game_code)
+        try:
+            level = int(difficulty_level or config["default_level"])
+        except (TypeError, ValueError):
+            level = int(config["default_level"])
+        available_levels = {int(item["level"]): item for item in config["levels"]}
+        if level not in available_levels:
+            level = int(config["default_level"])
+        parameters = dict(available_levels[level]["parameters"])
+        object_count = int(parameters["object_count"])
+        grid_columns = int(parameters["grid_columns"])
+        target_limits = tuple(int(value) for value in parameters["target_present_range"])
         available_sets = tuple(
             set_name for set_name in self.definition.stimulus_sets if set_name in TARGETS
         ) or tuple(TARGETS)
@@ -56,14 +68,16 @@ class Gm07TargetSearchPlugin(BrowserGamePlugin):
             selected_set,
             dict(TARGETS[selected_set]),
             level,
-            grid_size,
+            object_count,
+            grid_columns,
+            parameters,
         )
         self._sessions[session.session_id] = session
         return self._prepare_trial(session)
 
     def _prepare_trial(self, session: TargetSearchSession) -> dict[str, Any]:
         target_present = session.target_schedule[session.trial_index]
-        object_count = session.grid_size ** 2
+        object_count = session.object_count
         stimuli = [self._make_distractor(session, index) for index in range(object_count)]
         if target_present:
             target_position = self._random.randrange(object_count)
@@ -81,8 +95,8 @@ class Gm07TargetSearchPlugin(BrowserGamePlugin):
             "trial": session.trial_index + 1,
             "trial_count": TRIAL_COUNT,
             "difficulty_level": session.difficulty_level,
-            "difficulty_parameters": {"grid_size": session.grid_size, "target_present_trials": sum(session.target_schedule)},
-            "grid_size": session.grid_size,
+            "difficulty_parameters": dict(session.difficulty_parameters),
+            "grid_size": session.grid_columns,
             "object_count": object_count,
             "stimulus_set": session.stimulus_set,
             "target": session.target,

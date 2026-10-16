@@ -404,12 +404,12 @@
   border-radius: inherit;
   background: #ffffff;
   color: #17212b;
-  animation: nm-card-old-side 480ms linear forwards;
+  animation: nm-card-old-side 280ms linear forwards;
 }
 
 .nm-game-host .gm01-card.nm-card-flip {
   z-index: 1;
-  animation: nm-card-turn 480ms ease-in-out;
+  animation: nm-card-turn 280ms ease-in-out;
 }
 
 @keyframes nm-card-turn {

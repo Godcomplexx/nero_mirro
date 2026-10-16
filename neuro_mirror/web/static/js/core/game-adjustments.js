@@ -11,15 +11,11 @@
 //
 // If a game's own module starts doing the same thing, its entry is removed.
 
-import { animateSwap } from "../components/animate-swap.js";
-
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
 // «Парные карточки» draws a card by replacing its content ("?" or the
 // picture). Watching those replacements, the interface gives closed cards a
 // card back and turns a card over when its side changes: the side that was
 // there turns away, then the new one turns in.
-const FLIP_MS = 480;
+const FLIP_MS = 280;
 
 function cardContent(card) {
   return [...card.childNodes]
@@ -77,25 +73,6 @@ export function watchCardFlips(container) {
   }).observe(container, { childList: true, subtree: true });
   sync();
   watchCardPress(container);
-  holdPressesWhileAnswering(container);
-}
-
-// The game locks its field only once the core has answered the second card
-// of a pair, and that answer is held back while the card turns. A card
-// pressed meanwhile would reach the core but be drawn closed again, and
-// pressing it once more is refused («Недопустимая карточка»). So presses
-// wait for the answer.
-function holdPressesWhileAnswering(container) {
-  container.addEventListener(
-    "click",
-    (event) => {
-      if (!container.classList.contains("nm-game-answering")) return;
-      if (!(event.target.closest && event.target.closest(".gm01-card"))) return;
-      event.preventDefault();
-      event.stopPropagation();
-    },
-    true,
-  );
 }
 
 // Hovering a card presses it in under the pointer: the card tilts so that
@@ -130,11 +107,6 @@ const ADJUSTMENTS = {
 
   "GM-01": {
     onMounted: watchCardFlips,
-    // The second card of a pair stays open for its whole turn before the
-    // game closes a wrong pair
-    async beforeReply(reply) {
-      if (reply && !reply.first_pick) await sleep(FLIP_MS);
-    },
   },
 
   // «Найди отличие»: the two pictures stand side by side (wide field) instead
@@ -147,9 +119,8 @@ const ADJUSTMENTS = {
     },
   },
 
-  // «Пазлы»: the two chosen pieces glide into each other's place before the
-  // game redraws the board; a solved picture then stays on screen for two
-  // seconds, marked as correct, before the core's next puzzle is shown
+  // «Пазлы»: the move counter is placed beside the sample. Placement and
+  // rejection feedback belong to the game's drag-and-drop implementation.
   "GM-18": {
     // The move counter goes beside the sample, so the line above the board
     // only names the puzzle (layout: css/screens/game.css)
@@ -157,30 +128,6 @@ const ADJUSTMENTS = {
       const moves = container.querySelector("[data-moves]");
       const reference = container.querySelector(".gm18-reference");
       if (moves && reference) reference.prepend(moves);
-    },
-    async beforeReply(reply, previous, container, request) {
-      if (!previous || !previous.image) return;
-      const pieces = [...container.querySelectorAll("[data-board] .gm18-piece")];
-      // The moved pieces stay where they went: the game replaces the whole
-      // board with new pieces right after
-      if (request && pieces.length) await animateSwap(pieces[request.first_index], pieces[request.second_index]);
-      const solved =
-        reply.finished ||
-        reply.round_number !== previous.round_number ||
-        Boolean(reply.bonus) !== Boolean(previous.bonus);
-      const board = container.querySelector("[data-board]");
-      if (!solved || !board) return;
-      const status = container.querySelector("[data-status]");
-      board.style.backgroundImage = `url('/game-assets/differences/${previous.image}')`;
-      board.classList.add("nm-puzzle-solved");
-      if (status) {
-        status.textContent = "✓ Пазл собран верно";
-        status.classList.add("nm-puzzle-solved-note");
-      }
-      await sleep(2000);
-      board.classList.remove("nm-puzzle-solved");
-      board.style.backgroundImage = "";
-      if (status) status.classList.remove("nm-puzzle-solved-note");
     },
   },
 };

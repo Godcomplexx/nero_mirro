@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from neuro_mirror.plugins.games.base import BrowserGamePlugin
+from neuro_mirror.plugins.games.difficulty_config import level_config
 from neuro_mirror.plugins.games.gm04_location.stimuli import ROUNDS, STUDY_SECONDS
 from neuro_mirror.screening.gm04_scoring import score_gm04
 
@@ -18,8 +19,10 @@ class PatternSession:
     difficulty_level: int
     grid_size: int
     target_range: tuple[int, int]
+    difficulty_parameters: dict[str, Any]
     round_index: int = 0
     phase: str = "study"
+    started_at_ms: float = field(default_factory=lambda: time.time() * 1000)
     shown_ms: float = field(default_factory=lambda: time.time() * 1000)
     round_events: list[dict[str, Any]] = field(default_factory=list)
 
@@ -39,16 +42,25 @@ class Gm04LocationPlugin(BrowserGamePlugin):
         return self._start(difficulty_level=payload.get("difficulty_level"))
 
     def _start(self, *, difficulty_level: object = None) -> dict[str, Any]:
+        config = level_config(self.game_code)
         try:
-            level = min(3, max(1, int(difficulty_level or 1)))
+            level = int(difficulty_level or config["default_level"])
         except (TypeError, ValueError):
-            level = 1
-        grid_size, minimum, maximum = ((4, 3, 5), (8, 4, 7), (10, 6, 10))[level - 1]
+            level = int(config["default_level"])
+        available_levels = {int(item["level"]): item for item in config["levels"]}
+        if level not in available_levels:
+            level = int(config["default_level"])
+        parameters = dict(available_levels[level]["parameters"])
+        grid_size = int(parameters["grid_size"])
+        minimum, maximum = (int(value) for value in parameters["target_range"])
         patterns = [
             sorted(self._random.sample(range(grid_size ** 2), self._random.randint(minimum, maximum)))
             for _ in range(ROUNDS)
         ]
-        session = PatternSession(uuid.uuid4().hex, patterns, level, grid_size, (minimum, maximum))
+        session = PatternSession(
+            uuid.uuid4().hex, patterns, level, grid_size,
+            (minimum, maximum), parameters,
+        )
         self._sessions[session.session_id] = session
         return self._payload(session)
 
@@ -84,7 +96,7 @@ class Gm04LocationPlugin(BrowserGamePlugin):
         if session.round_index >= len(session.patterns):
             events = list(session.round_events)
             self._sessions.pop(session.session_id, None)
-            return {"ok": True, "finished": True, "correct": event["correct"], "events": events, "metrics": score_gm04(events, expected_rounds=ROUNDS)}
+            return {"ok": True, "finished": True, "correct": event["correct"], "events": events, "metrics": score_gm04(events, expected_rounds=ROUNDS, elapsed_ms=time.time() * 1000 - session.started_at_ms)}
         result = self._payload(session)
         result.update({"correct": event["correct"], "previous_targets": targets, "previous_selected": selected})
         return result
@@ -93,7 +105,7 @@ class Gm04LocationPlugin(BrowserGamePlugin):
         return {
             "ok": True, "finished": False, "session_id": session.session_id,
             "difficulty_level": session.difficulty_level,
-            "difficulty_parameters": {"grid_size": session.grid_size, "minimum_targets": session.target_range[0], "maximum_targets": session.target_range[1]},
+            "difficulty_parameters": dict(session.difficulty_parameters),
             "phase": session.phase, "grid_size": session.grid_size,
             "round": session.round_index + 1, "round_count": len(session.patterns),
             "targets": session.patterns[session.round_index] if session.phase == "study" else [],

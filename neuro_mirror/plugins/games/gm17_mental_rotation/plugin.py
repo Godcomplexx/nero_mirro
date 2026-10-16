@@ -7,7 +7,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from neuro_mirror.plugins.games.base import BrowserGamePlugin
-from neuro_mirror.plugins.games.gm17_mental_rotation.stimuli import SHAPE_SETS, TRIAL_COUNT, shape_payload
+from neuro_mirror.plugins.games.difficulty_config import level_config
+from neuro_mirror.plugins.games.gm17_mental_rotation.stimuli import SHAPE_SETS, shape_payload
 from neuro_mirror.screening.gm17_scoring import score_gm17_trials
 
 
@@ -18,6 +19,7 @@ class RotationSession:
     stimulus_set: str
     difficulty_level: int
     choice_count: int
+    difficulty_parameters: dict[str, Any]
     trial_index: int = 0
     correct_choice_id: str = ""
     current_trial: dict[str, Any] = field(default_factory=dict)
@@ -40,23 +42,30 @@ class Gm17MentalRotationPlugin(BrowserGamePlugin):
         return self._start_session(stimulus_set=str(payload.get("stimulus_set") or ""), difficulty_level=payload.get("difficulty_level"))
 
     def _start_session(self, *, stimulus_set: str = "", difficulty_level: object = None) -> dict[str, Any]:
-        try: level = min(3, max(1, int(difficulty_level or 1)))
-        except (TypeError, ValueError): level = 1
-        choice_count = (2, 3, 4)[level - 1]
+        config = level_config(self.game_code)
+        try: level = int(difficulty_level or config["default_level"])
+        except (TypeError, ValueError): level = int(config["default_level"])
+        available_levels = {int(item["level"]): item for item in config["levels"]}
+        if level not in available_levels: level = int(config["default_level"])
+        parameters = dict(available_levels[level]["parameters"])
+        choice_count = int(parameters["choices"])
+        trial_count = int(parameters["trials"])
         available = tuple(name for name in self.definition.stimulus_sets if name in SHAPE_SETS) or tuple(SHAPE_SETS)
         selected = stimulus_set if stimulus_set in available else available[0]
         keys = list(SHAPE_SETS[selected])
         # Build shuffled cycles so all figures occur with similar frequency
         # and the same figure never appears twice in a row between cycles.
         shape_order: list[str] = []
-        while len(shape_order) < TRIAL_COUNT:
+        while len(shape_order) < trial_count:
             cycle = list(keys)
             self._random.shuffle(cycle)
             if shape_order and cycle[0] == shape_order[-1]:
                 cycle[0], cycle[1] = cycle[1], cycle[0]
             shape_order.extend(cycle)
-        shape_order = shape_order[:TRIAL_COUNT]
-        session = RotationSession(uuid.uuid4().hex, shape_order, selected, level, choice_count)
+        shape_order = shape_order[:trial_count]
+        session = RotationSession(
+            uuid.uuid4().hex, shape_order, selected, level, choice_count, parameters
+        )
         self._sessions[session.session_id] = session
         return self._prepare_trial(session)
 
@@ -90,9 +99,9 @@ class Gm17MentalRotationPlugin(BrowserGamePlugin):
             "session_id": session.session_id,
             "stimulus_set": session.stimulus_set,
             "difficulty_level": session.difficulty_level,
-            "difficulty_parameters": {"choices": session.choice_count},
+            "difficulty_parameters": dict(session.difficulty_parameters),
             "trial": session.trial_index + 1,
-            "trial_count": TRIAL_COUNT,
+            "trial_count": len(session.shape_order),
             "sample": {**shape_payload(shape_key), "rotation": 0},
             "choices": choices,
         }
@@ -118,7 +127,7 @@ class Gm17MentalRotationPlugin(BrowserGamePlugin):
             }
         )
         session.trial_index += 1
-        if session.trial_index >= TRIAL_COUNT:
+        if session.trial_index >= len(session.shape_order):
             self._sessions.pop(session_id, None)
             return {
                 "ok": True,

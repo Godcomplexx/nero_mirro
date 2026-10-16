@@ -45,20 +45,46 @@ def a_pass(
 
 # ── Соответствие матрице игр ──────────────────────────────────────────────────
 
-MATRIX_GAMES_WITH_LEVELS = {
-    "GM-01", "GM-02", "GM-03", "GM-04", "GM-05", "GM-06",
-    "GM-07", "GM-09", "GM-10", "GM-14", "GM-17", "GM-18", "GM-22",
-}
+GAMES_WITH_CONFIGURED_LEVELS = {game.code for game in GAME_CATALOG}
 
 
 def test_levels_follow_the_game_matrix():
-    """Уровни заданы матрицей игр; здесь их нельзя назначить самовольно."""
+    """Каждая настроенная форма должна участвовать в адаптации уровня."""
     covered = {game.code for game in GAME_CATALOG if has_levels(game.code)}
-    assert covered == MATRIX_GAMES_WITH_LEVELS
+    assert covered == GAMES_WITH_CONFIGURED_LEVELS
 
 
 def test_a_game_without_levels_always_stays_at_the_first():
-    assert next_level("GM-13", [a_pass(rate=1.0, ago=10)], now=NOW) == MIN_LEVEL
+    assert next_level("GM-UNKNOWN", [a_pass(rate=1.0, ago=10)], now=NOW) == MIN_LEVEL
+
+
+def test_stop_signal_uses_both_kinds_of_error():
+    perfect = {"g07_omission_rate": 0.0, "g08_false_alarm_rate": 0.0}
+    poor = {"g07_omission_rate": 0.8, "g08_false_alarm_rate": 0.6}
+    assert success_rate("GM-08", perfect) == 1.0
+    assert success_rate("GM-08", poor) < HARD_RATE
+
+
+def test_verbal_fluency_uses_valid_unique_words_not_raw_token_count():
+    clean = {
+        "l04_valid_word_count": 9,
+        "l05_repetition_count": 1,
+        "l06_category_error_count": 0,
+    }
+    noisy = {
+        "l04_valid_word_count": 2,
+        "l05_repetition_count": 3,
+        "l06_rule_error_count": 5,
+    }
+    assert success_rate("GM-13", clean) == 0.9
+    assert success_rate("GM-16", noisy) < HARD_RATE
+
+
+def test_maze_rate_combines_path_redundancy_and_boundary_exits():
+    clean = {"v02_path_redundancy": 0.0, "v03_boundary_exits": 0}
+    inefficient = {"v02_path_redundancy": 2.0, "v03_boundary_exits": 2}
+    assert success_rate("GM-19", clean) == 1.0
+    assert success_rate("GM-19", inefficient) < HARD_RATE
 
 
 # ── Как оценивается прохождение ───────────────────────────────────────────────
@@ -86,8 +112,8 @@ def test_a_technically_invalid_pass_is_not_judged_at_all():
 
 def test_the_tower_is_measured_by_closeness_to_the_shortest_solution():
     """Готовой доли верных действий у башни нет."""
-    perfect = {"e01_valid_move_count": 7, "e05_moves_above_minimum": 0}
-    clumsy = {"e01_valid_move_count": 20, "e05_moves_above_minimum": 13}
+    perfect = {"valid_move_count": 7, "e01_moves_above_optimum": 0}
+    clumsy = {"valid_move_count": 20, "e01_moves_above_optimum": 13}
     assert success_rate("GM-22", perfect) == 1.0
     assert success_rate("GM-22", clumsy) < HARD_RATE
 
@@ -179,8 +205,17 @@ def test_a_session_raises_the_level_of_the_games_that_became_easy():
         "a06_tracking_accuracy": 1.0,
         "a07_found_difference_rate": 1.0,
         "u01_first_attempt_word_accuracy": 1.0,
-        "e01_valid_move_count": 7,
-        "e05_moves_above_minimum": 0,
+        "e08_calculation_accuracy": 1.0,
+        "g07_omission_rate": 0.0,
+        "g08_false_alarm_rate": 0.0,
+        "l04_valid_word_count": 10,
+        "l05_repetition_count": 0,
+        "l06_category_error_count": 0,
+        "l06_rule_error_count": 0,
+        "v02_path_redundancy": 0.0,
+        "v03_boundary_exits": 0,
+        "valid_move_count": 7,
+        "e01_moves_above_optimum": 0,
     }
 
     def passes(_code: str) -> list[dict]:

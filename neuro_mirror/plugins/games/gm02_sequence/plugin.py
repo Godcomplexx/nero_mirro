@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from neuro_mirror.plugins.games.base import BrowserGamePlugin
+from neuro_mirror.plugins.games.difficulty_config import level_config
 from neuro_mirror.plugins.games.gm02_sequence.stimuli import GRID_SIZE
 from neuro_mirror.screening.gm02_scoring import score_gm02_attempt
 
@@ -18,6 +19,7 @@ class SequenceSession:
     started_at_ms: float
     difficulty_level: int
     max_rounds: int
+    difficulty_parameters: dict[str, Any]
     successful_rounds: int = 0
     round_events: list[dict[str, Any]] = field(default_factory=list)
 
@@ -40,11 +42,16 @@ class Gm02SequencePlugin(BrowserGamePlugin):
         return self._start_session(difficulty_level=payload.get("difficulty_level"))
 
     def _start_session(self, *, difficulty_level: object = None) -> dict[str, Any]:
+        config = level_config(self.game_code)
         try:
-            level = min(3, max(1, int(difficulty_level or 1)))
+            level = int(difficulty_level or config["default_level"])
         except (TypeError, ValueError):
-            level = 1
-        max_rounds = (10, 15, 20)[level - 1]
+            level = int(config["default_level"])
+        available_levels = {int(item["level"]): item for item in config["levels"]}
+        if level not in available_levels:
+            level = int(config["default_level"])
+        parameters = dict(available_levels[level]["parameters"])
+        max_rounds = int(parameters["cycles"])
         session_id = uuid.uuid4().hex
         session = SequenceSession(
             session_id=session_id,
@@ -52,6 +59,7 @@ class Gm02SequencePlugin(BrowserGamePlugin):
             started_at_ms=time.time() * 1000,
             difficulty_level=level,
             max_rounds=max_rounds,
+            difficulty_parameters=parameters,
         )
         self._sessions[session_id] = session
         return self._round_payload(session)
@@ -128,7 +136,7 @@ class Gm02SequencePlugin(BrowserGamePlugin):
             "finished": False,
             "session_id": session.session_id,
             "difficulty_level": session.difficulty_level,
-            "difficulty_parameters": {"cycles": session.max_rounds},
+            "difficulty_parameters": dict(session.difficulty_parameters),
             "grid_size": GRID_SIZE,
             "round": session.successful_rounds + 1,
             "max_rounds": session.max_rounds,

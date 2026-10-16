@@ -22,6 +22,4 @@ PUZZLES_BY_LEVEL = {
     ),
 }
 
-GRID_BY_LEVEL = {1: (2, 3), 2: (3, 4), 3: (4, 5)}
-
 BONUS_PUZZLE = {"name": "Дополнительный пазл", "image": "park_a.png", "rows": 3, "columns": 4}

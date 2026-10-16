@@ -64,8 +64,8 @@ def a_pass(level: int, ago: float, rate: float) -> dict:
             "a06_tracking_accuracy": rate,
             "a07_found_difference_rate": rate,
             "u01_first_attempt_word_accuracy": rate,
-            "e01_valid_move_count": 10,
-            "e05_moves_above_minimum": round(10 * (1 - rate)),
+            "valid_move_count": 10,
+            "e01_moves_above_optimum": round(10 * (1 - rate)),
         },
     }
 

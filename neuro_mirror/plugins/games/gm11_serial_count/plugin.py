@@ -45,6 +45,7 @@ class CountSession:
     rule_index: int = 0
     current: int = 0
     correct_in_rule: int = 0
+    started_at_ms: float = field(default_factory=lambda: time.time() * 1000)
     last_answer_ms: float = field(default_factory=lambda: time.time() * 1000)
     round_events: list[dict[str, Any]] = field(default_factory=list)
 
@@ -128,7 +129,7 @@ class Gm11SerialCountPlugin(BrowserGamePlugin):
                         "finished": True,
                         "correct": True,
                         "events": events,
-                        "metrics": score_gm11(events, expected_rules=len(session.rules)),
+                        "metrics": score_gm11(events, expected_rules=len(session.rules), elapsed_ms=time.time() * 1000 - session.started_at_ms),
                     }
                 session.current = session.rules[session.rule_index]["start"]
         result = self._payload(session)

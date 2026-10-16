@@ -2,19 +2,19 @@ const TRAINING_RECORDING_MS = 4500;
 
 export function mount({ container, definition, api, close }) {
   const trainingSets = {
-    "животные": { words: ["Кошка", "Собака", "Лошадь"], answer: /(?:^|\s)(?:животн(?:ое|ые)|звер(?:ь|и))(?:$|\s)/i },
-    "фрукты": { words: ["Яблоко", "Груша", "Слива"], answer: /(?:^|\s)фрукт(?:ы|ами|ов)?(?:$|\s)/i },
-    "овощи": { words: ["Морковь", "Свёкла", "Капуста"], answer: /(?:^|\s)овощ(?:и|ами|ей)?(?:$|\s)/i },
-    "транспорт": { words: ["Автобус", "Трамвай", "Поезд"], answer: /(?:^|\s)транспорт(?:ом|а|ные средства)?(?:$|\s)/i },
-    "мебель": { words: ["Стол", "Стул", "Шкаф"], answer: /(?:^|\s)мебел(?:ь|и)(?:$|\s)/i },
-    "инструменты": { words: ["Молоток", "Пила", "Отвёртка"], answer: /(?:^|\s)инструмент(?:ы|ами|ов)?(?:$|\s)/i },
-    "одежда": { words: ["Рубашка", "Брюки", "Куртка"], answer: /(?:^|\s)одежд(?:а|ы|ой)(?:$|\s)/i },
+    "животные": { words: ["Кошка", "Собака"], answer: /(?:^|\s)(?:животн(?:ое|ые)|звер(?:ь|и))(?:$|\s)/i },
+    "фрукты": { words: ["Яблоко", "Груша"], answer: /(?:^|\s)фрукт(?:ы|ами|ов)?(?:$|\s)/i },
+    "овощи": { words: ["Морковь", "Свёкла"], answer: /(?:^|\s)овощ(?:и|ами|ей)?(?:$|\s)/i },
+    "транспорт": { words: ["Автобус", "Трамвай"], answer: /(?:^|\s)транспорт(?:ом|а|ные средства)?(?:$|\s)/i },
+    "мебель": { words: ["Стол", "Стул"], answer: /(?:^|\s)мебел(?:ь|и)(?:$|\s)/i },
+    "инструменты": { words: ["Молоток", "Пила"], answer: /(?:^|\s)инструмент(?:ы|ами|ов)?(?:$|\s)/i },
+    "одежда": { words: ["Рубашка", "Брюки"], answer: /(?:^|\s)одежд(?:а|ы|ой)(?:$|\s)/i },
   };
   const trainingSet = trainingSets[String(definition.selected_stimulus_set || "").toLowerCase()] || trainingSets["фрукты"];
   container.innerHTML = `
-    <header class="game-header-new"><div><p class="game-kicker-new mono">АБСТРАКЦИЯ</p><h2>${definition.title}</h2><p data-instruction>Определите, что объединяет три слова, и назовите общую категорию.</p></div><div class="game-progress-new" data-progress>Инструкция</div></header>
+    <header class="game-header-new"><div><p class="game-kicker-new mono">АБСТРАКЦИЯ</p><h2>${definition.title}</h2><p data-instruction>Определите, что объединяет два слова, и назовите общую категорию.</p></div><div class="game-progress-new" data-progress>Инструкция</div></header>
     <main class="game-stage-new gm24 is-instruction-stage">
-      <section class="gm24-tutorial" data-tutorial><h3>Как выполнять задание</h3><ol><li>Прочитайте три слова.</li><li>Определите общую категорию, к которой они относятся.</li><li>Нажмите «Назвать категорию».</li><li>После звукового сигнала чётко произнесите название категории.</li></ol><div class="gm24-demo-placeholder"><span class="mono">ПРИМЕР ВЫПОЛНЕНИЯ</span><strong>Видеоинструкция появится здесь</strong></div><button type="button" class="icon-btn primary-btn" data-start-training><span>Перейти к тренировке</span></button></section>
+      <section class="gm24-tutorial" data-tutorial><h3>Как выполнять задание</h3><ol><li>Прочитайте два слова.</li><li>Определите общую категорию, к которой они относятся.</li><li>Нажмите «Назвать категорию».</li><li>После звукового сигнала чётко произнесите название категории.</li></ol><div class="gm24-demo-placeholder"><span class="mono">ПРИМЕР ВЫПОЛНЕНИЯ</span><strong>Видеоинструкция появится здесь</strong></div><button type="button" class="icon-btn primary-btn" data-start-training><span>Перейти к тренировке</span></button></section>
       <section class="gm24-training" data-training hidden><h3>Тренировочный пример</h3><p>Определите общую категорию этих слов и назовите её вслух.</p><div class="gm24-words" data-training-words></div><button type="button" class="icon-btn primary-btn" data-training-record><span>Назвать категорию</span></button><div class="gm24-recording" data-training-recording hidden aria-label="Идёт запись"><span></span><span></span><span></span><span></span><span></span></div><p class="gm24-status" data-training-status aria-live="polite"></p></section>
       <section class="gm24-complete" data-complete hidden><h3>Обучение завершено</h3><p>Категория названа правильно. Закончить обучение и начать игру?</p><div class="gm24-complete-actions"><button type="button" class="icon-btn gm24-secondary-btn" data-repeat><span>Повторить обучение</span></button><button type="button" class="icon-btn primary-btn" data-start><span>Да, начать игру</span></button></div></section>
       <section class="gm24-game" data-game hidden><div class="gm24-words" data-words></div><button type="button" class="icon-btn primary-btn" data-record><span>Назвать категорию</span></button><div class="gm24-recording" data-recording hidden aria-label="Идёт запись"><span></span><span></span><span></span><span></span><span></span></div><p class="gm24-status" data-status aria-live="polite"></p></section>
@@ -190,7 +190,7 @@ export function mount({ container, definition, api, close }) {
       return card;
     }));
     progress.textContent = "2. Тренировочный пример";
-    instruction.textContent = "Назовите общую категорию трёх слов.";
+    instruction.textContent = "Назовите общую категорию двух слов.";
     showOnly(training);
   }
 
@@ -238,7 +238,7 @@ export function mount({ container, definition, api, close }) {
   const style = document.createElement("style");
   style.textContent = `
     .gm24{display:grid;place-items:center;text-align:center;overflow:hidden;padding:clamp(10px,2vh,22px)}.gm24.is-instruction-stage{align-items:start;overflow-y:auto}.gm24-tutorial,.gm24-training,.gm24-complete,.gm24-game{width:min(940px,96%)}.gm24-tutorial[hidden],.gm24-training[hidden],.gm24-complete[hidden],.gm24-game[hidden]{display:none}.gm24-tutorial h3,.gm24-training h3,.gm24-complete h3{margin:0 0 14px;color:#17212b}.gm24-tutorial ol{width:min(680px,92%);margin:0 auto 18px;padding-left:24px;text-align:left;color:#617180;line-height:1.55}.gm24-demo-placeholder{min-height:clamp(120px,20vh,190px);margin:0 auto 18px;display:grid;place-content:center;gap:8px;border:2px dashed #bdd2dc;border-radius:18px;background:#edf4f6;color:#607482}.gm24-demo-placeholder span{font-size:11px;letter-spacing:.14em;color:#168ba8}.gm24-complete-actions{display:flex;flex-wrap:wrap;justify-content:center;gap:14px;margin-top:22px}.gm24-secondary-btn{border-color:#75838d!important;background:#e7edf0!important;color:#17212b!important}
-    .gm24-words{display:grid;grid-template-columns:repeat(3,1fr);gap:clamp(12px,2vw,24px);width:min(880px,88vw);margin:clamp(18px,4vh,48px) auto}.gm24-word{display:grid;place-items:center;min-height:clamp(120px,21vh,210px);padding:18px;border:2px solid #c4d4dc;border-radius:24px;background:#fff;color:#17212b;font-size:clamp(22px,3.2vw,38px);font-weight:650;box-shadow:0 10px 22px rgba(20,35,45,.08)}.gm24-status{min-height:1.5em}.gm24-status.is-correct{color:#16835c;font-weight:700}.gm24-status.is-wrong{color:#b34c54;font-weight:700}.gm24-recording{height:44px;color:#2fa6bd}.gm24-recording span{display:inline-block;width:8px;height:32px;margin:0 4px;border-radius:8px;background:currentColor;animation:gm24-wave .8s ease-in-out infinite alternate}.gm24-recording span:nth-child(2),.gm24-recording span:nth-child(4){animation-delay:-.3s}.gm24-recording span:nth-child(3){animation-delay:-.55s}@keyframes gm24-wave{to{transform:scaleY(.3);opacity:.5}}
+    .gm24-words{display:grid;grid-template-columns:repeat(2,1fr);gap:clamp(12px,2vw,24px);width:min(650px,88vw);margin:clamp(18px,4vh,48px) auto}.gm24-word{display:grid;place-items:center;min-height:clamp(120px,21vh,210px);padding:18px;border:2px solid #c4d4dc;border-radius:24px;background:#fff;color:#17212b;font-size:clamp(22px,3.2vw,38px);font-weight:650;box-shadow:0 10px 22px rgba(20,35,45,.08)}.gm24-status{min-height:1.5em}.gm24-status.is-correct{color:#16835c;font-weight:700}.gm24-status.is-wrong{color:#b34c54;font-weight:700}.gm24-recording{height:44px;color:#2fa6bd}.gm24-recording span{display:inline-block;width:8px;height:32px;margin:0 4px;border-radius:8px;background:currentColor;animation:gm24-wave .8s ease-in-out infinite alternate}.gm24-recording span:nth-child(2),.gm24-recording span:nth-child(4){animation-delay:-.3s}.gm24-recording span:nth-child(3){animation-delay:-.55s}@keyframes gm24-wave{to{transform:scaleY(.3);opacity:.5}}
     @media(max-height:700px){.gm24-demo-placeholder{min-height:80px}.gm24-words{margin:12px auto}.gm24-word{min-height:95px}}@media(max-width:700px){.gm24-words{gap:8px}.gm24-word{min-height:105px;padding:8px;font-size:clamp(17px,5vw,24px)}}
   `;
   container.append(style);

@@ -58,7 +58,7 @@ def test_catalog_contains_all_spreadsheet_forms() -> None:
 def test_json_difficulty_config_covers_catalog_and_drives_levels() -> None:
     document = load_game_level_config()
     assert set(document["games"]) == {item.code for item in GAME_CATALOG}
-    assert document["games"]["GM-10"]["levels"][0]["parameters"]["scene_count"] == 5
+    assert document["games"]["GM-10"]["levels"][0]["parameters"]["scene_count"] == 4
     assert get_game_definition("GM-18").difficulty_levels[2].parameters == {
         "pieces": 20,
         "grid": "5×4",
@@ -97,6 +97,22 @@ def test_json_difficulty_config_covers_catalog_and_drives_levels() -> None:
     }
 
 
+def test_every_game_uses_json_difficulty_parameters_at_runtime() -> None:
+    registrations = {
+        item.definition.code: item.plugin_class
+        for item in discover_game_registrations()
+    }
+    for definition in GAME_CATALOG:
+        plugin_class = registrations[definition.code]
+        levels = load_game_level_config()["games"][definition.code]["levels"]
+        for configured_level in levels:
+            reply = plugin_class(EventBus()).start_game(
+                {"difficulty_level": configured_level["level"]}
+            )
+            assert reply["difficulty_level"] == configured_level["level"]
+            assert reply["difficulty_parameters"] == configured_level["parameters"]
+
+
 def test_plugin_can_define_a_game_outside_initial_catalog() -> None:
     class CustomGame(BrowserGamePlugin):
         game_code = "GM-CUSTOM-99"
@@ -115,7 +131,7 @@ def test_plugin_can_define_a_game_outside_initial_catalog() -> None:
     assert plugin.definition.code == "GM-CUSTOM-99"
 
 
-def test_base_report_uses_metrics_and_keeps_undeclared_validity_unknown() -> None:
+def test_base_report_uses_metrics_and_marks_captured_events_valid_by_policy() -> None:
     class ReportingGame(BrowserGamePlugin):
         game_code = "GM-REPORT-01"
         game_definition = GameDefinition(
@@ -140,7 +156,7 @@ def test_base_report_uses_metrics_and_keeps_undeclared_validity_unknown() -> Non
     result = ReportingGame(EventBus()).answer_game({"session_id": "session-1"})
     assert result["report"]["completion_status"] == "incomplete"
     assert result["report"]["technical_validity"] == "unknown"
-    assert result["report"]["trials"][0]["valid"] is None
+    assert result["report"]["trials"][0]["valid"] is True
 
 
 def test_registry_discovers_current_plugins_without_runtime_imports() -> None:

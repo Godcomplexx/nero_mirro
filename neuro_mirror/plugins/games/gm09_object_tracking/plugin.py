@@ -7,7 +7,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from neuro_mirror.plugins.games.base import BrowserGamePlugin
-from neuro_mirror.plugins.games.gm09_object_tracking.stimuli import MOVEMENT_MS, OBJECT_COUNT, PREVIEW_MS, ROUNDS, STIMULUS_SHAPES
+from neuro_mirror.plugins.games.difficulty_config import level_config
+from neuro_mirror.plugins.games.gm09_object_tracking.stimuli import OBJECT_COUNT, PREVIEW_MS, ROUNDS, STIMULUS_SHAPES
 from neuro_mirror.screening.gm09_scoring import score_gm09
 
 
@@ -18,7 +19,10 @@ class TrackingSession:
     stimulus_set: str
     difficulty_level: int
     target_count: int
+    movement_ms: int
+    difficulty_parameters: dict[str, Any]
     round_index: int = 0
+    started_at_ms: float = field(default_factory=lambda: time.time() * 1000)
     shown_ms: float = field(default_factory=lambda: time.time() * 1000)
     round_events: list[dict[str, Any]] = field(default_factory=list)
 
@@ -38,14 +42,25 @@ class Gm09ObjectTrackingPlugin(BrowserGamePlugin):
         return self._start(stimulus_set=str(payload.get("stimulus_set") or ""), difficulty_level=payload.get("difficulty_level"))
 
     def _start(self, *, stimulus_set: str = "", difficulty_level: object = None) -> dict[str, Any]:
-        try: level = min(3, max(1, int(difficulty_level or 1)))
-        except (TypeError, ValueError): level = 1
-        target_count = (2, 3, 5)[level - 1]
+        config = level_config(self.game_code)
+        try:
+            level = int(difficulty_level or config["default_level"])
+        except (TypeError, ValueError):
+            level = int(config["default_level"])
+        available_levels = {int(item["level"]): item for item in config["levels"]}
+        if level not in available_levels:
+            level = int(config["default_level"])
+        parameters = dict(available_levels[level]["parameters"])
+        target_count = int(parameters["tracked_objects"])
+        movement_ms = int(parameters["movement_ms"])
         available = tuple(name for name in self.definition.stimulus_sets if name in STIMULUS_SHAPES) or tuple(STIMULUS_SHAPES)
         selected = stimulus_set if stimulus_set in available else available[0]
         shape = STIMULUS_SHAPES[selected]
         rounds = [self._make_round(index, shape, target_count) for index in range(ROUNDS)]
-        session = TrackingSession(uuid.uuid4().hex, rounds, selected, level, target_count)
+        session = TrackingSession(
+            uuid.uuid4().hex, rounds, selected, level, target_count,
+            movement_ms, parameters,
+        )
         self._sessions[session.session_id] = session
         return self._payload(session)
 
@@ -86,7 +101,7 @@ class Gm09ObjectTrackingPlugin(BrowserGamePlugin):
         if session.round_index >= len(session.rounds):
             events = list(session.round_events)
             self._sessions.pop(session.session_id, None)
-            return {"ok": True, "finished": True, "correct": event["correct"], "events": events, "metrics": score_gm09(events, expected_rounds=ROUNDS)}
+            return {"ok": True, "finished": True, "correct": event["correct"], "events": events, "metrics": score_gm09(events, expected_rounds=ROUNDS, elapsed_ms=time.time() * 1000 - session.started_at_ms)}
         result = self._payload(session)
         result["correct"] = event["correct"]
         return result
@@ -98,8 +113,8 @@ class Gm09ObjectTrackingPlugin(BrowserGamePlugin):
             "round": session.round_index + 1, "round_count": len(session.rounds),
             "stimulus_set": session.stimulus_set,
             "difficulty_level": session.difficulty_level,
-            "difficulty_parameters": {"tracked_objects": session.target_count},
+            "difficulty_parameters": dict(session.difficulty_parameters),
             "objects": current["objects"], "targets": current["targets"],
             "target_count": session.target_count, "shape": current["shape"],
-            "preview_ms": PREVIEW_MS, "movement_ms": MOVEMENT_MS,
+            "preview_ms": PREVIEW_MS, "movement_ms": session.movement_ms,
         }

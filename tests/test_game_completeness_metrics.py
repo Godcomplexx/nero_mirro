@@ -10,7 +10,10 @@
 """
 from __future__ import annotations
 
+import ast
 import inspect
+import re
+from pathlib import Path
 
 import pytest
 
@@ -19,6 +22,7 @@ from neuro_mirror.plugins.games.registry import implemented_game_codes
 from neuro_mirror.screening import (
     gm01_scoring, gm03_scoring, gm04_scoring, gm06_scoring, gm09_scoring,
     gm10_scoring, gm11_scoring, gm13_scoring, gm15_scoring, gm16_scoring,
+    gm18_scoring, gm21_scoring, gm22_scoring, gm24_scoring,
 )
 
 
@@ -100,6 +104,8 @@ SCORERS = {
     "GM-09": gm09_scoring.score_gm09, "GM-10": gm10_scoring.score_gm10,
     "GM-11": gm11_scoring.score_gm11, "GM-13": gm13_scoring.score_gm13,
     "GM-15": gm15_scoring.score_gm15, "GM-16": gm16_scoring.score_gm16,
+    "GM-18": gm18_scoring.score_gm18, "GM-21": gm21_scoring.score_gm21,
+    "GM-22": gm22_scoring.score_gm22, "GM-24": gm24_scoring.score_gm24,
 }
 
 
@@ -131,3 +137,26 @@ def test_every_implemented_game_reports_whether_it_was_finished():
         if "u06_complete" not in source:
             missing.append(game.code)
     assert not missing, f"не сообщают о завершении: {missing}"
+
+
+def test_every_catalog_metric_is_implemented_by_its_scorer():
+    """A metric in the catalog must also be emitted by the game scorer."""
+    scoring_root = Path(__file__).parents[1] / "neuro_mirror" / "screening"
+    missing: dict[str, list[str]] = {}
+    for game in GAME_CATALOG:
+        source = (scoring_root / f"gm{game.code[-2:]}_scoring.py").read_text(
+            encoding="utf-8"
+        )
+        tree = ast.parse(source)
+        implemented_codes = {
+            node.value[:3].upper()
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and re.match(r"^[a-z][0-9]{2}_", node.value)
+        }
+        expected = set(game.primary_metrics) | set(game.additional_metrics)
+        absent = sorted(expected - implemented_codes)
+        if absent:
+            missing[game.code] = absent
+    assert not missing, missing

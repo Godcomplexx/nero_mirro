@@ -6,7 +6,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from neuro_mirror.plugins.games.base import BrowserGamePlugin
-from neuro_mirror.plugins.games.gm06_rhythm.stimuli import BUTTONS, INTERVALS_MS, ROUNDS, START_LENGTH
+from neuro_mirror.plugins.games.difficulty_config import level_config
+from neuro_mirror.plugins.games.gm06_rhythm.stimuli import BUTTONS, INTERVALS_MS, START_LENGTH
 from neuro_mirror.screening.gm06_scoring import score_gm06
 
 
@@ -15,6 +16,7 @@ class RhythmSession:
     session_id: str
     rounds: list[dict[str, Any]]
     difficulty_level: int
+    difficulty_parameters: dict[str, Any]
     round_index: int = 0
     round_events: list[dict[str, Any]] = field(default_factory=list)
 
@@ -34,9 +36,13 @@ class Gm06RhythmPlugin(BrowserGamePlugin):
         return self._start(difficulty_level=payload.get("difficulty_level"))
 
     def _start(self, *, difficulty_level: object = None) -> dict[str, Any]:
-        try: level = min(3, max(1, int(difficulty_level or 1)))
-        except (TypeError, ValueError): level = 1
-        round_count = (10, 15, 20)[level - 1]
+        config = level_config(self.game_code)
+        try: level = int(difficulty_level or config["default_level"])
+        except (TypeError, ValueError): level = int(config["default_level"])
+        available_levels = {int(item["level"]): item for item in config["levels"]}
+        if level not in available_levels: level = int(config["default_level"])
+        parameters = dict(available_levels[level]["parameters"])
+        round_count = int(parameters["cycles"])
         rounds = []
         for index in range(round_count):
             length = START_LENGTH + index
@@ -44,7 +50,7 @@ class Gm06RhythmPlugin(BrowserGamePlugin):
                 "sequence": [self._random.choice(BUTTONS) for _ in range(length)],
                 "intervals": [self._random.choice(INTERVALS_MS) for _ in range(max(0, length - 1))],
             })
-        session = RhythmSession(uuid.uuid4().hex, rounds, level)
+        session = RhythmSession(uuid.uuid4().hex, rounds, level, parameters)
         self._sessions[session.session_id] = session
         return self._payload(session)
 
@@ -80,7 +86,7 @@ class Gm06RhythmPlugin(BrowserGamePlugin):
         if session.round_index >= len(session.rounds):
             events = list(session.round_events)
             self._sessions.pop(session.session_id, None)
-            return {"ok": True, "finished": True, "correct": event["correct"], "events": events, "metrics": score_gm06(events, expected_rounds=ROUNDS)}
+            return {"ok": True, "finished": True, "correct": event["correct"], "events": events, "metrics": score_gm06(events, expected_rounds=len(session.rounds))}
         result = self._payload(session)
         result["correct"] = event["correct"]
         return result
@@ -90,7 +96,7 @@ class Gm06RhythmPlugin(BrowserGamePlugin):
         return {
             "ok": True, "finished": False, "session_id": session.session_id,
             "difficulty_level": session.difficulty_level,
-            "difficulty_parameters": {"cycles": len(session.rounds)},
+            "difficulty_parameters": dict(session.difficulty_parameters),
             "round": session.round_index + 1, "round_count": len(session.rounds),
             "sequence": current["sequence"], "intervals_ms": current["intervals"],
             "sequence_length": len(current["sequence"]),

@@ -73,7 +73,7 @@ class Gm24CategoryNamingPlugin(BrowserGamePlugin):
         for category in categories:
             source = groups_by_name[category.casefold()]
             category_words = tuple(word for group in source["groups"] for word in group)
-            variants = list(combinations(category_words, 3))
+            variants = list(combinations(category_words, 2))
             self._random.shuffle(variants)
             word_groups[category] = variants
         used_by_category = {category: 0 for category in categories}

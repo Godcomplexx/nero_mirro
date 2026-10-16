@@ -13,7 +13,7 @@ export function mount({ container, definition, api, close }) {
   const intro=container.querySelector("[data-intro]"), training=container.querySelector("[data-training]"), trainingBoard=container.querySelector("[data-training-board]");
   const trainingFeedback=container.querySelector("[data-training-feedback]"), trainingComplete=container.querySelector("[data-training-complete]");
   const game=container.querySelector("[data-game]"), board=container.querySelector("[data-board]"), result=container.querySelector("[data-result]");
-  let state=null, locked=false, shownAt=performance.now(), trainingPicks=[], active=true;
+  let state=null, locked=false, shownAt=performance.now(), trainingPicks=[], trainingMismatch=null, active=true;
   const timers=new Set();
   const later=(callback,delay)=>{const timer=setTimeout(()=>{timers.delete(timer);callback();},delay);timers.add(timer);};
   const files={"Часы":"clock.png","Телефон":"phone.png","Ножницы":"scissors.png","Карандаш":"pencil.png","Зонт":"umbrella.png","Ключ":"key.png","Конверт":"convert.png","Лампа":"lamp.png","Весы":"scales.png","Чашка":"cup.png","Книга":"book.png","Мыло":"soap.png","Собака":"dog.png","Кошка":"cat.png","Мышь":"mouse.png","Кролик":"rabbit.png","Лиса":"fox.png","Медведь":"bear.png","Панда":"panda.png","Лягушка":"frog.png","Обезьяна":"monkey.png","Лев":"lion.png","Лошадь":"horse.png","Слон":"elephant.png","Яблоко":"apple.png","Груша":"pear.png","Апельсин":"orange.png","Лимон":"lemon.png","Арбуз":"watermelon.png","Виноград":"grapes.png","Клубника":"strawberry.png","Морковь":"carrot.png","Кукуруза":"corn.png","Помидор":"tomato.png","Огурец":"cucumber.png","Капуста":"cabbage.png"};
@@ -22,41 +22,52 @@ export function mount({ container, definition, api, close }) {
 
   function beginTraining(){
     stage.classList.remove("is-instruction-stage");showOnly(training);progress.textContent="Тренировка";instruction.textContent="Найдите две одинаковые карточки.";
-    trainingFeedback.textContent="";trainingFeedback.className="gm01-feedback";trainingPicks=[];locked=false;
+    trainingFeedback.textContent="";trainingFeedback.className="gm01-feedback";trainingPicks=[];trainingMismatch=null;locked=false;
     const cards=["Собака","Яблоко","Собака","Яблоко"];
     trainingBoard.replaceChildren(...cards.map((symbol,index)=>{const button=document.createElement("button");button.type="button";button.className="gm01-card";button.textContent="?";button.onclick=()=>chooseTraining(index,symbol,button);return button;}));
   }
+  function closeTrainingMismatch(){
+    if(!trainingMismatch)return;
+    clearTimeout(trainingMismatch.timer);timers.delete(trainingMismatch.timer);
+    trainingMismatch.cards.forEach(({button})=>{button.textContent="?";button.disabled=false;});
+    trainingMismatch=null;trainingPicks=[];locked=false;trainingFeedback.textContent="";trainingFeedback.className="gm01-feedback";
+  }
   function chooseTraining(index,symbol,button){
-    if(!active||locked||button.disabled)return;button.innerHTML=visual(symbol);button.disabled=true;trainingPicks.push({index,symbol,button});if(trainingPicks.length<2)return;
+    if(!active||button.disabled)return;if(trainingMismatch)closeTrainingMismatch();if(locked)return;button.innerHTML=visual(symbol);button.disabled=true;trainingPicks.push({index,symbol,button});if(trainingPicks.length<2)return;
     locked=true;const [first,second]=trainingPicks;
     if(first.symbol===second.symbol){first.button.classList.add("is-matched");second.button.classList.add("is-matched");trainingFeedback.textContent="Верно, пара найдена.";trainingFeedback.classList.add("is-correct");later(()=>{if(!active)return;showOnly(trainingComplete);progress.textContent="Обучение завершено";instruction.textContent="Тренировочный пример выполнен правильно.";},450);return;}
-    trainingFeedback.textContent="Карточки разные. Запомните их и попробуйте ещё раз.";trainingFeedback.classList.add("is-wrong");later(()=>{if(!active)return;first.button.textContent="?";second.button.textContent="?";first.button.disabled=false;second.button.disabled=false;trainingPicks=[];locked=false;trainingFeedback.textContent="";trainingFeedback.className="gm01-feedback";},800);
+    trainingFeedback.textContent="Карточки разные. Можно сразу открывать следующую.";trainingFeedback.classList.add("is-wrong");
+    const timer=setTimeout(()=>{timers.delete(timer);if(active)closeTrainingMismatch();},600);timers.add(timer);trainingMismatch={cards:[first,second],timer};
   }
-  const render=payload=>{if(!active)return;state=payload;locked=false;shownAt=performance.now();progress.textContent=`Уровень ${payload.board} из ${payload.board_count} · ${payload.pair_count} пар`;board.style.setProperty("--gm01-columns",String(payload.grid_columns||5));board.replaceChildren(...payload.cards.map((symbol,index)=>{const button=document.createElement("button");button.type="button";button.className="gm01-card";button.innerHTML=payload.matched.includes(index)?visual(symbol):"?";button.disabled=payload.matched.includes(index);button.onclick=()=>choose(index,button,symbol);return button;}));};
-  // Показанная пара, ожидающая закрытия. Пока она висит, прежний код
-  // отбрасывал нажатия: человеку казалось, что игра подлагивает.
-  let pendingReveal=null;
-  const settlePending=()=>{if(!pendingReveal)return;clearTimeout(pendingReveal.timer);timers.delete(pendingReveal.timer);const payload=pendingReveal.payload;pendingReveal=null;render(payload);};
-  const choose=async(index,button,symbol)=>{
-    // Нажатие на следующую карточку закрывает показанную пару сразу и
-    // засчитывается, а не теряется в ожидании паузы.
-    if(pendingReveal){settlePending();const fresh=board.children[index];if(fresh&&!fresh.disabled)fresh.click();return;}
-    if(locked||button.disabled)return;
-    button.innerHTML=visual(symbol);button.disabled=true;
-    // Замок ставится до обращения к ядру: иначе за время ответа принимается
-    // ещё одно нажатие, и открытыми оказываются три карточки.
-    locked=true;
-    let payload;
-    try{payload=await api.answer({session_id:state.session_id,selected_index:index,reaction_ms:performance.now()-shownAt});}
-    catch(error){if(active){locked=false;button.disabled=false;button.innerHTML="?";result.textContent=`Не удалось проверить ход: ${error.message}`;}return;}
-    if(!active)return;
-    if(payload.first_pick){state=payload;locked=false;return;}
-    if(payload.finished){board.replaceChildren();progress.textContent="Завершено";result.textContent=`Ошибок: ${payload.metrics.u07_error_count}`;return;}
-    const timer=setTimeout(()=>{timers.delete(timer);pendingReveal=null;render(payload);},payload.correct?250:800);
-    timers.add(timer);
-    pendingReveal={timer,payload};
+  let firstPick=null, visibleMismatch=null, answerChain=Promise.resolve(), boardGeneration=0;
+  const closeMismatch=()=>{if(!visibleMismatch)return;clearTimeout(visibleMismatch.timer);timers.delete(visibleMismatch.timer);visibleMismatch.cards.forEach(({button})=>{if(button.isConnected){button.textContent="?";button.disabled=false;}});visibleMismatch=null;};
+  const render=payload=>{if(!active)return;closeMismatch();state=payload;firstPick=null;locked=false;shownAt=performance.now();boardGeneration+=1;progress.textContent=`Уровень ${payload.board} из ${payload.board_count} · ${payload.pair_count} пар`;board.style.setProperty("--gm01-columns",String(payload.grid_columns||5));board.replaceChildren(...payload.cards.map((symbol,index)=>{const button=document.createElement("button");button.type="button";button.className="gm01-card";button.innerHTML=payload.matched.includes(index)?visual(symbol):"?";button.disabled=payload.matched.includes(index);button.onclick=()=>choose(index,button,symbol);return button;}));};
+  const submitPair=(first,second,generation,boardNumber)=>{
+    const request={session_id:state.session_id,first_index:first.index,selected_index:second.index,reaction_ms:performance.now()-shownAt};
+    answerChain=answerChain.then(()=>api.answer(request)).then(payload=>{
+      if(!active)return;
+      if(payload.finished){locked=true;closeMismatch();firstPick=null;board.replaceChildren();progress.textContent="Завершено";result.textContent=`Ошибок: ${payload.metrics.u07_error_count}`;return;}
+      if(generation===boardGeneration&&payload.board!==boardNumber){render(payload);return;}
+      state=payload;
+    }).catch(error=>{if(active){locked=true;result.textContent=`Не удалось проверить ход: ${error.message}`;}});
   };
-  async function beginGame(){locked=true;showOnly(game);progress.textContent="Подготовка…";instruction.textContent="Открывайте по две карточки и находите одинаковые пары.";result.textContent="";try{render(await api.start());}catch(error){result.textContent=`Не удалось начать игру: ${error.message}`;}}
+  const choose=(index,button,symbol)=>{
+    if(!active||locked||button.disabled)return;
+    // Нажатие на третью карточку сразу закрывает несовпавшую пару. Оно само
+    // становится первым выбором новой пары и никогда не теряется.
+    if(visibleMismatch)closeMismatch();
+    button.innerHTML=visual(symbol);button.disabled=true;
+    const current={index,button,symbol};
+    if(!firstPick){firstPick=current;return;}
+    const first=firstPick;firstPick=null;
+    const correct=first.symbol===current.symbol;
+    if(correct){first.button.classList.add("is-matched");current.button.classList.add("is-matched");}
+    else{
+      const timer=setTimeout(()=>{timers.delete(timer);closeMismatch();},600);timers.add(timer);visibleMismatch={cards:[first,current],timer};
+    }
+    submitPair(first,current,boardGeneration,state.board);
+  };
+  async function beginGame(){locked=true;answerChain=Promise.resolve();showOnly(game);progress.textContent="Подготовка…";instruction.textContent="Открывайте по две карточки и находите одинаковые пары.";result.textContent="";try{render(await api.start());}catch(error){result.textContent=`Не удалось начать игру: ${error.message}`;}}
 
   container.querySelector("[data-start-training]").onclick=beginTraining;container.querySelector("[data-repeat-training]").onclick=beginTraining;container.querySelector("[data-confirm-start]").onclick=beginGame;
   container.querySelector("[data-close]").onclick=()=>{active=false;close();};
