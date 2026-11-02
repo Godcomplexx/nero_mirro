@@ -8,6 +8,7 @@ All business logic lives in plugins. This module only:
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import mimetypes
 import os
@@ -60,6 +61,16 @@ from neuro_mirror.screening.san_survey import (
     MOMENTS,
     questionnaire as san_questionnaire,
     score_san,
+)
+from neuro_mirror.screening.situational_task import (
+    SCENARIO as SITUATIONAL_DEMO_SCENARIO,
+    SituationalTaskError,
+    advance as advance_situational_demo,
+    initial_checkpoint as situational_initial_checkpoint,
+    load_demo_narrative,
+    public_state as situational_public_state,
+    result_from_checkpoint as situational_result,
+    score_demo as score_situational_demo,
 )
 from neuro_mirror.plugins.games.course_store import ITEM_ABANDONED, ITEM_DONE, CourseError
 from neuro_mirror.screening.difficulty_policy import describe
@@ -189,6 +200,16 @@ class SanAnswersIn(BaseModel):
     moment: str = "before"
     answers: dict[str, int] = Field(default_factory=dict)
     session_id: str = ""
+
+
+class SituationalDemoActionIn(BaseModel):
+    action: str
+    value: str = ""
+
+
+class SituationalConfirmationIn(BaseModel):
+    scores: dict[str, int] = Field(default_factory=dict)
+    note: str = ""
 
 
 # ---- Minimal application context ----
@@ -344,6 +365,158 @@ def create_app() -> FastAPI:
     @app.get("/")
     async def root() -> FileResponse:
         return FileResponse(static_dir / "index.html")
+
+    def _situational_demo() -> dict[str, Any]:
+        try:
+            return load_demo_narrative()
+        except (FileNotFoundError, SituationalTaskError, json.JSONDecodeError) as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="Демонстрационная ситуационная задача пока не подготовлена.",
+            ) from exc
+
+    def _situational_demo_session(session_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
+        ctx: WebAppContext = app.state.context
+        user = _active_user_or_400()
+        session = ctx.runtime.session_store.get(session_id)
+        if session is None or session.get("scenario") != SITUATIONAL_DEMO_SCENARIO:
+            raise HTTPException(status_code=404, detail="Демонстрационная сессия не найдена.")
+        if session.get("user_id") != user.get("id"):
+            raise HTTPException(status_code=403, detail="Эта сессия принадлежит другому профилю.")
+        return session, _situational_demo()
+
+    @app.get("/api/tasks")
+    async def task_library() -> JSONResponse:
+        """Expose only the explicitly marked demonstration task for now."""
+        try:
+            narrative = load_demo_narrative()
+        except (FileNotFoundError, SituationalTaskError, json.JSONDecodeError):
+            return JSONResponse({"domains": [], "tasks": []})
+        return JSONResponse({
+            "domains": [{"id": "memory", "label": "Память"}],
+            "tasks": [{
+                "id": narrative["id"],
+                "title": narrative.get("title", "Ситуационная задача"),
+                "description": "Пилотная входная форма СБС-ПАМ-01 по утверждённому паспорту нарратива.",
+                "domain": "memory",
+                "level": "Пилот",
+                "demo_only": True,
+                # The continuation image must not be shown before the story.
+                "image_url": "",
+            }],
+        })
+
+    @app.get("/api/situational-task/demo/assets/{file_name}")
+    async def situational_demo_asset(file_name: str) -> FileResponse:
+        narrative = _situational_demo()
+        if file_name != narrative.get("image") or Path(file_name).name != file_name:
+            raise HTTPException(status_code=404, detail="Файл демонстрации не найден.")
+        path = (
+            Path(__file__).resolve().parents[1]
+            / "screening" / "assets" / "situational_task" / "memory" / file_name
+        )
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail="Добавьте демонстрационное изображение.")
+        return FileResponse(path)
+
+    @app.post("/api/situational-task/demo/start")
+    async def start_situational_demo() -> JSONResponse:
+        ctx: WebAppContext = app.state.context
+        user = _active_user_or_400()
+        narrative = _situational_demo()
+        session = ctx.runtime.session_store.start(
+            user_id=str(user.get("id") or ""),
+            scenario=SITUATIONAL_DEMO_SCENARIO,
+            versions={
+                "situational_task_demo": "0.2.0",
+                "narrative": str(narrative.get("version") or ""),
+                "image": str(narrative.get("image_version") or ""),
+            },
+            technical_params={
+                "demo_only": True,
+                "narrative_code": narrative.get("code"),
+                "danger_side": narrative.get("danger_side"),
+            },
+        )
+        checkpoint = situational_initial_checkpoint(str(narrative["id"]))
+        session = ctx.runtime.session_store.checkpoint(session["session_id"], checkpoint) or session
+        return JSONResponse(situational_public_state(session, narrative))
+
+    @app.get("/api/situational-task/demo/{session_id}")
+    async def get_situational_demo(session_id: str) -> JSONResponse:
+        session, narrative = _situational_demo_session(session_id)
+        return JSONResponse(situational_public_state(session, narrative))
+
+    @app.post("/api/situational-task/demo/{session_id}/resume")
+    async def resume_situational_demo(session_id: str) -> JSONResponse:
+        ctx: WebAppContext = app.state.context
+        session, narrative = _situational_demo_session(session_id)
+        if session.get("status") == "interrupted":
+            user = _active_user_or_400()
+            session = ctx.runtime.session_store.resume(
+                session_id,
+                user_id=str(user.get("id") or ""),
+            )
+        elif (
+            session.get("status") in {"completed", "error"}
+            and (session.get("checkpoint") or {}).get("step")
+            not in {"completed", "deferred", "not_conducted"}
+        ):
+            user = _active_user_or_400()
+            session = ctx.runtime.session_store.reopen_incomplete(
+                session_id,
+                user_id=str(user.get("id") or ""),
+                scenario=SITUATIONAL_DEMO_SCENARIO,
+                reason="Исправление преждевременного завершения демонстрационной задачи.",
+            )
+        elif session.get("status") != "in_progress":
+            raise HTTPException(status_code=409, detail="Демонстрационная задача уже завершена.")
+        return JSONResponse(situational_public_state(session, narrative))
+
+    @app.post("/api/situational-task/demo/{session_id}/action")
+    async def act_situational_demo(
+        session_id: str,
+        payload: SituationalDemoActionIn,
+    ) -> JSONResponse:
+        ctx: WebAppContext = app.state.context
+        session, narrative = _situational_demo_session(session_id)
+        if session.get("status") == "interrupted":
+            user = _active_user_or_400()
+            session = ctx.runtime.session_store.resume(
+                session_id,
+                user_id=str(user.get("id") or ""),
+            )
+        elif (
+            session.get("status") in {"completed", "error"}
+            and (session.get("checkpoint") or {}).get("step")
+            not in {"completed", "deferred", "not_conducted"}
+        ):
+            user = _active_user_or_400()
+            session = ctx.runtime.session_store.reopen_incomplete(
+                session_id,
+                user_id=str(user.get("id") or ""),
+                scenario=SITUATIONAL_DEMO_SCENARIO,
+                reason="Исправление преждевременного завершения демонстрационной задачи.",
+            )
+        elif session.get("status") != "in_progress":
+            raise HTTPException(status_code=409, detail="Демонстрационная задача уже завершена.")
+        try:
+            checkpoint, completed = advance_situational_demo(
+                session.get("checkpoint") or situational_initial_checkpoint(narrative["id"]),
+                narrative,
+                action=payload.action,
+                value=payload.value,
+            )
+        except SituationalTaskError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if completed:
+            session = ctx.runtime.session_store.checkpoint(session_id, checkpoint) or session
+            session = ctx.runtime.session_store.complete(
+                session_id, situational_result(checkpoint, narrative)
+            ) or session
+        else:
+            session = ctx.runtime.session_store.checkpoint(session_id, checkpoint) or session
+        return JSONResponse(situational_public_state(session, narrative))
 
     @app.get("/api/state")
     async def get_state() -> JSONResponse:
@@ -1139,6 +1312,63 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         _log.info("специалист подтвердил результат домена")
         return JSONResponse(record)
+
+    @app.post("/api/specialist/situational/{session_id}/confirm")
+    async def specialist_confirm_situational(
+        session_id: str,
+        payload: SituationalConfirmationIn,
+    ) -> JSONResponse:
+        """Confirm editable demo scores without producing a total score."""
+        ctx: WebAppContext = app.state.context
+        if not specialist.is_active():
+            raise HTTPException(status_code=403, detail="Действие доступно специалисту после входа по PIN.")
+        active = _active_user_or_400()
+        session = ctx.runtime.session_store.get(session_id)
+        if (
+            session is None
+            or session.get("scenario") != SITUATIONAL_DEMO_SCENARIO
+            or session.get("user_id") != active.get("id")
+        ):
+            raise HTTPException(status_code=404, detail="Результат ситуационной задачи не найден.")
+        limits = {
+            "recall": 20,
+            "orientation": 4,
+            "image_description": 21,
+            "risk_understanding": 2,
+            "practical_solution": 2,
+            "memory_attention": 8,
+        }
+        if set(payload.scores) != set(limits):
+            raise HTTPException(status_code=400, detail="Переданы не все показатели ситуационной задачи.")
+        confirmed: dict[str, Any] = {}
+        for key, maximum in limits.items():
+            value = int(payload.scores[key])
+            if value < 0 or value > maximum:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Показатель {key} должен быть от 0 до {maximum}.",
+                )
+            confirmed[key] = {"score": value, "max_score": maximum}
+        result = session.get("result") or {}
+        preliminary = result.get("preliminary_scores") or score_situational_demo(
+            session.get("checkpoint") or {}, _situational_demo()
+        )
+        try:
+            updated = ctx.runtime.session_store.amend_result(
+                session_id,
+                user_id=str(active.get("id") or ""),
+                patch={
+                    "preliminary_scores": preliminary,
+                    "confirmed_scores": confirmed,
+                    "confirmed_at": datetime.now(UTC).isoformat(),
+                    "confirmation_note": payload.note.strip(),
+                    "specialist_confirmation_required": False,
+                },
+                event_type="situational_scores_confirmed",
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return JSONResponse(updated.get("result") or {})
 
     @app.get("/api/specialist/report")
     async def specialist_report() -> JSONResponse:

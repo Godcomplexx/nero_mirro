@@ -19,7 +19,7 @@
 
 import { activeUser, api } from "../core/legacy.js";
 import { notify } from "../components/notify.js";
-import { buildSpecialistTab } from "./specialist-report.js";
+import { buildSpecialistTab } from "./specialist-report.js?v=20261102-sbs-pam01";
 
 const REPORT_TYPE_LABELS = {
   screening: "Базовый скрининг",

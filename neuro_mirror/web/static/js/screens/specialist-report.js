@@ -337,6 +337,186 @@ function screeningSection(entries) {
   );
 }
 
+function situationalSection(entries, onChanged) {
+  if (!entries.length) {
+    return section("Социально-бытовая ситуационная задача", el("p", "nm-panel-text", "Демонстрационную задачу ещё не проходили."));
+  }
+  const statusLabels = {
+    completed: "завершена",
+    in_progress: "не завершена",
+    interrupted: "прервана",
+    error: "техническая ошибка",
+  };
+  const narrativeLabels = {
+    "demo-kitchen-01": "Кастрюля на плите (старый тестовый материал)",
+    "sbs-pam-01": "СБС-ПАМ-01 · Путаница с лекарствами",
+  };
+  const scoreMetrics = [
+    ["recall", "Воспроизведение истории"],
+    ["orientation", "Ориентация"],
+    ["image_description", "Описание изображения"],
+    ["risk_understanding", "Понимание риска"],
+    ["practical_solution", "Практическое решение"],
+    ["memory_attention", "Память и внимание"],
+  ];
+  const ordered = [...entries].sort((a, b) => {
+    if (a.status === "completed" && b.status !== "completed") return -1;
+    if (b.status === "completed" && a.status !== "completed") return 1;
+    return String(b.started_at || "").localeCompare(String(a.started_at || ""));
+  });
+  const cards = ordered.map((entry) => {
+    const responses = entry.responses || {};
+    const preparation = entry.preparation || {};
+    const answerRows = [];
+    const groups = [
+      ["Ориентация", responses.orientation],
+      ["Изображение", responses.image_questions],
+      ["Память", responses.memory],
+    ];
+    for (const [group, answers] of groups) {
+      for (const answer of answers || []) {
+        answerRows.push([
+          group,
+          answer.question || `Вопрос ${Number(answer.question_index || 0) + 1}`,
+          answer.answer,
+          answer.prompt_level || 0,
+        ]);
+      }
+    }
+    const card = el("article", "nm-report-card");
+    const answered = answerRows.length;
+    const promptCount = answerRows.filter((row) => Number(row[3] || 0) > 0).length;
+    const isEmpty = !responses.retelling && !responses.image_description && answered === 0;
+    const preliminary = entry.preliminary_scores || {};
+    const confirmed = entry.confirmed_scores || {};
+    const shownScores = Object.keys(confirmed).length ? confirmed : preliminary;
+    appendAll(
+      card,
+      el("h4", "nm-spec-subtitle", `${statusLabels[entry.status] || entry.status}: ${narrativeLabels[entry.narrative_id] || entry.narrative_id}`),
+      line("Начало", formatDate(entry.started_at)),
+      entry.finished_at ? line("Завершение", formatDate(entry.finished_at)) : null,
+      line("Исход попытки", entry.outcome || "—"),
+      line("Готовность", preparation.readiness === "continue" ? "продолжил(а)" : preparation.readiness === "deferred" ? "выбран перерыв" : "нет данных"),
+      line("Очки подготовлены", preparation.glasses_ready === true ? "да" : "нет данных"),
+      line("Проверка слуха", preparation.hearing_status === "good" ? "слышно хорошо" : preparation.hearing_status === "bad" ? "плохо слышно" : "нет данных"),
+      line("Попыток проверки слуха", preparation.hearing_attempts || 0),
+      line("Получено ответов на вопросы", `${answered} из 12`),
+      line("Ответов с подсказкой", promptCount),
+      line("Автоматический общий балл", "не рассчитывается по методике"),
+    );
+    if (isEmpty) {
+      card.appendChild(el("p", "nm-status-line", "Попытка создана, но ответы ещё не получены. Она не является результатом прохождения."));
+    } else {
+      if (responses.retelling) {
+        card.append(el("h5", "nm-spec-subtitle", "Пересказ истории"), el("p", "nm-panel-text", responses.retelling));
+      }
+      if (responses.retelling_addition) {
+        card.append(el("h5", "nm-spec-subtitle", "Дополнение к пересказу"), el("p", "nm-panel-text", responses.retelling_addition));
+      }
+      if (responses.image_description) {
+        card.append(el("h5", "nm-spec-subtitle", "Описание изображения"), el("p", "nm-panel-text", responses.image_description));
+      }
+      if (responses.image_description_addition) {
+        card.append(el("h5", "nm-spec-subtitle", "Дополнение к описанию"), el("p", "nm-panel-text", responses.image_description_addition));
+      }
+      if (answerRows.length) {
+        card.append(
+          el("h5", "nm-spec-subtitle", "Ответы на вопросы"),
+          table(["Этап", "Вопрос", "Распознанный ответ", "Подсказка"], answerRows.map((row) => [
+            row[0], row[1], row[2], Number(row[3] || 0) ? `ступень ${row[3]}` : "без подсказки",
+          ])),
+        );
+      }
+      if (Object.keys(shownScores).length) {
+        card.append(
+          el("h5", "nm-spec-subtitle", Object.keys(confirmed).length ? "Подтверждённые показатели" : "Предварительные показатели"),
+          table(
+            ["Показатель", "Балл", "Максимум"],
+            scoreMetrics.map(([key, label]) => [label, shownScores[key]?.score, shownScores[key]?.max_score]),
+          ),
+        );
+      }
+      if (preliminary.recall?.evidence?.length) {
+        card.appendChild(details(
+          "Как рассчитано воспроизведение",
+          table(
+            ["Смысловая единица", "Найдена", "Балл"],
+            preliminary.recall.evidence.map((item) => [item.label, item.found ? "да" : "нет", item.score]),
+          ),
+        ));
+      }
+      if (preliminary.image_description?.evidence?.length) {
+        card.appendChild(details(
+          "Как рассчитано описание изображения",
+          table(
+            ["Концепт", "Совпало признаков", "Балл"],
+            preliminary.image_description.evidence.map((item) => [
+              item.label, `${item.matched_groups} из ${item.group_count}`, item.score,
+            ]),
+          ),
+        ));
+      }
+      if (entry.status === "completed" && entry.specialist_confirmation_required !== false && !Object.keys(confirmed).length && Object.keys(preliminary).length) {
+        const form = el("form", "nm-spec-form");
+        form.appendChild(el("h5", "nm-spec-subtitle", "Проверка специалистом"));
+        const scoreGrid = el("div", "nm-situational-score-grid");
+        const inputs = {};
+        for (const [key, label] of scoreMetrics) {
+          const field = el("label", "nm-situational-score-field");
+          const caption = el("span", "nm-spec-label", `${label}, 0–${preliminary[key].max_score}`);
+          const input = el("input", "nm-input");
+          input.type = "number";
+          input.min = "0";
+          input.max = String(preliminary[key].max_score);
+          input.value = String(preliminary[key].score);
+          input.required = true;
+          inputs[key] = input;
+          field.append(caption, input);
+          scoreGrid.appendChild(field);
+        }
+        const note = el("textarea", "nm-input nm-situational-confirm-note");
+        note.rows = 3;
+        note.placeholder = "Комментарий специалиста (необязательно)";
+        const submit = el("button", "nm-btn nm-btn-primary", "Подтвердить показатели");
+        submit.type = "submit";
+        const message = el("p", "nm-status-line");
+        form.append(scoreGrid, note, submit, message);
+        form.addEventListener("submit", async (event) => {
+          event.preventDefault();
+          submit.disabled = true;
+          try {
+            const scores = Object.fromEntries(Object.entries(inputs).map(([key, input]) => [key, Number(input.value)]));
+            await api(`/api/specialist/situational/${encodeURIComponent(entry.session_id)}/confirm`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ scores, note: note.value.trim() }),
+            });
+            onChanged();
+          } catch (error) {
+            message.textContent = error.message || String(error);
+            submit.disabled = false;
+          }
+        });
+        card.appendChild(form);
+      } else if (Object.keys(confirmed).length) {
+        card.append(
+          line("Показатели подтверждены", formatDate(entry.confirmed_at)),
+          entry.confirmation_note ? line("Комментарий специалиста", entry.confirmation_note) : null,
+        );
+      }
+      const explanation = el("div", "nm-spec-quality nm-spec-quality-limited");
+      explanation.append(
+        el("strong", null, "Как читать результат"),
+        el("p", "nm-panel-text", "Система показывает распознанные ответы, подсказки и предварительные показатели по паспорту нарратива. До подтверждения специалистом эти показатели не считаются окончательными."),
+      );
+      card.appendChild(explanation);
+    }
+    card.appendChild(el("p", "nm-status-line", "Пилотные результаты пока не используются для клинической интерпретации или подбора тренировок."));
+    return card;
+  });
+  return section("Социально-бытовая ситуационная задача", ...cards);
+}
+
 const MOMENT_LABELS = { before: "до занятия", after: "после занятия", screening: "на скрининге" };
 
 function sanSection(entries) {
@@ -625,6 +805,7 @@ function buildReport(report, onClosed, onChanged) {
     notificationsSection(report.notifications, report.training, onChanged),
     dynamicsSection(report.dynamics),
     mocaSection(report.moca || []),
+    situationalSection(report.situational_tasks || [], onChanged),
     hadsSection(report.hads || []),
     screeningSection(report.screening || []),
     sanSection(report.san || []),

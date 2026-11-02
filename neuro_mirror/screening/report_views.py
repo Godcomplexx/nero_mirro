@@ -28,6 +28,7 @@ from neuro_mirror.screening.course_report import (
 )
 from neuro_mirror.screening.data_quality import assess
 from neuro_mirror.screening.dynamics import dynamics
+from neuro_mirror.screening.situational_task import load_demo_narrative, score_demo
 
 # Поля записи, которые видит пользователь.
 USER_FIELDS = frozenset({
@@ -271,6 +272,42 @@ def _journal(sessions: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]
     return rows
 
 
+def _situational_entries(sessions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    entries = []
+    for session in sessions:
+        if session.get("scenario") != "situational_task_demo":
+            continue
+        result = session.get("result") or {}
+        checkpoint = session.get("checkpoint") or {}
+        responses = result.get("responses") or checkpoint.get("responses") or {}
+        preliminary = deepcopy(result.get("preliminary_scores") or {})
+        narrative_id = result.get("narrative_id") or checkpoint.get("narrative_id")
+        if not preliminary and narrative_id == "sbs-pam-01":
+            try:
+                preliminary = score_demo(checkpoint, load_demo_narrative(narrative_id))
+            except (FileNotFoundError, ValueError):
+                preliminary = {}
+        entries.append({
+            "session_id": session.get("session_id"),
+            "started_at": session.get("started_at"),
+            "finished_at": session.get("finished_at"),
+            "status": session.get("status"),
+            "narrative_id": narrative_id,
+            "demo_only": True,
+            "responses": deepcopy(responses),
+            "preparation": deepcopy(result.get("preparation") or checkpoint.get("preparation") or {}),
+            "outcome": result.get("outcome") or ("completed" if session.get("status") == "completed" else "in_progress"),
+            "prompt_levels": deepcopy(result.get("prompt_levels") or checkpoint.get("prompt_levels") or []),
+            "has_total_score": False,
+            "specialist_confirmation_required": bool(result.get("specialist_confirmation_required", True)),
+            "preliminary_scores": preliminary,
+            "confirmed_scores": deepcopy(result.get("confirmed_scores") or {}),
+            "confirmed_at": result.get("confirmed_at"),
+            "confirmation_note": result.get("confirmation_note", ""),
+        })
+    return entries
+
+
 def specialist_report(
     items: list[dict[str, Any]],
     *,
@@ -297,6 +334,7 @@ def specialist_report(
         "moca": moca,
         "hads": hads,
         "screening": screening,
+        "situational_tasks": _situational_entries(sessions),
         "san": san,
         "training": _training_entry(course, levels or {}, level_changes or [], san),
         "journal": _journal(sessions, journal_limit),

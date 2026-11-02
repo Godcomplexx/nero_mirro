@@ -2,8 +2,9 @@
 //
 // Library of social-everyday tasks (deck slide 9). Its content — task list,
 // categories, difficulty — belongs to the backend and the methodology is
-// still being worked out, so no endpoint exists yet; until it does this
-// returns null and the screen shows a stub instead of invented tasks.
+// still being worked out.  The endpoint currently exposes only content
+// explicitly marked as a disabled demonstration; real screening forms are
+// not returned here.
 //
 // Expected contract for GET /api/tasks:
 //   {

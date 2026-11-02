@@ -9,9 +9,9 @@ import { confirmDialog } from "./components/confirm-dialog.js";
 import { screeningScreen } from "./screens/screening.js";
 import { hadsScreen } from "./screens/hads.js";
 import { mocaScreen } from "./screens/moca.js?v=20261009-san";
-import { reportsScreen } from "./screens/reports.js";
+import { reportsScreen } from "./screens/reports.js?v=20261102-sbs-pam01";
 import { serviceScreen } from "./screens/service.js";
-import { tasksScreen } from "./screens/tasks.js";
+import { tasksScreen } from "./screens/tasks.js?v=20261102-sbs-pam01";
 import { trainingScreen } from "./screens/training.js?v=20261009-demo";
 // Registers window.nmNotify for app.js (a classic script cannot import)
 import "./components/notify.js";

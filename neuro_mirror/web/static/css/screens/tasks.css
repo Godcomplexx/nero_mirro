@@ -111,3 +111,142 @@
 .nm-task-foot .nm-btn {
   margin-left: auto;
 }
+
+.nm-situational {
+  width: min(56rem, 100%);
+  margin: 0 auto;
+}
+
+.nm-situational-demo-label {
+  display: inline-flex;
+  margin-bottom: 0.75rem;
+  padding: 0.25rem 0.625rem;
+  border: 0.0625rem solid #b45309;
+  border-radius: 999px;
+  color: #92400e;
+  font-size: 0.8125rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.nm-situational-progress {
+  height: 0.625rem;
+  margin: 1rem 0 1.5rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e2e8f0;
+}
+
+.nm-situational-progress-bar {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--nm-accent, #2563eb);
+  transition: width 180ms ease;
+}
+
+.nm-situational-step {
+  margin: 0 0 0.75rem;
+  font-size: 1.5rem;
+}
+
+.nm-situational-note {
+  padding: 0.75rem 1rem;
+  border-left: 0.25rem solid #d97706;
+  background: #fffbeb;
+  color: #78350f;
+}
+
+.nm-situational-form {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.nm-situational-recording {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.nm-situational-recording-time {
+  color: #b91c1c;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.nm-situational-answer {
+  width: 100%;
+  min-height: 8rem;
+  resize: vertical;
+}
+
+.nm-situational-form .nm-btn {
+  justify-self: start;
+}
+
+.nm-situational-question {
+  margin: 0.5rem 0;
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+
+.nm-situational-counter {
+  margin: 1rem 0 0;
+  color: var(--nm-text-dim);
+}
+
+.nm-situational-prompt {
+  margin: 0.75rem 0;
+  padding: 0.75rem 1rem;
+  border-radius: 0.75rem;
+  background: #eff6ff;
+  color: #1e3a8a;
+  font-weight: 600;
+}
+
+.nm-situational-image-wrap {
+  display: grid;
+  place-items: center;
+  min-height: 15rem;
+  margin: 1rem 0;
+  overflow: hidden;
+  border: 0.0625rem solid var(--nm-border);
+  border-radius: var(--nm-radius);
+  background: #f8fafc;
+}
+
+.nm-situational-image {
+  display: block;
+  width: 100%;
+  max-height: 32rem;
+  object-fit: contain;
+}
+
+.nm-situational-image-missing {
+  max-width: 32rem;
+  padding: 2rem;
+  text-align: center;
+  color: var(--nm-text-dim);
+}
+
+.nm-situational-status {
+  margin-top: 1rem;
+  color: var(--nm-text-dim);
+}
+
+.nm-situational-status.is-error {
+  color: #b91c1c;
+  font-weight: 700;
+}
+
+@media (max-width: 48rem) {
+  .nm-situational .nm-btn-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .nm-situational .nm-btn {
+    width: 100%;
+  }
+}

@@ -152,6 +152,70 @@ class SessionStore:
         self._save()
         return deepcopy(self._find(record["session_id"]))
 
+    def reopen_incomplete(
+        self,
+        session_id: str,
+        *,
+        user_id: str,
+        scenario: str,
+        reason: str,
+    ) -> dict[str, Any]:
+        """Repair a session that was finalized before its checkpoint was final.
+
+        This is deliberately stricter than ``resume``: callers must prove the
+        user and scenario, and should invoke it only after validating the
+        scenario-specific checkpoint.
+        """
+        record = self._find(session_id)
+        if record is None:
+            raise KeyError(session_id)
+        if record.get("user_id") != user_id:
+            raise PermissionError(session_id)
+        if record.get("scenario") != scenario:
+            raise ValueError("Сценарий сессии не совпадает.")
+        if record.get("status") not in FINAL_STATUSES:
+            raise ValueError("Исправить можно только ошибочно завершённую сессию.")
+        now = _utc_now()
+        record["status"] = "in_progress"
+        record["finished_at"] = None
+        record["result"] = None
+        record["interruption_reason"] = ""
+        record["updated_at"] = now
+        record.setdefault("events", []).append({
+            "timestamp": now,
+            "type": "session_reopened",
+            "details": {"reason": self._sanitize(reason)},
+        })
+        self._save()
+        return deepcopy(self._find(record["session_id"]))
+
+    def amend_result(
+        self,
+        session_id: str,
+        *,
+        user_id: str,
+        patch: dict[str, Any],
+        event_type: str = "result_amended",
+    ) -> dict[str, Any]:
+        """Merge a reviewed result patch into a completed user's session."""
+        record = self._find(session_id)
+        if record is None:
+            raise KeyError(session_id)
+        if record.get("user_id") != user_id:
+            raise PermissionError(session_id)
+        if record.get("status") != "completed" or not isinstance(record.get("result"), dict):
+            raise ValueError("Подтвердить можно только результат завершённой сессии.")
+        now = _utc_now()
+        record["result"].update(self._sanitize(patch))
+        record["updated_at"] = now
+        record.setdefault("events", []).append({
+            "timestamp": now,
+            "type": event_type,
+            "details": {},
+        })
+        self._save()
+        return deepcopy(self._find(record["session_id"]))
+
     def _finish(
         self,
         session_id: str,
