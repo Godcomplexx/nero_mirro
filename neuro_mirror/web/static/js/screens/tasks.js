@@ -6,9 +6,12 @@ import { loadTaskLibrary } from "../core/tasks.js";
 import { createDomainTag } from "../components/domain-tag.js";
 import { requestConsent } from "../components/consent-request.js";
 
-const SESSION_KEY = "nm-situational-pam01-session";
+const SESSION_KEY = "nm-situational-memory-session";
 let busy = false;
 let currentAudio = null;
+let speechController = null;
+let storyPlaybackCancelled = false;
+let exiting = false;
 let currentRecorder = null;
 let currentStream = null;
 let recordingTimer = null;
@@ -41,21 +44,30 @@ function statusMessage(panel, message, error = false) {
 }
 
 async function speak(text) {
-  const response = await fetch("/api/tts/speak", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text }),
-  });
-  if (!response.ok) throw new Error("Не удалось воспроизвести голосовую инструкцию.");
-  const audio = new Audio(URL.createObjectURL(await response.blob()));
-  currentAudio = audio;
-  await audio.play();
-  await new Promise((resolve) => {
-    audio.addEventListener("ended", resolve, { once: true });
-    audio.addEventListener("error", resolve, { once: true });
-  });
-  URL.revokeObjectURL(audio.src);
-  currentAudio = null;
+  const controller = new AbortController();
+  speechController = controller;
+  let audio = null;
+  try {
+    const response = await fetch("/api/tts/speak", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+      signal: controller.signal,
+    });
+    if (!response.ok) throw new Error("Не удалось воспроизвести голосовую инструкцию.");
+    audio = new Audio(URL.createObjectURL(await response.blob()));
+    currentAudio = audio;
+    await audio.play();
+    await new Promise((resolve) => {
+      audio.addEventListener("ended", resolve, { once: true });
+      audio.addEventListener("error", resolve, { once: true });
+      audio.addEventListener("abort", resolve, { once: true });
+    });
+  } finally {
+    if (audio?.src) URL.revokeObjectURL(audio.src);
+    if (currentAudio === audio) currentAudio = null;
+    if (speechController === controller) speechController = null;
+  }
 }
 
 function progress(state) {
@@ -231,6 +243,43 @@ async function perform(panel, sessionId, action, value, render) {
   }
 }
 
+async function interruptAndExit(host, panel, sessionId) {
+  if (busy && !currentAudio && !speechController) return;
+  const confirmed = window.confirm(
+    "Прервать эту попытку и вернуться к выбору задач? Введённые в этой попытке ответы изменить будет нельзя.",
+  );
+  if (!confirmed) return;
+  exiting = true;
+  storyPlaybackCancelled = true;
+  speechController?.abort();
+  if (currentAudio) {
+    currentAudio.pause();
+    currentAudio.dispatchEvent(new Event("abort"));
+  }
+  if (currentRecorder?.state === "recording") {
+    discardRecording = true;
+    currentRecorder.stop();
+  }
+  currentStream?.getTracks().forEach((track) => track.stop());
+  busy = true;
+  for (const button of panel.querySelectorAll("button")) button.disabled = true;
+  statusMessage(panel, "Завершаю попытку…");
+  try {
+    await post(`/api/situational-task/demo/${encodeURIComponent(sessionId)}/interrupt`);
+    localStorage.removeItem(SESSION_KEY);
+    const library = await loadTaskLibrary();
+    host.innerHTML = "";
+    if (library?.tasks?.length) host.appendChild(buildLibrary(library, host));
+    else host.appendChild(el("p", "nm-panel-text", "Пилотный материал пока не подготовлен."));
+  } catch (error) {
+    statusMessage(panel, error.message || "Не удалось выйти из задачи.", true);
+    for (const button of panel.querySelectorAll("button")) button.disabled = false;
+  } finally {
+    exiting = false;
+    busy = false;
+  }
+}
+
 function renderDemo(host, state) {
   host.innerHTML = "";
   const panel = el("section", "nm-panel nm-situational");
@@ -241,6 +290,13 @@ function renderDemo(host, state) {
     progress(state),
   );
   const render = (next) => renderDemo(host, next);
+
+  if (!["completed", "deferred", "not_conducted"].includes(state.step)) {
+    const exit = el("button", "nm-btn nm-btn-secondary", "Прервать и выйти");
+    exit.type = "button";
+    exit.addEventListener("click", () => interruptAndExit(host, panel, state.session_id));
+    panel.appendChild(exit);
+  }
 
   if (state.step === "intro") {
     panel.append(
@@ -302,17 +358,21 @@ function renderDemo(host, state) {
     const button = el("button", "nm-btn nm-btn-primary", "Прослушать историю");
     button.addEventListener("click", async () => {
       if (busy) return;
+      storyPlaybackCancelled = false;
       busy = true;
       button.disabled = true;
       try {
         await speak(state.story);
+        if (storyPlaybackCancelled) return;
         busy = false;
         await perform(panel, state.session_id, "story_heard", "", render);
       } catch (error) {
-        statusMessage(panel, error.message, true);
-        button.disabled = false;
+        if (!storyPlaybackCancelled) {
+          statusMessage(panel, error.message, true);
+          button.disabled = false;
+        }
       } finally {
-        busy = false;
+        if (!exiting) busy = false;
       }
     });
     panel.appendChild(button);
@@ -404,11 +464,11 @@ function taskImage(url) {
   return wrap;
 }
 
-async function startDemo(host) {
+async function startDemo(host, narrativeId = "sbs-pam-01") {
   host.innerHTML = "";
   host.appendChild(el("p", "nm-panel-text", "Создаю пилотную сессию…"));
   try {
-    const state = await post("/api/situational-task/demo/start");
+    const state = await post(`/api/situational-task/demo/start?narrative_id=${encodeURIComponent(narrativeId)}`);
     localStorage.setItem(SESSION_KEY, state.session_id);
     renderDemo(host, state);
   } catch (error) {
@@ -425,10 +485,10 @@ function buildLibrary(library, host) {
     const body = el("div", "nm-task-body");
     body.append(el("h3", "nm-task-title", task.title), el("p", "nm-task-desc", task.description));
     const foot = el("div", "nm-task-foot");
-    foot.append(createDomainTag("Память"), el("span", "nm-task-level", "Пилот"));
+    foot.append(createDomainTag("Память"), el("span", "nm-task-level", task.level || "Пилот"));
     const open = el("button", "nm-btn nm-btn-primary", "Открыть задачу");
     open.type = "button";
-    open.addEventListener("click", () => startDemo(host));
+    open.addEventListener("click", () => startDemo(host, task.id));
     foot.appendChild(open);
     body.appendChild(foot);
     card.appendChild(body);
@@ -463,7 +523,13 @@ export const tasksScreen = {
     else host.appendChild(el("p", "nm-panel-text", "Пилотный материал пока не подготовлен."));
   },
   unmount() {
-    if (currentAudio) currentAudio.pause();
+    storyPlaybackCancelled = true;
+    speechController?.abort();
+    speechController = null;
+    if (currentAudio) {
+      currentAudio.pause();
+      currentAudio.dispatchEvent(new Event("abort"));
+    }
     currentAudio = null;
     clearInterval(recordingTimer);
     recordingTimer = null;

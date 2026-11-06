@@ -282,7 +282,7 @@ def _situational_entries(sessions: list[dict[str, Any]]) -> list[dict[str, Any]]
         responses = result.get("responses") or checkpoint.get("responses") or {}
         preliminary = deepcopy(result.get("preliminary_scores") or {})
         narrative_id = result.get("narrative_id") or checkpoint.get("narrative_id")
-        if not preliminary and narrative_id == "sbs-pam-01":
+        if not preliminary and narrative_id in {"sbs-pam-01", "sbs-pam-02", "sbs-pam-03"}:
             try:
                 preliminary = score_demo(checkpoint, load_demo_narrative(narrative_id))
             except (FileNotFoundError, ValueError):

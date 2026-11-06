@@ -366,9 +366,9 @@ def create_app() -> FastAPI:
     async def root() -> FileResponse:
         return FileResponse(static_dir / "index.html")
 
-    def _situational_demo() -> dict[str, Any]:
+    def _situational_demo(narrative_id: str = "sbs-pam-01") -> dict[str, Any]:
         try:
-            return load_demo_narrative()
+            return load_demo_narrative(narrative_id)
         except (FileNotFoundError, SituationalTaskError, json.JSONDecodeError) as exc:
             raise HTTPException(
                 status_code=503,
@@ -383,33 +383,38 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=404, detail="Демонстрационная сессия не найдена.")
         if session.get("user_id") != user.get("id"):
             raise HTTPException(status_code=403, detail="Эта сессия принадлежит другому профилю.")
-        return session, _situational_demo()
+        narrative_id = str((session.get("checkpoint") or {}).get("narrative_id") or "sbs-pam-01")
+        return session, _situational_demo(narrative_id)
 
     @app.get("/api/tasks")
     async def task_library() -> JSONResponse:
         """Expose only the explicitly marked demonstration task for now."""
         try:
-            narrative = load_demo_narrative()
+            narratives = [load_demo_narrative(item) for item in ("sbs-pam-01", "sbs-pam-02", "sbs-pam-03")]
         except (FileNotFoundError, SituationalTaskError, json.JSONDecodeError):
             return JSONResponse({"domains": [], "tasks": []})
+        form_labels = {"entry": "Входная форма", "exit": "Выходная форма", "backup": "Запасная форма"}
         return JSONResponse({
             "domains": [{"id": "memory", "label": "Память"}],
             "tasks": [{
                 "id": narrative["id"],
                 "title": narrative.get("title", "Ситуационная задача"),
-                "description": "Пилотная входная форма СБС-ПАМ-01 по утверждённому паспорту нарратива.",
+                "description": f"{form_labels.get(str(narrative.get('form')), 'Пилотная форма')} {narrative.get('code')} по утверждённому паспорту нарратива.",
                 "domain": "memory",
-                "level": "Пилот",
+                "level": form_labels.get(str(narrative.get("form")), "Пилот"),
                 "demo_only": True,
                 # The continuation image must not be shown before the story.
                 "image_url": "",
-            }],
+            } for narrative in narratives],
         })
 
     @app.get("/api/situational-task/demo/assets/{file_name}")
     async def situational_demo_asset(file_name: str) -> FileResponse:
-        narrative = _situational_demo()
-        if file_name != narrative.get("image") or Path(file_name).name != file_name:
+        allowed_images = {
+            _situational_demo(item).get("image")
+            for item in ("sbs-pam-01", "sbs-pam-02", "sbs-pam-03")
+        }
+        if file_name not in allowed_images or Path(file_name).name != file_name:
             raise HTTPException(status_code=404, detail="Файл демонстрации не найден.")
         path = (
             Path(__file__).resolve().parents[1]
@@ -420,15 +425,15 @@ def create_app() -> FastAPI:
         return FileResponse(path)
 
     @app.post("/api/situational-task/demo/start")
-    async def start_situational_demo() -> JSONResponse:
+    async def start_situational_demo(narrative_id: str = "sbs-pam-01") -> JSONResponse:
         ctx: WebAppContext = app.state.context
         user = _active_user_or_400()
-        narrative = _situational_demo()
+        narrative = _situational_demo(narrative_id)
         session = ctx.runtime.session_store.start(
             user_id=str(user.get("id") or ""),
             scenario=SITUATIONAL_DEMO_SCENARIO,
             versions={
-                "situational_task_demo": "0.2.0",
+                "situational_task_demo": "0.3.0",
                 "narrative": str(narrative.get("version") or ""),
                 "image": str(narrative.get("image_version") or ""),
             },
@@ -472,6 +477,20 @@ def create_app() -> FastAPI:
         elif session.get("status") != "in_progress":
             raise HTTPException(status_code=409, detail="Демонстрационная задача уже завершена.")
         return JSONResponse(situational_public_state(session, narrative))
+
+    @app.post("/api/situational-task/demo/{session_id}/interrupt")
+    async def interrupt_situational_demo(session_id: str) -> JSONResponse:
+        ctx: WebAppContext = app.state.context
+        session, _ = _situational_demo_session(session_id)
+        if session.get("status") != "in_progress":
+            raise HTTPException(status_code=409, detail="Эта попытка уже завершена.")
+        interrupted = ctx.runtime.session_store.interrupt(
+            session_id,
+            "Пользователь прервал ситуационную задачу.",
+        )
+        if interrupted is None:
+            raise HTTPException(status_code=404, detail="Демонстрационная сессия не найдена.")
+        return JSONResponse({"ok": True, "session_id": session_id, "status": "interrupted"})
 
     @app.post("/api/situational-task/demo/{session_id}/action")
     async def act_situational_demo(
@@ -1351,7 +1370,8 @@ def create_app() -> FastAPI:
             confirmed[key] = {"score": value, "max_score": maximum}
         result = session.get("result") or {}
         preliminary = result.get("preliminary_scores") or score_situational_demo(
-            session.get("checkpoint") or {}, _situational_demo()
+            session.get("checkpoint") or {},
+            _situational_demo(str((session.get("checkpoint") or {}).get("narrative_id") or "sbs-pam-01")),
         )
         try:
             updated = ctx.runtime.session_store.amend_result(

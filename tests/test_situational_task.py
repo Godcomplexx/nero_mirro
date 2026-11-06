@@ -50,6 +50,25 @@ def test_loader_accepts_only_disabled_demo_content(tmp_path):
         load_demo_narrative("demo-test-01", directory=tmp_path)
 
 
+@pytest.mark.parametrize(
+    ("narrative_id", "form", "image"),
+    [
+        ("sbs-pam-01", "entry", "sbs_pam_01.jpeg"),
+        ("sbs-pam-02", "exit", "sbs_pam_02.jpeg"),
+        ("sbs-pam-03", "backup", "sbs_pam_03.jpeg"),
+    ],
+)
+def test_memory_narrative_passports_are_complete(narrative_id, form, image):
+    item = load_demo_narrative(narrative_id)
+    assert item["form"] == form
+    assert item["image"] == image
+    assert len(item["orientation_questions"]) == 4
+    assert len(item["image_questions"]) == 4
+    assert len(item["memory_questions"]) == 4
+    assert len(item["scoring"]["recall_units"]) == 10
+    assert len(item["scoring"]["image_concepts"]) == 7
+
+
 def test_story_is_exposed_only_on_the_listening_step():
     item = narrative()
     checkpoint = initial_checkpoint(item["id"])
